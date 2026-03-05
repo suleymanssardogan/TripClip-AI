@@ -1,12 +1,11 @@
 
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-
-
 app = FastAPI(
-    title="TripClip AI API",
-    description="AI-powered travel planning from Instagram videos",
+    title="TripClip AI - Core API",
+    description="Business logic and AI services",
     version="0.1.0"
 )
 
@@ -18,16 +17,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(videos.router)
-
 @app.get("/")
 async def root():
     return {
-        "message": "🚀 TripClip AI API",
-        "version": "0.1.0",
+        "service": "Core API",
+        "message": "Business logic layer",
         "status": "running"
     }
 
 @app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
+async def health():
+    return {"status": "healthy", "service": "core-api"}
+
+# Internal endpoints (BFF'ler tarafından kullanılacak)
