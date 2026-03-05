@@ -1,6 +1,9 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.api.routes import videos
+
+
 
 app = FastAPI(
     title="TripClip AI API",
@@ -15,6 +18,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(videos.router)
 
 @app.get("/")
 async def root():
