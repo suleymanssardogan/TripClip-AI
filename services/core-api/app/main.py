@@ -1,5 +1,3 @@
-
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -29,4 +27,6 @@ async def root():
 async def health():
     return {"status": "healthy", "service": "core-api"}
 
-# Internal endpoints (BFF'ler tarafından kullanılacak)
+# Import router AFTER app creation
+from app.api.internal import videos
+app.include_router(videos.router)
