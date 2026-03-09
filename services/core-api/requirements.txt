@@ -23,3 +23,25 @@ pytest==7.4.4
 pytest-asyncio==0.23.3
 httpx==0.26.0
 
+# Video Processing
+ffmpeg-python==0.2.0
+opencv-python-headless==4.8.1.78
+pillow==10.1.0
+numpy==1.24.3
+
+# Video Processing
+ffmpeg-python==0.2.0
+opencv-python-headless==4.8.1.78
+pillow==10.1.0
+numpy==1.24.3
+
+# Video Processing
+ffmpeg-python==0.2.0
+opencv-python-headless==4.8.1.78
+pillow==10.1.0
+numpy==1.24.3
+
+# AI/ML
+ultralytics==8.0.225
+torch==2.1.1
+torchvision==0.16.1
