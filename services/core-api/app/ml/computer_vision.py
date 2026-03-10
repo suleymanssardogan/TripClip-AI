@@ -45,7 +45,7 @@ class ObjectDetectionService:
                     if detection["confidence"] > 0.5:
                         all_detections.append(detection)
         
-        logger.info(f"✅ Detected {len(all_detections)} objects")
+        logger.info(f"Detected {len(all_detections)} objects")
         return all_detections
 
     def get_landmark_candidates(self,detections:List[Dict])-> List[Dict]:
