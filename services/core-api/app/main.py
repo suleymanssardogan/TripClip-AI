@@ -1,10 +1,20 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import logging
+import sys
 
 app = FastAPI(
     title="TripClip AI - Core API",
     description="Business logic and AI services",
     version="0.1.0"
+)
+# Logging configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)  # ← Docker log'a yaz!
+    ]
 )
 
 app.add_middleware(

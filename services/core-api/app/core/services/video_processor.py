@@ -3,6 +3,7 @@ import uuid
 import ffmpeg
 from typing import List,Dict
 import logging
+import time 
 from app.ml.computer_vision import ObjectDetectionService
 
 
@@ -17,14 +18,14 @@ class VideoProcessingService:
         # AI: Object detection service
         self.detector = ObjectDetectionService()
     
-    def process_video(self,video_path:str,video_id=int) -> Dict:
+    def process_video(self,video_path:str,video_id:int) -> Dict:
         """
         Videoyu İşle
         1. Metadata çıkar
         2. Frame'leri extract et
         3. Thumbnail oluştur
         """
-
+        start_time = time.time()
         try:
             logger.info(f"Processing video {video_id}")
 
@@ -44,9 +45,17 @@ class VideoProcessingService:
 
             # 4. AI: Object detection
             detections = self.detector.detect_objects_in_frames(frames)
+            detections = self.detector.remove_duplicate_detections(detections)
             landmarks = self.detector.get_landmark_candidates(detections)
             summary = self.detector.get_detection_summary(detections)
-        
+
+            total_time = time.time() -start_time
+            logger.info(f"Performance: ")
+            logger.info(f"Total Time: {total_time:.2f}s")
+            logger.info(f" Frames/sec: {len(frames)/total_time:.2f}")
+            logger.info(f" Time per frame: {total_time/len(frames):.2f}s")
+
+
             return{
                 "duration": metadata["duration"],
                 "resolution": f"{metadata['width']}x{metadata['height']}",
@@ -56,7 +65,11 @@ class VideoProcessingService:
                 "thumbnail": thumbnail,
                 "detections_count": len(detections),
                 "landmarks_count":len(landmarks),
+                "processing_time": round(total_time,2),
+                "fps_processed": round(len(frames)/total_time, 2),
                 "top_objects": summary["top_5_classes"]
+                
+
             }
         
         except Exception as e:
@@ -87,7 +100,8 @@ class VideoProcessingService:
             logger.error(f"Metadata extraction failed: {e}")
             raise
     
-    def _extract_frames(self, video_path: str, output_dir: Path, fps: int = 1) -> List[str]:
+    # Optimize edildi 1 fps 1 saniye idi şimdi her 2 saniyede 1 frame
+    def _extract_frames(self, video_path: str, output_dir: Path, fps: int = 0.5) -> List[str]:
         """
         Video'dan frame'ler çıkar
         fps=1 → saniyede 1 frame
