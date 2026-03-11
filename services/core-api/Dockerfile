@@ -16,4 +16,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Credentials klasörünü kopyala (Google Vision API için)
+COPY credentials /app/credentials
+
+# Environment variable
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/tripclip-ai.json
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

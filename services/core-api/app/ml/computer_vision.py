@@ -2,6 +2,8 @@ from ultralytics import YOLO
 from pathlib import Path
 from typing import List, Dict
 import logging
+from google.cloud import vision
+
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +64,6 @@ class ObjectDetectionService:
         
         landmark_classes = vehicle_classes + crowd_classes + urban_classes
         
-        # ← BURASI EKSİKTİ!
         landmarks = [
             d for d in detections 
             if d["class_name"] in landmark_classes
@@ -122,3 +123,60 @@ class ObjectDetectionService:
 
         logger.info(f"Reduced {len(detections)} -> {len(unique_detections)} detections")
         return unique_detections
+    
+class LandmarkDetectionService:
+    """Google Vision API ile landmark detection"""
+    
+    def __init__(self):
+        self.client = vision.ImageAnnotatorClient()
+        logger.info("✅ Google Vision API client initialized")
+    
+    def detect_landmarks(self, image_path: str) -> List[Dict]:
+        """Frame'de landmark tespit et"""
+        
+        try:
+            with open(image_path, 'rb') as f:
+                content = f.read()
+            
+            image = vision.Image(content=content)
+            response = self.client.landmark_detection(image=image)
+            
+            landmarks = []
+            for landmark in response.landmark_annotations:
+                landmarks.append({
+                    'name': landmark.description,
+                    'confidence': landmark.score,
+                    'latitude': landmark.locations[0].lat_lng.latitude if landmark.locations else None,
+                    'longitude': landmark.locations[0].lat_lng.longitude if landmark.locations else None
+                })
+            
+            logger.info(f"Found {len(landmarks)} landmarks in frame")
+            return landmarks
+        
+        except Exception as e:
+            logger.error(f"Vision API error: {e}")
+            return []
+    
+    def detect_landmarks_in_frames(self, frame_paths: List[str]) -> List[Dict]:
+        """Tüm frame'lerde landmark tespit et"""
+        
+        all_landmarks = []
+        
+        # Her 3 frame'den 1'ini test et (maliyet azaltmak için)
+        sample_frames = frame_paths[::3]
+        logger.info(f"Sampling {len(sample_frames)} frames for Vision API")
+        
+        for frame in sample_frames:
+            landmarks = self.detect_landmarks(frame)
+            all_landmarks.extend(landmarks)
+        
+        # Duplicate'leri kaldır (aynı landmark farklı frame'lerde)
+        unique_landmarks = {}
+        for lm in all_landmarks:
+            name = lm['name']
+            if name not in unique_landmarks or lm['confidence'] > unique_landmarks[name]['confidence']:
+                unique_landmarks[name] = lm
+        
+        result = list(unique_landmarks.values())
+        logger.info(f" Total unique landmarks: {len(result)}")
+        return result

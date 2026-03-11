@@ -45,3 +45,9 @@ numpy==1.24.3
 ultralytics==8.0.225
 torch==2.1.1
 torchvision==0.16.1
+
+# Google Cloud
+google-cloud-vision==3.4.5
+
+# OCR
+easyocr==1.7.0

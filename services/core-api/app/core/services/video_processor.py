@@ -4,8 +4,9 @@ import ffmpeg
 from typing import List,Dict
 import logging
 import time 
+from app.ml.ocr_service import OCRService
 from app.ml.computer_vision import ObjectDetectionService
-
+from app.ml.computer_vision import LandmarkDetectionService
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,9 @@ class VideoProcessingService:
         self.frames_dir.mkdir(parents=True,exist_ok=True)
         # AI: Object detection service
         self.detector = ObjectDetectionService()
+        self.vision_detector = LandmarkDetectionService()
+        self.ocr = OCRService()
+        
     
     def process_video(self,video_path:str,video_id:int) -> Dict:
         """
@@ -24,6 +28,8 @@ class VideoProcessingService:
         1. Metadata çıkar
         2. Frame'leri extract et
         3. Thumbnail oluştur
+        4. Google Vision: Landmark Detection
+        5. Text Exraction (OCR)
         """
         start_time = time.time()
         try:
@@ -48,6 +54,9 @@ class VideoProcessingService:
             detections = self.detector.remove_duplicate_detections(detections)
             landmarks = self.detector.get_landmark_candidates(detections)
             summary = self.detector.get_detection_summary(detections)
+            vision_landmarks = self.vision_detector.detect_landmarks_in_frames(frames[:5])
+            extracted_texts = self.ocr.extract_text_from_frames(frames[:10]
+                                                                )
 
             total_time = time.time() -start_time
             logger.info(f"Performance: ")
@@ -67,6 +76,8 @@ class VideoProcessingService:
                 "landmarks_count":len(landmarks),
                 "processing_time": round(total_time,2),
                 "fps_processed": round(len(frames)/total_time, 2),
+                "vision_landmarks": vision_landmarks,
+                "extracted_texts": extracted_texts,
                 "top_objects": summary["top_5_classes"]
                 
 
@@ -152,3 +163,4 @@ class VideoProcessingService:
         except Exception as e:
             logger.error(f"Thumbnail creation failed: {e}")
             return None
+    

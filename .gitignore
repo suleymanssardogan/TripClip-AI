@@ -108,3 +108,4 @@ venv/
 # IDE
 .vscode/
 .idea/
+services/core-api/credentials/
