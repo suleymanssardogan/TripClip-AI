@@ -55,8 +55,8 @@ class VideoProcessingService:
             landmarks = self.detector.get_landmark_candidates(detections)
             summary = self.detector.get_detection_summary(detections)
             vision_landmarks = self.vision_detector.detect_landmarks_in_frames(frames[:5])
-            extracted_texts = self.ocr.extract_text_from_frames(frames[:10]
-                                                                )
+            extracted_texts = self.ocr.extract_text_from_frames(frames[:10])
+                                                                
 
             total_time = time.time() -start_time
             logger.info(f"Performance: ")

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Enum, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Enum, ForeignKey,Float,JSON
 from app.core.database import Base
 from datetime import datetime
 import enum
@@ -14,8 +14,19 @@ class Video(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    filename = Column(String, nullable=False)  # ← DEĞİŞTİ
+    filename = Column(String, nullable=False)  
     file_path = Column(String, nullable=False)
     status = Column(Enum(VideoStatus), default=VideoStatus.UPLOADED)
     duration = Column(Integer)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # AI Results
+    processing_time = Column(Float, nullable=True)
+    fps_processed = Column(Float , nullable=True)
+    detections_count =Column(Integer,nullable=True)
+    landmarks_count = Column(Integer,nullable=True)
+    top_objects = Column(JSON,nullable=True)
+    extracted_text= Column(JSON,nullable=True)
+    vision_landmarks = Column(JSON,nullable=True)
+
+ 

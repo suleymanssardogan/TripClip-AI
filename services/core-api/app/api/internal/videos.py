@@ -69,16 +69,13 @@ async def process_video(
 
 
 def process_video_background(video_id: int, video_path: str):
-    """Background task: Video işleme"""
-    
-    # Yeni DB session (background task için)
+    """ Arkaplanda video işleme"""
     from app.core.database import SessionLocal
     db = SessionLocal()
     
     try:
         logger.info(f"🎬 Starting background processing for video {video_id}")
         
-        # Status güncelle: PROCESSING
         video = db.query(Video).filter(Video.id == video_id).first()
         video.status = VideoStatus.PROCESSING
         db.commit()
@@ -86,18 +83,26 @@ def process_video_background(video_id: int, video_path: str):
         # Video process et
         result = video_processor.process_video(video_path, video_id)
         
-        # Duration güncelle
+        # Database'e TÜMÜNÜ kaydet
         video.duration = int(result["duration"])
+        video.processing_time = result.get("processing_time")
+        video.fps_processed = result.get("fps_processed")
+        video.detections_count = result.get("detections_count")
+        video.landmarks_count = result.get("landmarks_count")
+        video.top_objects = result.get("top_objects")
+        video.extracted_texts = result.get("extracted_texts")
+        video.vision_landmarks = result.get("vision_landmarks")
         video.status = VideoStatus.COMPLETED
         db.commit()
         
-        logger.info(f" Video {video_id} processed successfully!")
-        logger.info(f"   Duration: {result['duration']}s")
-        logger.info(f"   Resolution: {result['resolution']}")
-        logger.info(f"   Frames: {result['frame_count']}")
+        logger.info(f"✅ Video {video_id} processed successfully!")
+        logger.info(f"   AI Results:")
+        logger.info(f"   - Detections: {result.get('detections_count')}")
+        logger.info(f"   - Texts: {len(result.get('extracted_texts', []))}")
+        logger.info(f"   - Processing: {result.get('processing_time')}s")
         
     except Exception as e:
-        logger.error(f"Video {video_id} processing failed: {e}")
+        logger.error(f"❌ Video {video_id} processing failed: {e}")
         video = db.query(Video).filter(Video.id == video_id).first()
         if video:
             video.status = VideoStatus.FAILED
@@ -106,10 +111,9 @@ def process_video_background(video_id: int, video_path: str):
     finally:
         db.close()
 
-
 @router.get("/{video_id}")
 async def get_video(video_id: int, db: Session = Depends(get_db)):
-    """Get video details"""
+    """Get video with AI results"""
     
     video = db.query(Video).filter(Video.id == video_id).first()
     if not video:
@@ -120,5 +124,21 @@ async def get_video(video_id: int, db: Session = Depends(get_db)):
         "filename": video.filename,
         "status": video.status.value,
         "duration": video.duration,
-        "created_at": video.created_at.isoformat()
+        "created_at": video.created_at.isoformat(),
+        # AI Results
+        "ai_results": {
+            "processing_time": video.processing_time,
+            "fps_processed": video.fps_processed,
+            "detections": {
+                "count": video.detections_count,
+                "landmarks_count": video.landmarks_count,
+                "top_objects": video.top_objects
+            },
+            "ocr": {
+                "extracted_texts": video.extracted_texts
+            },
+            "vision": {
+                "landmarks": video.vision_landmarks
+            }
+        }
     }
