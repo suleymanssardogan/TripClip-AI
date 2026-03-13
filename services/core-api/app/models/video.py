@@ -26,7 +26,8 @@ class Video(Base):
     detections_count =Column(Integer,nullable=True)
     landmarks_count = Column(Integer,nullable=True)
     top_objects = Column(JSON,nullable=True)
-    extracted_text= Column(JSON,nullable=True)
+    extracted_texts= Column(JSON,nullable=True)
     vision_landmarks = Column(JSON,nullable=True)
+    transcription = Column(JSON,nullable=True)
 
  

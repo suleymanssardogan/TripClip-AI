@@ -92,6 +92,8 @@ def process_video_background(video_id: int, video_path: str):
         video.top_objects = result.get("top_objects")
         video.extracted_texts = result.get("extracted_texts")
         video.vision_landmarks = result.get("vision_landmarks")
+        video.transcription = result.get("transcription")
+
         video.status = VideoStatus.COMPLETED
         db.commit()
         
@@ -139,6 +141,9 @@ async def get_video(video_id: int, db: Session = Depends(get_db)):
             },
             "vision": {
                 "landmarks": video.vision_landmarks
+            },
+            "audio": {
+                "transcription": video.transcription
             }
         }
     }
