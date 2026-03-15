@@ -8,6 +8,7 @@ from app.ml.ocr_service import OCRService
 from app.ml.computer_vision import ObjectDetectionService
 from app.ml.computer_vision import LandmarkDetectionService
 from app.ml.speech_to_text import AudioProcessingService
+from app.ml.ner_service import NERService
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ class VideoProcessingService:
         self.vision_detector = LandmarkDetectionService()
         self.ocr = OCRService()
         self.audio_processor = AudioProcessingService()
-        
+        self.ner = NERService()
     
     def process_video(self,video_path:str,video_id:int) -> Dict:
         """
@@ -61,7 +62,14 @@ class VideoProcessingService:
             extracted_texts = self.ocr.extract_text_from_frames(frames[:10])
 
             # 6 Whisper: Audio Transcription
-            transcription = self.audio_processor.process_video_audio(video_path,video_id)                                                        
+            transcription = self.audio_processor.process_video_audio(video_path,video_id) 
+            # 7 NER  Location extraction
+            extracted_locations = []
+            if transcription and transcription.get("transcript"):
+                extracted_locations = self.ner.extract_locations_from_transcript(
+                    transcription["transcript"]
+                )
+                                                                   
 
             total_time = time.time() -start_time
             logger.info(f"Performance: ")
@@ -84,6 +92,7 @@ class VideoProcessingService:
                 "vision_landmarks": vision_landmarks,
                 "extracted_texts": extracted_texts,
                 "transcription": transcription,
+                "extracted_locations": extracted_locations,
                 "top_objects": summary["top_5_classes"]
                 
 

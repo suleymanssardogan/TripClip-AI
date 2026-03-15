@@ -1,6 +1,10 @@
 import easyocr
 from typing import List, Dict
 import logging
+from PIL import Image
+
+if not hasattr(Image,'ANTIALIAS'):
+    Image.ANTIALIAS = Image.LANCZOS
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +44,9 @@ class OCRService:
         
         all_texts = []
         
-        # Her 5 frame'den 1'ini sample et
+        # Her 3 frame'den 1'ini sample et
         sample_frames = frame_paths[::5]
-        logger.info(f"Sampling {len(sample_frames)} frames for OCR")
+        logger.info(f"Sampling {len(sample_frames)} frames for OCR (from {len(frame_paths)} total)")
         
         for frame in sample_frames:
             texts = self.extract_text(frame)

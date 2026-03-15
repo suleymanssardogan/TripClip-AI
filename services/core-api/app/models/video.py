@@ -29,5 +29,7 @@ class Video(Base):
     extracted_texts= Column(JSON,nullable=True)
     vision_landmarks = Column(JSON,nullable=True)
     transcription = Column(JSON,nullable=True)
+    extracted_locations = Column(JSON,nullable=True)
+    
 
  

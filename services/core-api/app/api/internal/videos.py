@@ -93,11 +93,12 @@ def process_video_background(video_id: int, video_path: str):
         video.extracted_texts = result.get("extracted_texts")
         video.vision_landmarks = result.get("vision_landmarks")
         video.transcription = result.get("transcription")
+        video.extracted_locations = result.get("extracted_locations")
 
         video.status = VideoStatus.COMPLETED
         db.commit()
         
-        logger.info(f"✅ Video {video_id} processed successfully!")
+        logger.info(f".  Video {video_id} processed successfully!")
         logger.info(f"   AI Results:")
         logger.info(f"   - Detections: {result.get('detections_count')}")
         logger.info(f"   - Texts: {len(result.get('extracted_texts', []))}")
@@ -144,6 +145,9 @@ async def get_video(video_id: int, db: Session = Depends(get_db)):
             },
             "audio": {
                 "transcription": video.transcription
+            },
+            "ner":{
+                "extracted_locations": video.extracted_locations
             }
         }
     }
