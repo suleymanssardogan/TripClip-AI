@@ -9,7 +9,7 @@ from app.ml.computer_vision import ObjectDetectionService
 from app.ml.computer_vision import LandmarkDetectionService
 from app.ml.speech_to_text import AudioProcessingService
 from app.ml.ner_service import NERService
-
+from app.ml.places_service import PlacesService
 logger = logging.getLogger(__name__)
 
 class VideoProcessingService:
@@ -24,6 +24,7 @@ class VideoProcessingService:
         self.ocr = OCRService()
         self.audio_processor = AudioProcessingService()
         self.ner = NERService()
+        self.places = PlacesService()
     
     def process_video(self,video_path:str,video_id:int) -> Dict:
         """
@@ -69,7 +70,14 @@ class VideoProcessingService:
                 extracted_locations = self.ner.extract_locations_from_transcript(
                     transcription["transcript"]
                 )
-                                                                   
+            # 8 Nominatim:  Location enrichment
+            enriched_locations =[]
+            if extracted_locations:
+                logger.info(f"Enriching {len(extracted_locations)} locations with Nominatim...")
+                enriched_locations = self.places.enrich_locations(extracted_locations)
+
+
+                         
 
             total_time = time.time() -start_time
             logger.info(f"Performance: ")
@@ -93,6 +101,7 @@ class VideoProcessingService:
                 "extracted_texts": extracted_texts,
                 "transcription": transcription,
                 "extracted_locations": extracted_locations,
+                "enriched_locations": enriched_locations,
                 "top_objects": summary["top_5_classes"]
                 
 

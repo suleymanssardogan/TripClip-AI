@@ -94,7 +94,7 @@ def process_video_background(video_id: int, video_path: str):
         video.vision_landmarks = result.get("vision_landmarks")
         video.transcription = result.get("transcription")
         video.extracted_locations = result.get("extracted_locations")
-
+        video.enriched_locations = result.get("enriched_locations")
         video.status = VideoStatus.COMPLETED
         db.commit()
         
@@ -148,6 +148,9 @@ async def get_video(video_id: int, db: Session = Depends(get_db)):
             },
             "ner":{
                 "extracted_locations": video.extracted_locations
+            },
+            "nominatim":{
+                    "enriched_locations": video.enriched_locations
             }
         }
     }
