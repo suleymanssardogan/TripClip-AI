@@ -10,6 +10,7 @@ from app.ml.computer_vision import LandmarkDetectionService
 from app.ml.speech_to_text import AudioProcessingService
 from app.ml.ner_service import NERService
 from app.ml.places_service import PlacesService
+from app.ml.location_deduplicator import LocationDeduplicator
 logger = logging.getLogger(__name__)
 
 class VideoProcessingService:
@@ -25,6 +26,7 @@ class VideoProcessingService:
         self.audio_processor = AudioProcessingService()
         self.ner = NERService()
         self.places = PlacesService()
+        self.deduplicator = LocationDeduplicator(distance_threshold_km=5.0)
     
     def process_video(self,video_path:str,video_id:int) -> Dict:
         """
@@ -75,9 +77,14 @@ class VideoProcessingService:
             if extracted_locations:
                 logger.info(f"Enriching {len(extracted_locations)} locations with Nominatim...")
                 enriched_locations = self.places.enrich_locations(extracted_locations)
-
-
-                         
+            # 9 Deduplicaiton: Remove duplicate locations
+            deduplicated_locations = []
+            location_summary = {}
+            
+            if enriched_locations:
+                deduplicated_locations = self.deduplicator.deduplicate_locations(enriched_locations)
+                location_summary = self.deduplicator.get_location_summary(enriched_locations)
+                            
 
             total_time = time.time() -start_time
             logger.info(f"Performance: ")
@@ -102,6 +109,8 @@ class VideoProcessingService:
                 "transcription": transcription,
                 "extracted_locations": extracted_locations,
                 "enriched_locations": enriched_locations,
+                "location_summary":location_summary,
+                "deduplicated_locations": deduplicated_locations,
                 "top_objects": summary["top_5_classes"]
                 
 

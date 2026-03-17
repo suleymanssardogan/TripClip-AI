@@ -31,6 +31,8 @@ class Video(Base):
     transcription = Column(JSON,nullable=True)
     extracted_locations = Column(JSON,nullable=True)
     enriched_locations = Column(JSON,nullable=True)
+    deduplicated_locations = Column(JSON, nullable=True)   
+    location_summary = Column(JSON, nullable=True)         
     
 
     

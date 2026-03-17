@@ -95,6 +95,8 @@ def process_video_background(video_id: int, video_path: str):
         video.transcription = result.get("transcription")
         video.extracted_locations = result.get("extracted_locations")
         video.enriched_locations = result.get("enriched_locations")
+        video.deduplicated_locations = result.get("deduplicated_locations")
+        video.location_summary = result.get("location_summary")
         video.status = VideoStatus.COMPLETED
         db.commit()
         
@@ -150,7 +152,9 @@ async def get_video(video_id: int, db: Session = Depends(get_db)):
                 "extracted_locations": video.extracted_locations
             },
             "nominatim":{
-                    "enriched_locations": video.enriched_locations
+                    "enriched_locations": video.enriched_locations,
+                    "deduplicated_locations":video.deduplicated_locations,
+                    "location_summary":video.location_summary
             }
         }
     }
