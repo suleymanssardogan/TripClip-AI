@@ -45,15 +45,20 @@ class OCRService:
         all_texts = []
         
         # Her 3 frame'den 1'ini sample et
-        sample_frames = frame_paths[::5]
+        sample_frames = frame_paths[::3]
         logger.info(f"Sampling {len(sample_frames)} frames for OCR (from {len(frame_paths)} total)")
         
-        for frame in sample_frames:
+        for i, frame in enumerate(sample_frames):
+            logger.info(f"OCR processing frame {i+1}/{len(sample_frames)}: {frame}")
             texts = self.extract_text(frame)
+            if texts:
+                logger.info(f" Found texts: {[t['text'] for t in texts]}")
+            else:
+                logger.info(f"No text found in frame {i+1}")
             all_texts.extend([t['text'] for t in texts])
-        
+            
         # Duplicate'leri kaldır
         unique_texts = list(set(all_texts))
         
-        logger.info(f"✅ Total unique texts: {len(unique_texts)}")
+        logger.info(f"Total unique texts: {len(unique_texts)}")
         return unique_texts

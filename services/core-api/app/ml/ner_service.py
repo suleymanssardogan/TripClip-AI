@@ -43,8 +43,8 @@ class NERService:
                     "score": round(ent["score"], 2)
                 }
                 for ent in entities
-                if ent["entity_group"] in ["LOC", "GPE"]
-                and ent["score"] > 0.7
+                if ent["entity_group"] in ["LOC", "GPE","ORG"]
+                and ent["score"] > 0.6
             ]
             
             logger.info(f"Extracted {len(locations)} location entities")

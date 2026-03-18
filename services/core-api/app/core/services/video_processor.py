@@ -11,6 +11,8 @@ from app.ml.speech_to_text import AudioProcessingService
 from app.ml.ner_service import NERService
 from app.ml.places_service import PlacesService
 from app.ml.location_deduplicator import LocationDeduplicator
+from app.ml.route_optimizer import RouteOptimizer
+
 logger = logging.getLogger(__name__)
 
 class VideoProcessingService:
@@ -27,6 +29,8 @@ class VideoProcessingService:
         self.ner = NERService()
         self.places = PlacesService()
         self.deduplicator = LocationDeduplicator(distance_threshold_km=5.0)
+        self.route_optimizer = RouteOptimizer()
+
     
     def process_video(self,video_path:str,video_id:int) -> Dict:
         """
@@ -62,16 +66,26 @@ class VideoProcessingService:
             summary = self.detector.get_detection_summary(detections)
             vision_landmarks = self.vision_detector.detect_landmarks_in_frames(frames[:5])
             # 5 OCR: Text Extraction
-            extracted_texts = self.ocr.extract_text_from_frames(frames[:10])
+            extracted_texts = self.ocr.extract_text_from_frames(frames)
 
             # 6 Whisper: Audio Transcription
             transcription = self.audio_processor.process_video_audio(video_path,video_id) 
             # 7 NER  Location extraction
             extracted_locations = []
+            combined_text = ""
             if transcription and transcription.get("transcript"):
-                extracted_locations = self.ner.extract_locations_from_transcript(
-                    transcription["transcript"]
-                )
+                combined_text += transcription["transcript"]
+            if combined_text:
+                extracted_locations = self.ner.extract_locations_from_transcript(combined_text)
+
+            # OCR text'lerini direkt lokasyon olarak ekle (yer adı + işletme)
+            if extracted_texts:
+                ocr_locations = [t for t in extracted_texts if len(t.split()) >= 2 and len(t) > 4]
+                extracted_locations = list(set(extracted_locations + ocr_locations))
+                logger.info(f"Added {len(ocr_locations)} OCR locations, total: {len(extracted_locations)}")
+                        
+                
+
             # 8 Nominatim:  Location enrichment
             enriched_locations =[]
             if extracted_locations:
@@ -84,7 +98,11 @@ class VideoProcessingService:
             if enriched_locations:
                 deduplicated_locations = self.deduplicator.deduplicate_locations(enriched_locations)
                 location_summary = self.deduplicator.get_location_summary(enriched_locations)
-                            
+            
+            # 10 Route Optimization
+            optimized_route = {}
+            if deduplicated_locations:
+                optimized_route = self.route_optimizer.optimize_route(deduplicated_locations)
 
             total_time = time.time() -start_time
             logger.info(f"Performance: ")
@@ -111,6 +129,7 @@ class VideoProcessingService:
                 "enriched_locations": enriched_locations,
                 "location_summary":location_summary,
                 "deduplicated_locations": deduplicated_locations,
+                "optimized_route": optimized_route,
                 "top_objects": summary["top_5_classes"]
                 
 
