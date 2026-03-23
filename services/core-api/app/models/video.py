@@ -32,7 +32,9 @@ class Video(Base):
     extracted_locations = Column(JSON,nullable=True)
     enriched_locations = Column(JSON,nullable=True)
     deduplicated_locations = Column(JSON, nullable=True)   
-    location_summary = Column(JSON, nullable=True)         
+    location_summary = Column(JSON, nullable=True)
+    optimized_route = Column(JSON, nullable=True)
+    travel_tips = Column(JSON, nullable=True)         
     
 
     

@@ -97,6 +97,8 @@ def process_video_background(video_id: int, video_path: str):
         video.enriched_locations = result.get("enriched_locations")
         video.deduplicated_locations = result.get("deduplicated_locations")
         video.location_summary = result.get("location_summary")
+        video.optimized_route = result.get("optimized_route")
+        video.travel_tips = result.get("travel_tips")
         video.status = VideoStatus.COMPLETED
         db.commit()
         
@@ -155,6 +157,14 @@ async def get_video(video_id: int, db: Session = Depends(get_db)):
                     "enriched_locations": video.enriched_locations,
                     "deduplicated_locations":video.deduplicated_locations,
                     "location_summary":video.location_summary
+            },
+            "route": {
+                "optimized_route": video.optimized_route
+            },
+            "rag": {
+                "travel_tips": video.travel_tips
             }
+
+            
         }
     }

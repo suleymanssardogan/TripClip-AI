@@ -12,6 +12,8 @@ from app.ml.ner_service import NERService
 from app.ml.places_service import PlacesService
 from app.ml.location_deduplicator import LocationDeduplicator
 from app.ml.route_optimizer import RouteOptimizer
+from app.ml.rag_service import RAGService
+
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,8 @@ class VideoProcessingService:
         self.places = PlacesService()
         self.deduplicator = LocationDeduplicator(distance_threshold_km=5.0)
         self.route_optimizer = RouteOptimizer()
+        self.rag = RAGService()
+
 
     
     def process_video(self,video_path:str,video_id:int) -> Dict:
@@ -104,6 +108,12 @@ class VideoProcessingService:
             if deduplicated_locations:
                 optimized_route = self.route_optimizer.optimize_route(deduplicated_locations)
 
+
+            # 11 RAG: Travel Tips
+            travel_tips ={}
+            if deduplicated_locations:
+                travel_tips = self.rag.generate_travel_tips(deduplicated_locations)
+            
             total_time = time.time() -start_time
             logger.info(f"Performance: ")
             logger.info(f"Total Time: {total_time:.2f}s")
@@ -130,6 +140,7 @@ class VideoProcessingService:
                 "location_summary":location_summary,
                 "deduplicated_locations": deduplicated_locations,
                 "optimized_route": optimized_route,
+                "travel_tips": travel_tips,
                 "top_objects": summary["top_5_classes"]
                 
 
