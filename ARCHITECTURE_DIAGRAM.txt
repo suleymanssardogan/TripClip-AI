@@ -1,0 +1,263 @@
+════════════════════════════════════════════════════════════════════════════════
+                        TRIPCLİP AI - SİSTEM MİMARİSİ
+════════════════════════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        KLİENT KATMANI                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│     ┌──────────────────┐              ┌──────────────────┐                │
+│     │  İOS Uygulaması  │              │   Web Arayüzü    │                │
+│     │     (Swift)      │              │  (React/Vue/JS)  │                │
+│     └────────┬─────────┘              └────────┬─────────┘                │
+│              │                                 │                            │
+└──────────────┼─────────────────────────────────┼────────────────────────────┘
+               │                                 │
+               │          API GATEWAYLARı         │
+               ├─────────────────┬────────────────┤
+               │                 │                │
+┌──────────────▼────────┐ ┌──────▼────────────────▼──────┐
+│   Mobile BFF         │ │    Web BFF                   │
+│   (Port 8001)        │ │    (Port 8002)               │
+├──────────────────────┤ ├──────────────────────────────┤
+│ • Video Upload       │ │ • Dashboard                  │
+│ • Result Proxy       │ │ • Plan Management            │
+│ • Mobile Validation  │ │ • Analytics                  │
+└──────────────┬───────┘ └──────────┬───────────────────┘
+               │                    │
+               └────────────────┬───┘
+                                │
+             ┌──────────────────▼─────────────────┐
+             │        CORE-API (Port 8000)        │
+             │     (İS MANTIGI & ML ORKESTRATÖRİ)│
+             ├───────────────────────────────────┤
+             │ • Video Processing Service        │
+             │ • AI Analysis Service             │
+             │ • Route Optimizer Service         │
+             │ • Database Management             │
+             └──────────────────┬────────────────┘
+                                │
+         ┌──────────────────────┴──────────────────┐
+         │                                         │
+    ┌────▼──────────────────┐   ┌────────────────▼───────┐
+    │   ML PIPELINE         │   │   VERİTABANI KATMANI   │
+    ├───────────────────────┤   ├───────────────────────┤
+    │                       │   │                       │
+    │ 1️⃣ Computer Vision    │   │ • PostgreSQL (Ana)    │
+    │    • YOLOv8           │   │ • Redis (Cache)       │
+    │    • Google Vision    │   │ • MongoDB (Doküman)   │
+    │                       │   │                       │
+    │ 2️⃣ Speech-to-Text     │   │ Tablolar:             │
+    │    • Whisper          │   │ • users               │
+    │                       │   │ • videos              │
+    │ 3️⃣ OCR               │   │ • plans               │
+    │    • EasyOCR         │   │ • video_results       │
+    │                       │   │                       │
+    │ 4️⃣ NER               │   │                       │
+    │    • Turkish BERT     │   │                       │
+    │                       │   │                       │
+    │ 5️⃣ Geocoding         │   │                       │
+    │    • Nominatim       │   │                       │
+    │                       │   │                       │
+    │ 6️⃣ Location Dedup    │   │                       │
+    │    • Haversine       │   │                       │
+    │                       │   │                       │
+    │ 7️⃣ Route Optimizer   │   │                       │
+    │    • TSP Solver      │   │                       │
+    │                       │   │                       │
+    └───────────────────────┘   └───────────────────────┘
+
+════════════════════════════════════════════════════════════════════════════════
+                        VIDEO İŞLEME AKIŞI (11 ADIM)
+════════════════════════════════════════════════════════════════════════════════
+
+INPUT: Video Dosyası
+  │
+  ├─→ [1] FFmpeg → Frame & Ses Çıkarma
+  │
+  ├─→ [2] YOLOv8 → Nesne Algılama
+  │        (Araç, insan, bina vb. tespit)
+  │
+  ├─→ [3] Google Vision API → Landmark Algılama
+  │        (Eiffel Kulesi, Roma Kolossiyumu, vb.)
+  │
+  ├─→ [4] Whisper → Ses Transkripsiyonu
+  │        (Video sesini Türkçe metne çevir)
+  │
+  ├─→ [5] EasyOCR → Metni Çıkarma
+  │        (Videodaki yazıları okuma)
+  │
+  ├─→ [6] NER (Turkish BERT) → Konum Çıkarma
+  │        (Istanbul, Eiffel Kulesi, Blue Mosque vb.)
+  │
+  ├─→ [7] Nominatim → Geocoding
+  │        (Konum adı → lat/lng koordinatları)
+  │
+  ├─→ [8] Location Deduplicator → Kopya Konum Kaldırma
+  │        (5km içinde çiftleri birleştir)
+  │
+  └─→ [9] Route Optimizer → En İyi Rotayı Bul
+           (TSP algoritması - komşu heuristic)
+  │
+  │ VERİTABANINA KAYDET
+  │
+OUTPUT: Analiz Sonuçları
+
+{
+  "video_id": 123,
+  "metadata": {
+    "filename": "istanbul_tour.mp4",
+    "duration": 300,
+    "resolution": "1920x1080"
+  },
+  "detections": {
+    "objects": ["mosque", "car", "people"],
+    "landmarks": ["Blue Mosque", "Hagia Sophia"],
+    "detection_count": 45
+  },
+  "transcription": "Merhaba Istanbul'dan günaydın...",
+  "extracted_text": ["Welcome to Istanbul", "Price: 50₺"],
+  "locations": [
+    {
+      "name": "Blue Mosque",
+      "latitude": 41.0053,
+      "longitude": 28.9770,
+      "confidence": 0.95,
+      "type": "landmark"
+    },
+    {
+      "name": "Hagia Sophia",
+      "latitude": 41.0086,
+      "longitude": 28.9802,
+      "confidence": 0.92,
+      "type": "landmark"
+    }
+  ],
+  "optimized_route": [
+    "Blue Mosque (0km)",
+    "Hagia Sophia (0.4km)",
+    "Topkapi Palace (1.2km)"
+  ],
+  "processing_time": 45.3
+}
+
+════════════════════════════════════════════════════════════════════════════════
+                        API ENDPOINTS ÖZETI
+════════════════════════════════════════════════════════════════════════════════
+
+CORE-API (Port 8000)
+────────────────────────────────────────────────────────────────────────────
+GET   /
+      → Hizmet durumu kontrol
+      Response: {service, message, status}
+
+GET   /health
+      → Sağlık kontrolü
+      Response: {status, service}
+
+POST  /internal/videos/process
+      → Video yükleme ve işleme başlatma
+      Payload: multipart/form-data (video dosyası)
+      Response: {video_id, status, message}
+
+GET   /internal/videos/{video_id}
+      → İşlenen video sonuçlarını alma
+      Response: {Tüm AI analiz sonuçları}
+
+────────────────────────────────────────────────────────────────────────────
+
+MOBILE-BFF (Port 8001)
+────────────────────────────────────────────────────────────────────────────
+POST  /api/mobile/videos/upload
+      → Mobil uygulamadan video yükleme
+      Validasyon: MIME type, Max 100MB
+      Proxy: Core-API
+
+GET   /api/mobile/videos/{video_id}
+      → Mobil cihaz için optimize sonuç
+      Proxy: Core-API
+
+────────────────────────────────────────────────────────────────────────────
+
+WEB-BFF (Port 8002)
+────────────────────────────────────────────────────────────────────────────
+GET   /health
+      → Sağlık kontrolü
+      (Diğer endpoints geliştirme aşamasında)
+
+════════════════════════════════════════════════════════════════════════════════
+                        DOSYA YAPISI (CORE-API)
+════════════════════════════════════════════════════════════════════════════════
+
+services/core-api/app/
+│
+├── main.py
+│   └─ FastAPI uygulaması, CORS, router konfigürasyonu
+│
+├── config.py
+│   └─ Konfigürasyon ve ortam değişkenleri
+│
+├── models/
+│   ├── user.py ................... User ORM modeli
+│   ├── video.py .................. Video ORM modeli (AI sonuçları + metadata)
+│   └── plan.py ................... Plan ORM modeli (itinerary)
+│
+├── ml/
+│   ├── computer_vision.py ........ YOLOv8 + Google Vision
+│   ├── speech_to_text.py ......... Whisper audio transcription
+│   ├── ocr_service.py ............ EasyOCR metin çıkarma
+│   ├── ner_service.py ............ Turkish BERT konum çıkarma
+│   ├── places_service.py ......... Nominatim geocoding
+│   ├── location_deduplicator.py .. Haversine deduplication
+│   ├── route_optimizer.py ........ TSP çözücü
+│   ├── embeddings.py ............. Vector DB (boş)
+│   └── nlp.py .................... NLP utilities (boş)
+│
+├── services/
+│   ├── video_processor.py ........ ORCHESTRATOR - Tüm pipeline
+│   ├── ai_analyzer.py ............ AI analysis service
+│   └── route_optimizer.py ........ Route optimization service
+│
+├── api/
+│   ├── internal/
+│   │   └── videos.py ............. Video endpoints
+│   ├── mobile/
+│   │   └── (routes henüz yok)
+│   └── web/
+│       └── (routes henüz yok)
+│
+└── core/
+    ├── database.py ............... SQLAlchemy ORM setup
+    ├── redis.py .................. Redis client (boş)
+    ├── celery_app.py ............. Celery config (boş)
+    └── services/
+        └── video_processor.py .... Video processing service
+
+════════════════════════════════════════════════════════════════════════════════
+                        KULLANILAN TEKNOLOJİLER
+════════════════════════════════════════════════════════════════════════════════
+
+Backend Framework:
+  • FastAPI (Python web framework)
+  • SQLAlchemy (ORM)
+  • Pydantic (Data validation)
+
+AI/ML Services:
+  • YOLOv8 (Object detection)
+  • Google Cloud Vision API (Landmark detection)
+  • OpenAI Whisper (Speech-to-text)
+  • HuggingFace Transformers (Turkish BERT for NER)
+  • EasyOCR (Optical character recognition)
+  • Nominatim/OpenStreetMap (Geocoding)
+
+Databases:
+  • PostgreSQL (Relational data)
+  • Redis (Caching + Rate limiting)
+  • MongoDB (Document storage - optional)
+
+Infrastructure:
+  • Docker & Docker Compose
+  • FFmpeg (Video/audio processing)
+  • Celery (Task queue - not active)
+
+════════════════════════════════════════════════════════════════════════════════
