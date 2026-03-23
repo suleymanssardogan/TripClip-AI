@@ -6,6 +6,8 @@ from app.core.services.video_processor import VideoProcessingService
 import uuid
 from pathlib import Path
 import logging
+from fastapi.responses import JSONResponse
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +120,8 @@ def process_video_background(video_id: int, video_path: str):
     finally:
         db.close()
 
+
+    
 @router.get("/{video_id}")
 async def get_video(video_id: int, db: Session = Depends(get_db)):
     """Get video with AI results"""
@@ -126,13 +130,12 @@ async def get_video(video_id: int, db: Session = Depends(get_db)):
     if not video:
         raise HTTPException(404, detail="Video not found")
     
-    return {
+    data = {
         "id": video.id,
         "filename": video.filename,
         "status": video.status.value,
         "duration": video.duration,
         "created_at": video.created_at.isoformat(),
-        # AI Results
         "ai_results": {
             "processing_time": video.processing_time,
             "fps_processed": video.fps_processed,
@@ -150,13 +153,13 @@ async def get_video(video_id: int, db: Session = Depends(get_db)):
             "audio": {
                 "transcription": video.transcription
             },
-            "ner":{
+            "ner": {
                 "extracted_locations": video.extracted_locations
             },
-            "nominatim":{
-                    "enriched_locations": video.enriched_locations,
-                    "deduplicated_locations":video.deduplicated_locations,
-                    "location_summary":video.location_summary
+            "nominatim": {
+                "enriched_locations": video.enriched_locations,
+                "deduplicated_locations": video.deduplicated_locations,
+                "location_summary": video.location_summary
             },
             "route": {
                 "optimized_route": video.optimized_route
@@ -164,7 +167,7 @@ async def get_video(video_id: int, db: Session = Depends(get_db)):
             "rag": {
                 "travel_tips": video.travel_tips
             }
-
-            
         }
     }
+    
+    return JSONResponse(content=json.loads(json.dumps(data, ensure_ascii=False)))
