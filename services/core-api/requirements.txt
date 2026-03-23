@@ -58,3 +58,7 @@ pydub==0.25.1
 
 # NER ( Named Entity Recognition)
 transformers==4.36.2
+
+# Vector Database
+qdrant-client==1.7.3
+sentence-transformers==2.3.1
