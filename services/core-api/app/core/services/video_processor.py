@@ -84,7 +84,7 @@ class VideoProcessingService:
 
             # OCR text'lerini direkt lokasyon olarak ekle (yer adı + işletme)
             if extracted_texts:
-                ocr_locations = [t for t in extracted_texts if len(t.split()) >= 2 and len(t) > 4]
+                ocr_locations = [t for t in extracted_texts if len(t) > 3]
                 extracted_locations = list(set(extracted_locations + ocr_locations))
                 logger.info(f"Added {len(ocr_locations)} OCR locations, total: {len(extracted_locations)}")
                         

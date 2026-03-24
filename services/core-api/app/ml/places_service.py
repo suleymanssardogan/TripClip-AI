@@ -118,13 +118,38 @@ class PlacesService:
         enriched = []
         
         for location in locations:
+            # Temel filtreler
             if location.startswith("##") or len(location) < 3:
                 logger.info(f"Skipping invalid location: {location}")
+                continue
+            
+            # Tamamı büyük harf olanları işle - içinde şehir ismi olabilir
+            if location.isupper():
+                # Büyük harfli kelimelerden anlamlı isim çıkarmaya çalış
+                words = location.title()  # "GÜNDE URFA" → "Günde Urfa"
+                # Sadece son kelimeyi al (genelde şehir ismi sonda olur)
+                last_word = location.split()[-1].title()  # "URFA"
+                if len(last_word) >= 3:
+                    logger.info(f"Extracting city from uppercase: {location} → {last_word}")
+                    location = last_word  # Urfa olarak devam et
+                else:
+                    logger.info(f"Skipping uppercase noise: {location}")
+                    continue
+                        
+            # Özel karakter ile bitenleri atla
+            if location.endswith(("-", "?", "'")):
+                logger.info(f"Skipping special char location: {location}")
                 continue
             
             place_data = self.search_place(location)
             
             if place_data:
+                # Importance skoru düşük olanları atla (gerçek lokasyon değil)
+                importance = place_data.get("importance", 0)
+                if importance < 0.1:
+                    logger.info(f"Skipping low importance location: {location} (score: {importance:.3f})")
+                    continue
+                
                 enriched.append({
                     "original_name": location,
                     "place_data": place_data
