@@ -77,8 +77,7 @@ struct ResultsView: View {
     }
     
     func pollVideoStatus() async {
-        // Her 3 saniyede bir kontrol et
-        for _ in 0..<60 {
+        for _ in 0..<120 {
             do {
                 let video = try await APIService.shared.getVideoStatus(id: videoId)
                 
@@ -96,7 +95,7 @@ struct ResultsView: View {
                     return
                 }
                 
-                try await Task.sleep(nanoseconds: 3_000_000_000) // 3 saniye
+                try await Task.sleep(nanoseconds: 5_000_000_000) // 5 saniye
             } catch {
                 await MainActor.run {
                     errorMessage = error.localizedDescription
@@ -136,3 +135,4 @@ struct SectionCard<Content: View>: View {
         ResultsView(videoId: 1)
     }
 }
+

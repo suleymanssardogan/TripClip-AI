@@ -3,6 +3,14 @@ import Foundation
 class APIService {
     static let shared = APIService()
     private let baseURL = "http://localhost:8001"
+
+    
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 300
+        config.timeoutIntervalForResource = 300
+        return URLSession(configuration: config)
+    }()
     
     // Video upload
     func uploadVideo(fileURL: URL) async throws -> Int {
@@ -25,7 +33,7 @@ class APIService {
         
         request.httpBody = body
         
-        let (data, _) = try await URLSession.shared.data(for: request)
+        let (data, _) = try await session.data(for: request)
         let response = try JSONDecoder().decode(UploadResponse.self, from: data)
         return response.id
     }
@@ -33,7 +41,7 @@ class APIService {
     // Video status
     func getVideoStatus(id: Int) async throws -> VideoResponse {
         let url = URL(string: "\(baseURL)/api/mobile/videos/\(id)")!
-        let (data, _) = try await URLSession.shared.data(from: url)
+        let (data, _) = try await session.data(from: url)
         return try JSONDecoder().decode(VideoResponse.self, from: data)
     }
 }
