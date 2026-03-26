@@ -146,7 +146,7 @@ class PlacesService:
             if place_data:
                 # Importance skoru düşük olanları atla (gerçek lokasyon değil)
                 importance = place_data.get("importance", 0)
-                if importance < 0.05:
+                if importance < 0.08:
                     logger.info(f"Skipping low importance location: {location} (score: {importance:.3f})")
                     continue
                 
