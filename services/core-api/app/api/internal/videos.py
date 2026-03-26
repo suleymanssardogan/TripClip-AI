@@ -101,6 +101,7 @@ def process_video_background(video_id: int, video_path: str):
         video.location_summary = result.get("location_summary")
         video.optimized_route = result.get("optimized_route")
         video.travel_tips = result.get("travel_tips")
+        video.ocr_pois = result.get("ocr_pois")
         video.status = VideoStatus.COMPLETED
         db.commit()
         
@@ -166,7 +167,8 @@ async def get_video(video_id: int, db: Session = Depends(get_db)):
             },
             "rag": {
                 "travel_tips": video.travel_tips
-            }
+            },
+            "ocr_pois": video.ocr_pois
         }
     }
     

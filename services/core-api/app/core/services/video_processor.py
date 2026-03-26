@@ -80,15 +80,21 @@ class VideoProcessingService:
             if transcription and transcription.get("transcript"):
                 combined_text += transcription["transcript"]
             if combined_text:
-                extracted_locations = self.ner.extract_locations_from_transcript(combined_text)
+                 extracted_locations = self.ner.extract_locations_from_transcript(combined_text)
 
             # OCR text'lerini direkt lokasyon olarak ekle (yer adı + işletme)
+            ocr_pois = []
             if extracted_texts:
-                ocr_locations = [t for t in extracted_texts if len(t) > 3]
-                extracted_locations = list(set(extracted_locations + ocr_locations))
-                logger.info(f"Added {len(ocr_locations)} OCR locations, total: {len(extracted_locations)}")
-                        
-                
+                ocr_pois = [
+                    t for t in extracted_texts
+                    if len(t.split()) >= 2
+                    and len(t) > 4
+                    and not t.isupper()
+                    and t[0].isupper()
+                    and not t.endswith(("-", "?", "'"))
+                ]
+                logger.info(f"OCR POIs: {ocr_pois}")                        
+                            
 
             # 8 Nominatim:  Location enrichment
             enriched_locations =[]
@@ -141,6 +147,7 @@ class VideoProcessingService:
                 "deduplicated_locations": deduplicated_locations,
                 "optimized_route": optimized_route,
                 "travel_tips": travel_tips,
+                "ocr_pois": ocr_pois,
                 "top_objects": summary["top_5_classes"]
                 
 

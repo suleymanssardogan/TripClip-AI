@@ -70,6 +70,44 @@ struct AIResults: Codable {
     let ocr: OCRResults?
     let ner: NERResults?
     let rag: RAGResults?
+    let nominatim: NominatimResults?
+    let processingTime: Double?
+    let detections: DetectionResults?
+    let ocrPois: [String]?
+    
+    enum CodingKeys: String, CodingKey {
+        case ocr, ner, rag, nominatim
+        case processingTime = "processing_time"
+        case ocrPois = "ocr_pois"
+        case detections
+    }
+}
+
+struct NominatimResults: Codable {
+    let deduplicatedLocations: [EnrichedLocation]?
+    
+    enum CodingKeys: String, CodingKey {
+        case deduplicatedLocations = "deduplicated_locations"
+    }
+}
+
+struct EnrichedLocation: Codable {
+    let originalName: String
+    let placeData: PlaceData?
+    
+    enum CodingKeys: String, CodingKey {
+        case originalName = "original_name"
+        case placeData = "place_data"
+    }
+}
+
+struct PlaceData: Codable {
+    let name: String?
+    let type: String?
+}
+
+struct DetectionResults: Codable {
+    let count: Int?
 }
 
 struct OCRResults: Codable {
