@@ -8,11 +8,14 @@ struct HomeView: View {
     @State private var errorMessage: String?
     @State private var navigateToResults = false
     @State private var animateLogo = false
+    @State private var uploadProgress: CGFloat = 0.0
+    @State private var uploadStepText = "Video yükleniyor..."
+    @State private var uploadStepSubtext = "Lütfen bekleyin"
+    @State private var uploadStepIcon = "video.fill"
     
     var body: some View {
         NavigationStack {
             ZStack {
-                // Gradient arka plan
                 LinearGradient(
                     colors: [Color(hex: "0A0E27"), Color(hex: "1a1a4e"), Color(hex: "0d2137")],
                     startPoint: .topLeading,
@@ -65,15 +68,36 @@ struct HomeView: View {
                     }
                     .padding(.bottom, 40)
                     
-                    // Upload butonu
+                    // Upload butonu veya loading
                     if isUploading {
-                        VStack(spacing: 12) {
-                            ProgressView()
-                                .tint(.white)
-                                .scaleEffect(1.3)
-                            Text("Video yükleniyor...")
-                                .foregroundColor(.white.opacity(0.7))
-                                .font(.subheadline)
+                        VStack(spacing: 20) {
+                            ZStack {
+                                Circle()
+                                    .stroke(Color.white.opacity(0.1), lineWidth: 4)
+                                    .frame(width: 80, height: 80)
+                                Circle()
+                                    .trim(from: 0, to: uploadProgress)
+                                    .stroke(
+                                        LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing),
+                                        style: StrokeStyle(lineWidth: 4, lineCap: .round)
+                                    )
+                                    .frame(width: 80, height: 80)
+                                    .rotationEffect(.degrees(-90))
+                                    .animation(.easeInOut(duration: 0.5), value: uploadProgress)
+                                
+                                Image(systemName: uploadStepIcon)
+                                    .font(.title2)
+                                    .foregroundColor(.white)
+                            }
+                            
+                            Text(uploadStepText)
+                                .font(.headline)
+                                .foregroundColor(.white)
+                            
+                            Text(uploadStepSubtext)
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.5))
+                                .multilineTextAlignment(.center)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 20)
@@ -125,6 +149,14 @@ struct HomeView: View {
     func uploadVideo(item: PhotosPickerItem) async {
         isUploading = true
         errorMessage = nil
+        
+        await MainActor.run {
+            uploadProgress = 0.15
+            uploadStepIcon = "icloud.and.arrow.up"
+            uploadStepText = "Video yükleniyor..."
+            uploadStepSubtext = "Dosya sunucuya gönderiliyor"
+        }
+        
         do {
             guard let data = try await item.loadTransferable(type: Data.self) else {
                 throw URLError(.badServerResponse)
@@ -132,8 +164,36 @@ struct HomeView: View {
             let tempURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString + ".mp4")
             try data.write(to: tempURL)
-            let id = try await APIService.shared.uploadVideo(fileURL: tempURL)
+            
             await MainActor.run {
+                uploadProgress = 0.4
+                uploadStepIcon = "cpu.fill"
+                uploadStepText = "AI analiz ediyor..."
+                uploadStepSubtext = "Görüntü ve ses işleniyor"
+            }
+            
+            let id = try await APIService.shared.uploadVideo(fileURL: tempURL)
+            
+            await MainActor.run {
+                uploadProgress = 0.7
+                uploadStepIcon = "mappin.and.ellipse"
+                uploadStepText = "Lokasyonlar bulunuyor..."
+                uploadStepSubtext = "Mekanlar ve şehirler tespit ediliyor"
+            }
+            
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            
+            await MainActor.run {
+                uploadProgress = 0.9
+                uploadStepIcon = "map.fill"
+                uploadStepText = "Gezi planı hazırlanıyor..."
+                uploadStepSubtext = "Seyahat önerileri oluşturuluyor"
+            }
+            
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            
+            await MainActor.run {
+                uploadProgress = 1.0
                 videoId = id
                 isUploading = false
                 navigateToResults = true
