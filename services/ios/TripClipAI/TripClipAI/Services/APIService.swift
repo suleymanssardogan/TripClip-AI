@@ -104,6 +104,12 @@ struct EnrichedLocation: Codable {
 struct PlaceData: Codable {
     let name: String?
     let type: String?
+    let location: LocationCoordinate?
+}
+
+struct LocationCoordinate: Codable {
+    let lat: Double
+    let lng: Double
 }
 
 struct DetectionResults: Codable {

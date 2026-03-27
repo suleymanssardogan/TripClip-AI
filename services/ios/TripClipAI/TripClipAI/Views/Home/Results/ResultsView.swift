@@ -1,4 +1,5 @@
 import SwiftUI
+import MapKit
 
 struct ResultsView: View {
     let videoId: Int
@@ -38,6 +39,16 @@ struct ResultsView: View {
             } else if let video = videoData {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+                        
+                        // Harita
+                        if let locations = video.aiResults?.nominatim?.deduplicatedLocations,
+                           !locations.isEmpty {
+                            DarkCard(title: "🗺️ Harita") {
+                                MapView(locations: locations)
+                                    .frame(height: 200)
+                                    .cornerRadius(12)
+                            }
+                        }
                         
                         // Şehirler
                         if let locations = video.aiResults?.nominatim?.deduplicatedLocations,
@@ -186,6 +197,44 @@ struct ResultsView: View {
         await MainActor.run {
             errorMessage = "Zaman aşımı"
             isLoading = false
+        }
+    }
+}
+
+struct MapView: UIViewRepresentable {
+    let locations: [EnrichedLocation]
+    
+    func makeUIView(context: Context) -> MKMapView {
+        let mapView = MKMapView()
+        mapView.mapType = .standard
+        return mapView
+    }
+    
+    func updateUIView(_ mapView: MKMapView, context: Context) {
+        mapView.removeAnnotations(mapView.annotations)
+        
+        var coordinates: [CLLocationCoordinate2D] = []
+        
+        for location in locations {
+            guard let lat = location.placeData?.location?.lat,
+                  let lng = location.placeData?.location?.lng else { continue }
+            
+            let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+            coordinates.append(coordinate)
+            
+            let annotation = MKPointAnnotation()
+            annotation.coordinate = coordinate
+            annotation.title = location.originalName
+            mapView.addAnnotation(annotation)
+        }
+        
+        if let first = coordinates.first {
+            let region = MKCoordinateRegion(
+                center: first,
+                latitudinalMeters: 10000,
+                longitudinalMeters: 10000
+            )
+            mapView.setRegion(region, animated: false)
         }
     }
 }
