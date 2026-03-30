@@ -65,8 +65,8 @@ class ShareViewController: UIViewController {
             DispatchQueue.main.async {
                 if error == nil, let data = data,
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let _ = json["id"] as? Int {
-                    self?.showSuccess()
+                   let videoId = json["id"] as? Int {
+                    self?.showSuccess(videoId: videoId)
                 } else {
                     self?.showError()
                 }
@@ -102,9 +102,27 @@ class ShareViewController: UIViewController {
         ])
     }
     
-    func showSuccess() {
-        let alert = UIAlertController(title: "✅ Yüklendi!", message: "Video TripClip AI'a gönderildi. Uygulamayı açarak gezi planını görebilirsiniz.", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "Tamam", style: .default) { _ in
+    var videoId: Int = 0
+
+    func showSuccess(videoId: Int) {
+        let alert = UIAlertController(
+            title: "✅ Yüklendi!",
+            message: "Video TripClip AI'a gönderildi.",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "Uygulamayı Aç", style: .default) { _ in
+            let url = URL(string: "tripclip://video/\(videoId)")!
+            var responder: UIResponder? = self
+            while responder != nil {
+                if let application = responder as? UIApplication {
+                    application.open(url)
+                    break
+                }
+                responder = responder?.next
+            }
+            self.dismiss()
+        })
+        alert.addAction(UIAlertAction(title: "Tamam", style: .cancel) { _ in
             self.dismiss()
         })
         present(alert, animated: true)
