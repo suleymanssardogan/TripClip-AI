@@ -11,6 +11,7 @@ from app.ml.speech_to_text import AudioProcessingService
 from app.ml.ner_service import NERService
 from app.ml.places_service import PlacesService
 from app.ml.location_deduplicator import LocationDeduplicator
+from app.ml.qdrant_service import QdrantService
 from app.ml.route_optimizer import RouteOptimizer
 from app.ml.rag_service import RAGService
 
@@ -31,6 +32,7 @@ class VideoProcessingService:
         self.ner = NERService()
         self.places = PlacesService()
         self.deduplicator = LocationDeduplicator(distance_threshold_km=5.0)
+        self.qdrant = QdrantService()
         self.route_optimizer = RouteOptimizer()
         self.rag = RAGService()
 
@@ -120,6 +122,13 @@ class VideoProcessingService:
             if deduplicated_locations:
                 travel_tips = self.rag.generate_travel_tips(deduplicated_locations)
             
+            # 12. Qdrant: Location embeddings
+            if enriched_locations:
+                try:
+                    self.qdrant.add_locations(enriched_locations)
+                    logger.info(f"✅ Added {len(enriched_locations)} locations to Qdrant")
+                except Exception as e:
+                    logger.warning(f"Qdrant error (non-critical): {e}")
             total_time = time.time() -start_time
             logger.info(f"Performance: ")
             logger.info(f"Total Time: {total_time:.2f}s")
