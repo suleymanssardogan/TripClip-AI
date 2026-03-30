@@ -9,6 +9,7 @@ import logging
 from fastapi.responses import JSONResponse
 import json
 
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/internal/videos", tags=["internal"])

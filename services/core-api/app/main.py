@@ -3,6 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 import sys
 
+import sentry_sdk
+sentry_sdk.init(
+    dsn="https://1538a657aa1234c66d5af8f3101f6142@o4511132818407424.ingest.de.sentry.io/4511132827648080",
+    send_default_pii=True,
+    traces_sample_rate=1.0,
+    profile_session_sample_rate=1.0,
+    profile_lifecycle="trace",
+)
+
 app = FastAPI(
     title="TripClip AI - Core API",
     description="Business logic and AI services",
