@@ -1,5 +1,6 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks, Header
 from sqlalchemy.orm import Session
+from typing import Optional
 from app.core.database import get_db
 from app.models.video import Video, VideoStatus
 from app.core.services.video_processor import VideoProcessingService
@@ -24,7 +25,8 @@ video_processor = VideoProcessingService()
 async def process_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    x_user_id: Optional[int] = Header(default=None),
 ):
     """
     Video upload + background processing
@@ -48,7 +50,7 @@ async def process_video(
         filename=file.filename,
         file_path=str(file_path),
         status=VideoStatus.UPLOADED,
-        user_id=1  # TODO: Get from auth
+        user_id=x_user_id or 1
     )
     db.add(db_video)
     db.commit()

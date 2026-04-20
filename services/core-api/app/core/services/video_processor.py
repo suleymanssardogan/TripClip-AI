@@ -76,37 +76,62 @@ class VideoProcessingService:
 
             # 6 Whisper: Audio Transcription
             transcription = self.audio_processor.process_video_audio(video_path,video_id) 
-            # 7 NER  Location extraction
+            # 7. NER: audio + OCR text birleştirip lokasyon çıkar
             extracted_locations = []
             combined_text = ""
             if transcription and transcription.get("transcript"):
-                combined_text += transcription["transcript"]
-            if combined_text:
-                 extracted_locations = self.ner.extract_locations_from_transcript(combined_text)
+                combined_text += transcription["transcript"] + " "
+            if extracted_texts:
+                combined_text += " ".join(extracted_texts)
+            if combined_text.strip():
+                extracted_locations = self.ner.extract_locations_from_transcript(combined_text)
 
-            # OCR text'lerini direkt lokasyon olarak ekle (yer adı + işletme)
+            # OCR POI'lar: ekranda görünen mekan/işletme adları
+            noise_patterns = {"www.", "http", "@", "#", ".com", ".tr", "₺", "$", "€"}
             ocr_pois = []
             if extracted_texts:
                 ocr_pois = [
                     t for t in extracted_texts
-                    if len(t.split()) >= 2
-                    and len(t) > 4
-                    and not t.isupper()
-                    and t[0].isupper()
-                    and not t.endswith(("-", "?", "'"))
+                    if len(t) >= 4
+                    and not t.replace(" ", "").isnumeric()
+                    and not t.endswith("?")
+                    and not any(p in t.lower() for p in noise_patterns)
                 ]
-                logger.info(f"OCR POIs: {ocr_pois}")                        
-                            
+                logger.info(f"OCR POIs: {ocr_pois}")
 
-            # 8 Nominatim:  Location enrichment
-            enriched_locations =[]
+            # 8. Nominatim: NER lokasyonlarını zenginleştir
+            ner_enriched = []
             if extracted_locations:
-                logger.info(f"Enriching {len(extracted_locations)} locations with Nominatim...")
-                enriched_locations = self.places.enrich_locations(extracted_locations)
-            # 9 Deduplicaiton: Remove duplicate locations
+                logger.info(f"Enriching {len(extracted_locations)} NER locations...")
+                ner_enriched = self.places.enrich_locations(extracted_locations)
+
+            # OCR POI'ları da Nominatim'den geçir
+            ocr_enriched = []
+            if ocr_pois:
+                logger.info(f"Enriching {len(ocr_pois)} OCR POIs...")
+                ocr_enriched = self.places.enrich_locations(ocr_pois)
+
+            # Vision landmarks'ı enriched formatına çevir
+            vision_enriched = []
+            for lm in vision_landmarks:
+                if lm.get("latitude") and lm.get("longitude") and lm.get("confidence", 0) > 0.5:
+                    vision_enriched.append({
+                        "original_name": lm["name"],
+                        "place_data": {
+                            "name": lm["name"],
+                            "location": {"lat": lm["latitude"], "lng": lm["longitude"]},
+                            "type": "landmark",
+                            "importance": lm["confidence"]
+                        }
+                    })
+
+            # Tüm kaynakları birleştir (NER + OCR + Vision)
+            enriched_locations = ner_enriched + ocr_enriched + vision_enriched
+            logger.info(f"Total enriched: {len(ner_enriched)} NER + {len(ocr_enriched)} OCR + {len(vision_enriched)} Vision = {len(enriched_locations)}")
+
+            # 9. Deduplication
             deduplicated_locations = []
             location_summary = {}
-            
             if enriched_locations:
                 deduplicated_locations = self.deduplicator.deduplicate_locations(enriched_locations)
                 location_summary = self.deduplicator.get_location_summary(enriched_locations)

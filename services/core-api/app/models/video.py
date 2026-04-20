@@ -34,7 +34,8 @@ class Video(Base):
     deduplicated_locations = Column(JSON, nullable=True)   
     location_summary = Column(JSON, nullable=True)
     optimized_route = Column(JSON, nullable=True)
-    travel_tips = Column(JSON, nullable=True)         
+    travel_tips = Column(JSON, nullable=True)
+    ocr_pois = Column(JSON, nullable=True)
     
 
     

@@ -2,7 +2,7 @@ import Foundation
 
 class APIService {
     static let shared = APIService()
-    private let baseURL = "http://localhost:8001"
+    private let baseURL = "http://127.0.0.1:8001"
 
     
     private let session: URLSession = {
@@ -12,11 +12,16 @@ class APIService {
         return URLSession(configuration: config)
     }()
     
+    private func authHeader() -> String? {
+        AuthService.shared.accessToken.map { "Bearer \($0)" }
+    }
+
     // Video upload
     func uploadVideo(fileURL: URL) async throws -> Int {
         let url = URL(string: "\(baseURL)/api/mobile/videos/upload")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        if let auth = authHeader() { request.setValue(auth, forHTTPHeaderField: "Authorization") }
         
         let boundary = UUID().uuidString
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -33,15 +38,27 @@ class APIService {
         
         request.httpBody = body
         
-        let (data, _) = try await session.data(for: request)
+        let (data, httpResponse) = try await session.data(for: request)
+        if let http = httpResponse as? HTTPURLResponse, http.statusCode >= 400 {
+            let raw = String(data: data, encoding: .utf8) ?? "no body"
+            throw NSError(domain: "API", code: http.statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode): \(raw)"])
+        }
         let response = try JSONDecoder().decode(UploadResponse.self, from: data)
         return response.id
     }
-    
+
     // Video status
     func getVideoStatus(id: Int) async throws -> VideoResponse {
         let url = URL(string: "\(baseURL)/api/mobile/videos/\(id)")!
-        let (data, _) = try await session.data(from: url)
+        var request = URLRequest(url: url)
+        if let auth = authHeader() { request.setValue(auth, forHTTPHeaderField: "Authorization") }
+        let (data, httpResponse) = try await session.data(for: request)
+        if let http = httpResponse as? HTTPURLResponse, http.statusCode >= 400 {
+            let raw = String(data: data, encoding: .utf8) ?? "no body"
+            throw NSError(domain: "API", code: http.statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: "HTTP \(http.statusCode): \(raw)"])
+        }
         return try JSONDecoder().decode(VideoResponse.self, from: data)
     }
 }
@@ -71,12 +88,13 @@ struct AIResults: Codable {
     let ner: NERResults?
     let rag: RAGResults?
     let nominatim: NominatimResults?
+    let audio: AudioResults?
     let processingTime: Double?
     let detections: DetectionResults?
     let ocrPois: [String]?
-    
+
     enum CodingKeys: String, CodingKey {
-        case ocr, ner, rag, nominatim
+        case ocr, ner, rag, nominatim, audio
         case processingTime = "processing_time"
         case ocrPois = "ocr_pois"
         case detections
@@ -114,6 +132,20 @@ struct LocationCoordinate: Codable {
 
 struct DetectionResults: Codable {
     let count: Int?
+    let topObjects: [String: Int]?
+    enum CodingKeys: String, CodingKey {
+        case count
+        case topObjects = "top_objects"
+    }
+}
+
+struct AudioResults: Codable {
+    let transcription: TranscriptionResult?
+}
+
+struct TranscriptionResult: Codable {
+    let transcript: String?
+    let language: String?
 }
 
 struct OCRResults: Codable {

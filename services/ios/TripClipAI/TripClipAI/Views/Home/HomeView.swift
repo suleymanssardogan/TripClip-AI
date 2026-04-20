@@ -2,6 +2,7 @@ import SwiftUI
 import PhotosUI
 
 struct HomeView: View {
+    @EnvironmentObject private var auth: AuthService
     @State private var selectedItem: PhotosPickerItem?
     @State private var isUploading = false
     @State private var videoId: Int?
@@ -14,8 +15,7 @@ struct HomeView: View {
     @State private var uploadStepIcon = "video.fill"
     
     var body: some View {
-        NavigationStack {
-            ZStack {
+        ZStack {
                 LinearGradient(
                     colors: [Color(hex: "0A0E27"), Color(hex: "1a1a4e"), Color(hex: "0d2137")],
                     startPoint: .topLeading,
@@ -132,7 +132,21 @@ struct HomeView: View {
                     Spacer().frame(height: 50)
                 }
             }
-            .navigationBarHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: { auth.logout() }) {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                }
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink(destination: HistoryView()
+                        .environment(\.managedObjectContext, PersistenceService.shared.context)) {
+                        Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
+                            .foregroundColor(.white)
+                    }
+                }
+            }
             .onAppear { animateLogo = true }
             .onChange(of: selectedItem) { _, newItem in
                 guard let item = newItem else { return }
@@ -143,9 +157,8 @@ struct HomeView: View {
                     ResultsView(videoId: id)
                 }
             }
-        }
     }
-    
+
     func uploadVideo(item: PhotosPickerItem) async {
         isUploading = true
         errorMessage = nil
@@ -247,5 +260,5 @@ extension Color {
 }
 
 #Preview {
-    HomeView()
+    HomeView().environmentObject(AuthService.shared)
 }

@@ -46,6 +46,7 @@ async def root():
 async def health():
     return {"status": "healthy", "service": "core-api"}
 
-# Import router AFTER app creation
-from app.api.internal import videos
+# Import routers AFTER app creation
+from app.api.internal import videos, auth
 app.include_router(videos.router)
+app.include_router(auth.router)
