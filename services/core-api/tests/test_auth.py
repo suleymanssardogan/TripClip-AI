@@ -25,7 +25,7 @@ def test_register_success(client):
 def test_register_duplicate_email(client):
     """Aynı e-posta ile iki kez kayıt → 400"""
     email = f"dup_{uuid.uuid4().hex[:8]}@test.com"
-    payload = {"email": email, "password": "Pass123!", "username": f"u_{uuid.uuid4().hex[:6]}"}
+    payload = {"email": email, "password": "T3st_pwd!", "username": f"u_{uuid.uuid4().hex[:6]}"}
     r1 = client.post("/internal/auth/register", json=payload)
     assert r1.status_code == 200
 
@@ -50,7 +50,7 @@ def test_register_duplicate_username(client):
 def test_register_without_username(client):
     """Kullanıcı adı opsiyonel — e-posta prefix'i kullanılmalı"""
     email = f"nousername_{uuid.uuid4().hex[:8]}@test.com"
-    resp = client.post("/internal/auth/register", json={"email": email, "password": "Pass123!"})
+    resp = client.post("/internal/auth/register", json={"email": email, "password": "T3st_pwd!"})
     assert resp.status_code == 200
     assert resp.json()["access_token"]
 

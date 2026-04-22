@@ -17,7 +17,7 @@ class AudioProcessingService:
         """Load Whisper model when needed"""
         if self.model is None:
             logger.info("Loading Whisper model...")
-            self.model = whisper.load_model("base")
+            self.model = whisper.load_model("tiny")
             logger.info("✅ Whisper model loaded!")
     
     def extract_audio(self, video_path: str, output_path: str) -> bool:

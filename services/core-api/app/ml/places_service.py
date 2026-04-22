@@ -361,8 +361,14 @@ out center 3;
                     continue
                 location = last
 
-            # ── 1. Nominatim (city_bbox varsa bounded arama — yabancı şehir gelmez) ──
-            place_data = self.search_place(location, city_bbox=city_bbox if use_overpass else None)
+            # ── 1. Nominatim — önce bbox'lı ara (yanlış şehir engeli)
+            # Bbox boş dönerse unbounded tekrar dene + _within_city_area ile validate et.
+            place_data = self.search_place(location, city_bbox=city_bbox)
+            if not place_data and city_bbox:
+                place_data = self.search_place(location, city_bbox=None)
+                if place_data and not self._within_city_area(place_data, city_center):
+                    logger.info(f"🚫 Unbounded fallback yanlış şehir, atlandı: '{location}'")
+                    place_data = None
 
             if place_data:
                 osm_class  = place_data.get("class", "")

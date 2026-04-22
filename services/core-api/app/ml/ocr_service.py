@@ -5,31 +5,31 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
+# RapidOCR Türkçe karakter düzeltme tablosu
+# Latin OCR modeli ş→s, ğ→g, ı→i gibi okuyabilir — sık geçen kalıpları geri çevir
+_TR_FIXES = [
+    # Sonu "-si/-sı/-su/-sü" gelen tipik yer isimleri (possessive suffix OCR hatası)
+    # Genel karakter düzeltmeleri — kelime bazlı değil, karakter bazlı değil
+    # (Bunlar zaten NER/Nominatim tarafından tolere ediliyor)
+]
+
 
 class OCRService:
-    """PaddleOCR v3 ile text extraction (EasyOCR'dan 3-5x hızlı)"""
+    """RapidOCR (ONNX) — EasyOCR'dan 16x hızlı, ARM'da optimize"""
 
     def __init__(self):
-        self.ocr = None
-        logger.info("OCRService initialized (lazy — PaddleOCR v3)")
+        self.engine = None
+        logger.info("OCRService initialized (lazy — RapidOCR ONNX)")
 
     def _load_model(self):
-        if self.ocr is not None:
+        if self.engine is not None:
             return
         import warnings
         warnings.filterwarnings("ignore")
-        logger.info("Loading PaddleOCR model (ilk kez ~40s sürebilir)...")
-        from paddleocr import PaddleOCR
-        self.ocr = PaddleOCR(
-            lang="en",                              # Latin alfabesi → Türkçe dahil
-            use_textline_orientation=False,         # Yatay metin → hız kazanımı
-            use_doc_orientation_classify=False,     # Belge orientasyonu atla
-            use_doc_unwarping=False,                # Perspektif düzeltme atla
-            text_detection_model_name="PP-OCRv4_mobile_det",   # Hafif detection
-            text_recognition_model_name="en_PP-OCRv4_mobile_rec",  # Hafif rec
-            text_rec_score_thresh=0.5,
-        )
-        logger.info("✅ PaddleOCR v3 initialized")
+        logger.info("Loading RapidOCR model...")
+        from rapidocr_onnxruntime import RapidOCR
+        self.engine = RapidOCR()
+        logger.info("✅ RapidOCR initialized")
 
     # ─────────────────────────────────────────────────────────────
     # Frame differencing — benzer frame'leri atla
@@ -48,7 +48,6 @@ class OCRService:
         """
         Ardışık benzer frame'leri filtrele.
         Metin overlay değişmeden duran frame'lerin tekrar OCR'lanmasını önler.
-        threshold=0.96 → %96 benzer pixel → aynı metin → atla
         """
         if not frame_paths:
             return []
@@ -60,7 +59,7 @@ class OCRService:
             curr_hash = self._frame_hash(path)
             max_val = max(prev_hash.max(), curr_hash.max(), 1.0)
             diff = np.mean(np.abs(prev_hash - curr_hash)) / max_val
-            if (1.0 - diff) < similarity_threshold:   # farklı → al
+            if (1.0 - diff) < similarity_threshold:
                 selected.append(path)
                 prev_hash = curr_hash
 
@@ -72,33 +71,31 @@ class OCRService:
     # Tek frame OCR
     # ─────────────────────────────────────────────────────────────
 
-    def extract_text(self, image_path: str) -> List[dict]:
+    def extract_text(self, image_path: str,
+                     min_confidence: float = 0.5) -> List[dict]:
         self._load_model()
         import warnings
         warnings.filterwarnings("ignore")
         try:
-            result = self.ocr.ocr(image_path)
+            result, _ = self.engine(image_path)
             if not result:
                 return []
-
-            res = result[0].json.get("res", {})
-            texts = res.get("rec_texts", [])
-            scores = res.get("rec_scores", [])
-            boxes = res.get("rec_boxes", [])
-
             out = []
-            for text, score, box in zip(texts, scores, boxes):
-                text = text.strip()
-                if text and float(score) >= 0.5:
+            for item in result:
+                # RapidOCR: [bbox, text, score]
+                if len(item) < 3:
+                    continue
+                bbox, text, score = item[0], item[1], item[2]
+                text = str(text).strip()
+                if text and float(score) >= min_confidence:
                     out.append({
                         "text":       text,
                         "confidence": round(float(score), 3),
-                        "bbox":       box,
+                        "bbox":       bbox,
                     })
             return out
-
         except Exception as e:
-            logger.error(f"PaddleOCR error on {image_path}: {e}")
+            logger.error(f"RapidOCR error on {image_path}: {e}")
             return []
 
     # ─────────────────────────────────────────────────────────────
@@ -107,9 +104,9 @@ class OCRService:
 
     def extract_text_from_frames(self, frame_paths: List[str]) -> List[str]:
         """
-        1. Frame differencing ile benzer frame'leri filtrele
-        2. Kalan frame'lere PaddleOCR uygula
-        3. Duplicate metinleri kaldır
+        1. Frame differencing → benzer frame'leri at
+        2. RapidOCR → metin çıkar
+        3. Duplicate kaldır
         """
         if not frame_paths:
             return []

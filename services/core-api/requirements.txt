@@ -29,18 +29,6 @@ opencv-python-headless==4.8.1.78
 pillow==9.5.0
 numpy==1.24.3
 
-# Video Processing
-ffmpeg-python==0.2.0
-opencv-python-headless==4.8.1.78
-pillow==9.5.0
-numpy==1.24.3
-
-# Video Processing
-ffmpeg-python==0.2.0
-opencv-python-headless==4.8.1.78
-pillow==9.5.0
-numpy==1.24.3
-
 # AI/ML
 ultralytics==8.0.225
 torch==2.1.1
@@ -50,7 +38,7 @@ torchvision==0.16.1
 google-cloud-vision==3.4.5
 
 # OCR
-easyocr==1.7.0
+rapidocr-onnxruntime
 
 # Audio Processing
 openai-whisper

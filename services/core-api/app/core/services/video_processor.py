@@ -1,6 +1,8 @@
 from pathlib import Path
 import uuid
 import ffmpeg
+import re as _re
+from difflib import SequenceMatcher
 from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
@@ -210,7 +212,6 @@ class VideoProcessingService:
                 r"(listesi|rehberi|onerileri|tavsiyeleri)",
                 r"(top\s*\d+|en\s+iyi\s+\d+)",
             ]
-            import re as _re
             desc_regexes = [_re.compile(p, _re.IGNORECASE) for p in description_patterns]
 
             def is_noise(t: str) -> bool:
@@ -241,28 +242,73 @@ class VideoProcessingService:
             #   1. NER modeli LOC/GPE dedi → kesinlikle yer ismi
             #   2. Geo/biz sinyal kelimesi var → muhtemelen yer ismi
             #   3. 2+ kelime + gürültü değil → muhtemelen yer ismi (fallback)
+
+            # Tek başına anlamsız olan generic tip kelimeleri ("Koyu", "Plaj" gibi)
+            # yer ismi değil, sınıflandırıcı kelimedir — geocoding'e gönderilmez.
+            generic_type_words = {
+                "koyu", "koy", "plaj", "plaji", "sahil", "dağ", "dag", "gol", "göl",
+                "şelale", "selale", "orman", "vadi", "kanyon", "tepe", "kale",
+                "cami", "camii", "köy", "koy", "mahalle", "sokak", "cadde",
+                "park", "bahçe", "bahce", "ada", "kıyı", "kiyi", "liman",
+            }
+
+            def _split_camelcase(t: str) -> str:
+                """ManavgatSelalesi → Manavgat Selalesi (OCR boşluk atlama düzeltmesi)"""
+                # küçük→BÜYÜK sınırı: "gatSe" → "gat Se"
+                t = _re.sub(r'([a-zğüşıöç])([A-ZĞÜŞİÖÇ])', r'\1 \2', t)
+                # BÜYÜK→BÜYÜK+küçük: "SELAlesi" gibi durumlar
+                t = _re.sub(r'([A-ZĞÜŞİÖÇ]{2,})([A-ZĞÜŞİÖÇ][a-zğüşıöç])', r'\1 \2', t)
+                return t.strip()
+
+            def _norm_for_dedup(t: str) -> str:
+                """Fuzzy dedup için: boşluk + noktalama kaldır, tr_lower uygula."""
+                return _re.sub(r'[^a-z0-9ğüşıöç]', '', tr_lower(t))
+
+            def _is_fuzzy_dup(t: str, seen_norms: list) -> bool:
+                """Benzer metinleri fuzzy eşleştir (OCR hatalarına karşı)."""
+                norm = _norm_for_dedup(t)
+                if len(norm) < 4:
+                    return False
+                for s in seen_norms:
+                    ratio = SequenceMatcher(None, norm, s).ratio()
+                    if ratio >= 0.82:
+                        return True
+                return False
+
             display_pois = []
             seen_display = set()
+            seen_norms: list = []   # fuzzy dedup için normalize edilmiş liste
+            MAX_DISPLAY_POIS = 18   # çok fazla item → Overpass zinciri saatler sürer
+
             if extracted_texts:
                 for t in extracted_texts:
-                    t_clean = t.strip()
-                    t_lower = t_clean.lower()
+                    if len(display_pois) >= MAX_DISPLAY_POIS:
+                        logger.info(f"display_pois sınırına ulaşıldı ({MAX_DISPLAY_POIS}), kalan atlandı")
+                        break
+                    t_clean = _split_camelcase(t.strip())  # "ManavgatSelalesi" → "Manavgat Selalesi"
+                    t_lower = tr_lower(t_clean)   # Türkçe-doğru lowercase (İ→i fix)
                     if is_noise(t_clean): continue
-                    if t_lower in seen_display: continue
+                    if t_lower in seen_display: continue  # exact dedup
+                    if _is_fuzzy_dup(t_clean, seen_norms): continue  # fuzzy dedup
+
                     words = t_clean.split()
+
+                    # Tek kelime + generic tip kelimesi → yer ismi değil, atla
+                    if len(words) == 1 and t_lower in generic_type_words:
+                        logger.debug(f"Generic tip kelimesi atlandı: '{t_clean}'")
+                        continue
+
                     has_signal = any(s in t_lower for s in all_poi_signals)
 
-                    # 1. NER ile kontrol et (model kendi karar verir — kural yok)
-                    ner_says_location = self.ner.is_location(t_clean)
-
-                    # 2. Fallback: sinyal kelimesi veya 2+ kelime
+                    # Heuristic eşleme: sinyal kelimesi VEYA 2+ kelime
+                    # NER.is_location() her satır için çağrılmıyordu — 50 text × 2s BERT = 100s+
+                    # NER zaten audio+OCR combined text üzerinden extract_locations ile çalışıyor.
                     heuristic_match = has_signal or len(words) >= 2
 
-                    if ner_says_location or heuristic_match:
+                    if heuristic_match:
                         seen_display.add(t_lower)
+                        seen_norms.append(_norm_for_dedup(t_clean))
                         display_pois.append(t_clean)
-                        if ner_says_location:
-                            logger.debug(f"NER onayladı: '{t_clean}'")
 
             # ── Liste 2: Geocoding POI'ları (Nominatim'e gönderilecek, sıkı) ──
             # Sadece geo sinyali içerenler veya 2+ kelime + geo sinyal
