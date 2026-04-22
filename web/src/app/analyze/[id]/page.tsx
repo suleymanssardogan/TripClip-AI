@@ -1,149 +1,200 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { 
-  MapPin, 
-  Sparkles, 
-  ArrowLeft, 
-  Clock, 
-  DollarSign, 
-  Utensils, 
-  ArrowRight, 
-  BrainCircuit,
-} from "lucide-react";
+import { MapPin, ArrowLeft, Clock, Mic, FileText, Loader2, Globe2, Navigation } from "lucide-react";
 import Navbar from "@/components/Navbar";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
+import { getPlan, type VideoDetail } from "@/lib/api";
+import dynamic from "next/dynamic";
 
-const MOCK_ANALYSIS = {
-  locations: [
-    {
-      id: "01",
-      name: "Spiaggia Grande",
-      desc: "The main beach of Positano, identified by the iconic orange umbrellas and the cliffside church background.",
-      image: "https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?auto=format&fit=crop&q=80&w=800",
-      bestTime: "10 AM",
-      price: "Free Entry",
-      category: "Beach"
-    },
-    {
-      id: "02",
-      name: "Villa Treville Gardens",
-      desc: "Private terrace appearing in the reel's middle segment. Requires reservation for the cocktail lounge.",
-      image: "https://images.unsplash.com/photo-1548126466-41999a552014?auto=format&fit=crop&q=80&w=800",
-      bestTime: "Sunset",
-      price: "Dining Spot",
-      category: "Luxury"
-    }
-  ]
-};
+const MapPreview = dynamic(() => import("@/components/MapPreview"), { ssr: false });
 
 export default function AnalysisResultPage() {
   const router = useRouter();
-  const [added, setAdded] = useState(false);
+  const params = useParams();
+  const [video, setVideo] = useState<VideoDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const id = Number(params.id);
+    if (!id || isNaN(id)) { setError("Geçersiz ID"); setLoading(false); return; }
+
+    getPlan(id)
+      .then(setVideo)
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [params.id]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-surface flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
+  }
+
+  if (error || !video) {
+    return (
+      <div className="min-h-screen bg-surface flex flex-col items-center justify-center gap-4">
+        <p className="text-red-400">{error || "Plan bulunamadı"}</p>
+        <button onClick={() => router.back()} className="text-primary hover:underline text-sm">Geri Dön</button>
+      </div>
+    );
+  }
+
+  const ai = video.ai_results;
+  const locations = ai?.nominatim?.deduplicated_locations ?? [];
+  const ocrTexts = ai?.ocr?.extracted_texts ?? [];
+  const nerLocations = ai?.ner?.extracted_locations ?? [];
+  const ocrPois = ai?.ocr_pois ?? [];
+  const transcript = ai?.audio?.transcription?.transcript;
+  const tips = ai?.rag?.travel_tips?.tips ?? [];
+  const summary = ai?.rag?.travel_tips?.summary;
+  const totalDistance = ai?.route?.optimized_route?.total_distance_km;
 
   return (
-    <div className="min-h-screen relative overflow-hidden bg-surface font-body text-on-surface">
+    <div className="min-h-screen bg-surface text-on-surface">
       <Navbar />
-      
-      {/* Background Blobs */}
-      <div className="mesh-blob w-[600px] h-[600px] bg-primary/10 -top-40 -left-40" />
-      <div className="mesh-blob w-[400px] h-[400px] bg-secondary/5 top-1/4 -right-20" />
 
-      <main className="pt-32 pb-32 px-6 max-w-screen-xl mx-auto relative z-10">
-        <button onClick={() => router.back()} className="flex items-center gap-2 text-on-surface-variant hover:text-white transition-all mb-12 group font-bold uppercase tracking-widest text-[10px]">
-          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Back to Dashboard
+      <main className="pt-24 pb-20 px-6 max-w-screen-xl mx-auto">
+        <button
+          onClick={() => router.back()}
+          className="flex items-center gap-2 text-on-surface-variant hover:text-white transition-all mb-8 group font-bold uppercase tracking-widest text-[10px]"
+        >
+          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Geri
         </button>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-          {/* AI Insights - LG 4 */}
-          <div className="lg:col-span-4 space-y-8">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-surface-container-highest/60 backdrop-blur-3xl p-10 rounded-[3rem] relative overflow-hidden border border-white/10 shadow-2xl"
-            >
-              <div className="absolute -right-6 -top-6 opacity-10">
-                <BrainCircuit className="w-32 h-32 text-primary" />
-              </div>
-              <div className="relative z-10 text-left">
-                <span className="bg-secondary/20 text-secondary px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.2em] inline-block mb-6">
-                   Deep Vision AI
-                </span>
-                <h3 className="font-headline text-3xl font-black mb-6 tracking-tighter">Analysis Insights</h3>
-                <p className="text-on-surface-variant leading-relaxed text-sm font-medium opacity-80 mb-8">
-                  Detected <span className="text-primary font-bold">3 hotspots</span> and <span className="text-primary font-bold">2 transit routes</span>. The vibe is Mediterranean Luxury.
-                </p>
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-4xl font-black tracking-tighter mb-2">
+            {locations.length > 0
+              ? locations[0].original_name.charAt(0).toUpperCase() + locations[0].original_name.slice(1) + " Gezi Planı"
+              : "Gezi Planı"}
+          </h1>
+          <div className="flex items-center gap-6 text-sm text-on-surface-variant">
+            {ai?.processing_time && <span className="flex items-center gap-1"><Clock className="w-4 h-4" /> {Math.round(ai.processing_time)}s analiz</span>}
+            {video.duration && <span className="flex items-center gap-1"><FileText className="w-4 h-4" /> {video.duration}s video</span>}
+            {totalDistance && <span className="flex items-center gap-1"><Navigation className="w-4 h-4" /> {Math.round(totalDistance)} km rota</span>}
+            {ai?.detections?.count && <span className="flex items-center gap-1"><Globe2 className="w-4 h-4" /> {ai.detections.count} nesne tespit</span>}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+          {/* Sol Panel */}
+          <div className="lg:col-span-4 space-y-6">
+
+            {/* Şehirler */}
+            {locations.length > 0 && (
+              <Card title="🏙️ Bulunan Şehirler">
+                <div className="space-y-3">
+                  {locations.map((loc, i) => (
+                    <div key={i} className="flex items-start gap-3">
+                      <MapPin className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="font-semibold text-sm">{loc.original_name.charAt(0).toUpperCase() + loc.original_name.slice(1)}</p>
+                        <p className="text-xs text-on-surface-variant">{loc.place_data?.name}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {/* NER Lokasyonlar (koordinatsız) */}
+            {locations.length === 0 && nerLocations.length > 0 && (
+              <Card title="📍 Tespit Edilen Yerler">
                 <div className="flex flex-wrap gap-2">
-                  {["#HiddenGem", "#Luxury", "#Italy"].map(tag => (
-                    <span key={tag} className="bg-white/5 border border-white/10 text-on-surface-variant px-4 py-2 rounded-xl text-[10px] font-bold">
-                      {tag}
+                  {nerLocations.map((loc, i) => (
+                    <span key={i} className="bg-primary/10 text-primary text-xs font-medium px-3 py-1 rounded-full">
+                      {loc}
                     </span>
                   ))}
                 </div>
-              </div>
-            </motion.div>
+              </Card>
+            )}
 
-            <motion.div 
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-              className="bg-secondary p-10 rounded-[3rem] text-on-secondary text-center shadow-2xl shadow-secondary/20"
-            >
-               <h4 className="font-headline text-2xl font-black mb-3">Add to Plan?</h4>
-               <p className="text-on-secondary/70 text-sm mb-8 font-medium italic">Save this curated route to your journeys.</p>
-               <button 
-                 onClick={() => setAdded(true)}
-                 className="w-full bg-on-secondary text-secondary py-5 rounded-full font-black flex items-center justify-center gap-3 hover:scale-[1.03] active:scale-95 transition-all text-sm uppercase tracking-widest"
-               >
-                 {added ? "Success! ✅" : "Save Route"}
-                 {!added && <ArrowRight className="w-5 h-5" />}
-               </button>
-            </motion.div>
+            {/* Travel Tips */}
+            {tips.length > 0 && (
+              <Card title="💡 Seyahat İpuçları">
+                <div className="space-y-3">
+                  {tips.map((tip: any, i: number) => (
+                    <div key={i} className="p-3 bg-white/5 rounded-xl">
+                      <p className="text-xs font-bold text-primary mb-1">{tip.location}</p>
+                      <p className="text-xs text-on-surface-variant leading-relaxed">{tip.tip}</p>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {/* Özet */}
+            {summary && (
+              <Card title="📖 Özet">
+                <p className="text-sm text-on-surface-variant leading-relaxed">{summary}</p>
+              </Card>
+            )}
           </div>
 
-          {/* Route Preview - LG 8 */}
-          <div className="lg:col-span-8 space-y-12">
-            <div className="flex items-end justify-between px-6">
-              <h2 className="font-headline text-4xl font-black tracking-tighter">Journey Map</h2>
-              <span className="text-secondary font-black text-xs uppercase tracking-[0.3em] opacity-60">Verified Route</span>
-            </div>
+          {/* Sağ Panel */}
+          <div className="lg:col-span-8 space-y-6">
 
-            <div className="space-y-12">
-              {MOCK_ANALYSIS.locations.map((loc, i) => (
-                <motion.div 
-                  key={loc.id}
-                  initial={{ opacity: 0, y: 30 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: i * 0.2 }}
-                  className={`glass-card rounded-[3.5rem] flex flex-col md:flex-row overflow-hidden ${i % 2 === 1 ? 'md:flex-row-reverse md:translate-x-12' : ''}`}
-                >
-                  <div className="md:w-5/12 h-80 md:h-[450px] overflow-hidden">
-                    <img src={loc.image} className="w-full h-full object-cover transition-transform duration-1000 hover:scale-110" alt={loc.name} />
-                  </div>
-                  <div className={`md:w-7/12 p-12 flex flex-col justify-center ${i % 2 === 1 ? 'text-right items-end' : ''}`}>
-                    <span className="text-secondary font-black text-xs uppercase tracking-[0.4em] mb-6 block">Stop {loc.id}</span>
-                    <h3 className="font-headline text-4xl font-black text-on-surface mb-6 tracking-tighter leading-none">{loc.name}</h3>
-                    <p className="text-on-surface-variant text-sm leading-[1.7] mb-10 opacity-70 font-medium max-w-sm">
-                      {loc.desc}
-                    </p>
-                    <div className={`flex gap-8 ${i % 2 === 1 ? 'justify-end' : ''}`}>
-                      <div className="flex items-center gap-3 text-on-surface-variant">
-                        <Clock className="w-5 h-5 text-secondary" />
-                        <span className="text-xs font-black uppercase tracking-widest">{loc.bestTime}</span>
-                      </div>
-                      <div className="flex items-center gap-3 text-on-surface-variant">
-                        <DollarSign className="w-5 h-5 text-secondary" />
-                        <span className="text-xs font-black uppercase tracking-widest">{loc.price}</span>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              ))}
-            </div>
+            {/* Harita */}
+            {locations.length > 0 && (
+              <Card title="🗺️ Harita">
+                <div className="h-[350px] rounded-xl overflow-hidden">
+                  <MapPreview locations={locations} />
+                </div>
+              </Card>
+            )}
+
+            {/* Videodaki Yazılar */}
+            {(ocrPois.length > 0 || ocrTexts.length > 0) && (
+              <Card title="📝 Videodaki Yazılar">
+                <div className="flex flex-wrap gap-2">
+                  {(ocrPois.length > 0 ? ocrPois : ocrTexts).map((text, i) => (
+                    <span key={i} className="bg-white/5 border border-white/10 text-on-surface text-xs px-3 py-1.5 rounded-lg">
+                      {text}
+                    </span>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {/* Transkripsiyon */}
+            {transcript && (
+              <Card title="🎙️ Ses Transkripsiyonu">
+                <div className="flex items-start gap-3">
+                  <Mic className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                  <p className="text-sm text-on-surface-variant leading-relaxed">{transcript}</p>
+                </div>
+              </Card>
+            )}
+
+            {/* Veri yok */}
+            {locations.length === 0 && nerLocations.length === 0 && ocrTexts.length === 0 && (
+              <Card title="ℹ️ Bilgi">
+                <p className="text-sm text-on-surface-variant">Bu videodan lokasyon bilgisi çıkarılamadı. Türkçe yazı veya yer adı içeren videolar deneyin.</p>
+              </Card>
+            )}
           </div>
         </div>
       </main>
     </div>
+  );
+}
+
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-white/5 border border-white/10 rounded-2xl p-6"
+    >
+      <h3 className="font-bold text-sm mb-4">{title}</h3>
+      {children}
+    </motion.div>
   );
 }

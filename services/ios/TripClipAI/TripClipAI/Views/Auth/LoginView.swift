@@ -7,6 +7,7 @@ struct LoginView: View {
     @State private var password = ""
     @State private var isRegisterMode = false
     @State private var errorMessage: String?
+    @State private var successMessage: String?
     @State private var isLoading = false
 
     var body: some View {
@@ -84,6 +85,7 @@ struct LoginView: View {
                             Button {
                                 isRegisterMode.toggle()
                                 errorMessage = nil
+                                successMessage = nil
                             } label: {
                                 Text(isRegisterMode ? "Zaten hesabın var mı? Giriş yap" : "Hesap yok mu? Kayıt ol")
                                     .font(.caption)
@@ -119,6 +121,17 @@ struct LoginView: View {
                         .cornerRadius(14)
                     }
 
+                    if let success = successMessage {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                            Text(success)
+                                .font(.caption)
+                                .foregroundColor(.green.opacity(0.9))
+                        }
+                        .multilineTextAlignment(.center)
+                    }
+
                     if let error = errorMessage {
                         Text(error)
                             .font(.caption)
@@ -145,9 +158,16 @@ struct LoginView: View {
         }
         isLoading = true
         errorMessage = nil
+        successMessage = nil
         do {
             if isRegisterMode {
                 try await auth.register(email: email, password: password, username: nil)
+                // Kayıt başarılı → giriş ekranına yönlendir
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    successMessage = "Hesap oluşturuldu! Şimdi giriş yapabilirsin."
+                    isRegisterMode = false
+                    password = ""    // şifreyi temizle, email saklı kalsın
+                }
             } else {
                 try await auth.login(email: email, password: password)
             }

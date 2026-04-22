@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 from app.core.database import get_db
 from app.models.video import Video, VideoStatus
-from app.core.services.video_processor import VideoProcessingService
+from app.core.services.video_processor import VideoProcessingService, _progress_redis
 import uuid
 from pathlib import Path
 import logging
@@ -126,6 +126,84 @@ def process_video_background(video_id: int, video_path: str):
 
 
     
+@router.get("/{video_id}/progress")
+async def get_video_progress(video_id: int, db: Session = Depends(get_db)):
+    """
+    Video işlem aşamasını döner (mobil polling için).
+    stage: metadata | frames | ai_parallel | ner | geocoding | overpass | dedup | route | rag | done
+    percent: 0-100
+    """
+    # Redis'ten progress bilgisini al
+    if _progress_redis:
+        try:
+            raw = _progress_redis.get(f"progress:{video_id}")
+            if raw:
+                return json.loads(raw)
+        except Exception:
+            pass
+
+    # Fallback: DB'deki status'e göre tahmin
+    video = db.query(Video).filter(Video.id == video_id).first()
+    if not video:
+        raise HTTPException(404, detail="Video not found")
+
+    stage_map = {
+        VideoStatus.UPLOADED:   ("uploaded",   5),
+        VideoStatus.PROCESSING: ("processing", 30),
+        VideoStatus.COMPLETED:  ("done",       100),
+        VideoStatus.FAILED:     ("failed",     0),
+    }
+    stage, percent = stage_map.get(video.status, ("unknown", 0))
+    return {"stage": stage, "percent": percent}
+
+
+@router.get("/stats")
+async def get_platform_stats(db: Session = Depends(get_db)):
+    """Platform istatistikleri"""
+    from sqlalchemy import func
+    total_videos = db.query(func.count(Video.id)).scalar()
+    completed = db.query(func.count(Video.id)).filter(Video.status == VideoStatus.COMPLETED).scalar()
+    total_users = db.query(func.count(func.distinct(Video.user_id))).scalar()
+    all_locations = db.query(Video.deduplicated_locations).filter(Video.deduplicated_locations.isnot(None)).all()
+    city_names = set()
+    for (locs,) in all_locations:
+        if locs:
+            for l in locs:
+                city_names.add(l.get("original_name", "").lower())
+    return {"total_videos": total_videos, "completed_videos": completed, "total_users": total_users, "total_cities": len(city_names)}
+
+
+@router.get("/public")
+async def get_public_plans(city: str = None, limit: int = 20, offset: int = 0, db: Session = Depends(get_db)):
+    """Public feed — completed videolar"""
+    all_videos = db.query(Video).filter(Video.status == VideoStatus.COMPLETED).order_by(Video.created_at.desc()).all()
+    plans = []
+    for v in all_videos:
+        locs = v.deduplicated_locations or []
+        if city:
+            names = [l.get("original_name", "").lower() for l in locs]
+            if not any(city.lower() in n for n in names):
+                continue
+        plans.append({"id": v.id, "filename": v.filename, "duration": v.duration,
+                       "created_at": v.created_at.isoformat() if v.created_at else None,
+                       "locations_count": len(locs), "top_location": locs[0]["original_name"] if locs else None,
+                       "ocr_preview": (v.extracted_texts or [])[:3], "processing_time": v.processing_time})
+    return {"plans": plans[offset:offset + limit], "total": len(plans)}
+
+
+@router.get("/user/{user_id}")
+async def get_user_videos(user_id: int, db: Session = Depends(get_db)):
+    """Kullanıcıya ait tüm videolar"""
+    videos = db.query(Video).filter(Video.user_id == user_id).order_by(Video.created_at.desc()).all()
+    plans = [{"id": v.id, "filename": v.filename, "status": v.status.value if v.status else "unknown",
+               "duration": v.duration, "created_at": v.created_at.isoformat() if v.created_at else None,
+               "locations_count": len(v.deduplicated_locations) if v.deduplicated_locations else 0,
+               "top_location": v.deduplicated_locations[0]["original_name"] if v.deduplicated_locations else None,
+               "ocr_preview": (v.extracted_texts or [])[:3], "processing_time": v.processing_time}
+              for v in videos]
+    return {"plans": plans, "total": len(plans)}
+
+
 @router.get("/{video_id}")
 async def get_video(video_id: int, db: Session = Depends(get_db)):
     """Get video with AI results"""
@@ -176,3 +254,5 @@ async def get_video(video_id: int, db: Session = Depends(get_db)):
     }
     
     return JSONResponse(content=json.loads(json.dumps(data, ensure_ascii=False)))
+
+

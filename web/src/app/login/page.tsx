@@ -2,13 +2,16 @@
 
 import React, { useState } from "react";
 import Navbar from "@/components/Navbar";
-import { LogIn, Loader2, AlertCircle } from "lucide-react";
+import { LogIn, Loader2, AlertCircle, CheckCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { login } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState(false);
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -16,63 +19,109 @@ export default function LoginPage() {
     setError("");
 
     const formData = new FormData(e.currentTarget);
-    const email = formData.get("email");
-    const password = formData.get("password");
+    const email = formData.get("email") as string;
+    const password = formData.get("password") as string;
 
     try {
-      const response = await fetch("http://localhost:8000/internal/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.detail || "Giriş bilgileri hatalı.");
-      }
-
-      // Token'ı sakla ve yönlendir
+      const data = await login(email, password);
       localStorage.setItem("token", data.access_token);
-      localStorage.setItem("user", JSON.stringify(data));
-      router.push("/dashboard");
-    } catch (err: any) {
-      setError(err.message);
+      localStorage.setItem("user_id", String(data.user_id));
+      localStorage.setItem("email", data.email);
+      setSuccess(true);
+      setTimeout(() => router.push("/dashboard"), 800);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Giriş bilgileri hatalı.");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-background pt-32 px-6">
+    <div className="min-h-screen bg-bg pt-24 px-6 flex items-center justify-center">
       <Navbar />
-      <div className="max-w-md mx-auto glass p-8 rounded-3xl text-center">
-        <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-6">
-          <LogIn className="text-primary w-8 h-8" />
-        </div>
-        <h1 className="text-3xl font-bold mb-4">Giriş Yap</h1>
-        <p className="text-muted-foreground mb-8">Seyahat planlarını yönetmek için hesabına giriş yap.</p>
-        
-        {error && (
-          <div className="bg-red-500/10 border border-red-500/20 text-red-500 p-4 rounded-xl mb-6 text-sm flex items-center gap-2 outline-none">
-            <AlertCircle className="w-4 h-4" /> {error}
+
+      {/* Background orbs */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="orb w-96 h-96 bg-violet top-1/4 -right-48" />
+        <div className="orb w-80 h-80 bg-neon bottom-1/4 -left-40" />
+      </div>
+
+      <div className="relative w-full max-w-md">
+        {/* Card */}
+        <div className="glass rounded-2xl p-8 border border-white/8">
+          {/* Logo mark */}
+          <div className="flex flex-col items-center mb-8">
+            <div className="w-14 h-14 bg-neon/10 border border-neon/20 rounded-2xl flex items-center justify-center mb-4">
+              <LogIn className="w-7 h-7 text-neon" />
+            </div>
+            <h1 className="font-display font-black text-2xl text-ice">Tekrar Hoş Geldin</h1>
+            <p className="text-muted text-sm mt-1">Seyahat planlarını yönetmek için giriş yap</p>
           </div>
-        )}
 
-        <form onSubmit={handleLogin} className="space-y-4">
-          <input name="email" type="email" placeholder="E-posta" className="w-full bg-white/5 border border-white/10 rounded-xl p-4 focus:outline-none focus:border-primary/50" required disabled={loading} />
-          <input name="password" type="password" placeholder="Şifre" className="w-full bg-white/5 border border-white/10 rounded-xl p-4 focus:outline-none focus:border-primary/50" required disabled={loading} />
-          <button 
-            type="submit" 
-            disabled={loading}
-            className="w-full bg-primary text-white py-4 rounded-xl font-bold hover:opacity-90 transition-opacity uppercase tracking-wider text-sm flex items-center justify-center gap-2"
-          >
-            {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Giriş Yap"}
-          </button>
-        </form>
+          {/* Error */}
+          {error && (
+            <div className="bg-coral/10 border border-coral/20 text-coral p-3.5 rounded-xl mb-5 text-sm flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
 
-        <p className="mt-8 text-sm text-muted-foreground">
-          Henüz hesabın yok mu? <a href="/signup" className="text-primary hover:underline">Kaydol</a>
+          {/* Success */}
+          {success && (
+            <div className="bg-neon/10 border border-neon/20 text-neon p-3.5 rounded-xl mb-5 text-sm flex items-center gap-2">
+              <CheckCircle className="w-4 h-4 flex-shrink-0" />
+              <span>Giriş başarılı! Yönlendiriliyorsunuz...</span>
+            </div>
+          )}
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="text-xs text-muted font-medium mb-1.5 block">E-posta</label>
+              <input
+                name="email"
+                type="email"
+                placeholder="sen@ornek.com"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-ice placeholder:text-muted/50 text-sm focus:outline-none focus:border-neon/40 focus:bg-neon/5 transition-all"
+                required
+                disabled={loading || success}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted font-medium mb-1.5 block">Şifre</label>
+              <input
+                name="password"
+                type="password"
+                placeholder="••••••••"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-ice placeholder:text-muted/50 text-sm focus:outline-none focus:border-neon/40 focus:bg-neon/5 transition-all"
+                required
+                disabled={loading || success}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading || success}
+              className="w-full btn-primary py-3.5 rounded-xl font-bold text-sm tracking-wide flex items-center justify-center gap-2 mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Giriş yapılıyor...</>
+              ) : (
+                "Giriş Yap"
+              )}
+            </button>
+          </form>
+
+          <p className="mt-6 text-center text-sm text-muted">
+            Hesabın yok mu?{" "}
+            <Link href="/signup" className="text-neon hover:text-neon/80 transition-colors font-medium">
+              Kaydol
+            </Link>
+          </p>
+        </div>
+
+        {/* Footer note */}
+        <p className="text-center text-xs text-muted/40 mt-4">
+          TripClip AI · Fırat Üniversitesi Bitirme Projesi
         </p>
       </div>
     </div>

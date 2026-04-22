@@ -44,16 +44,23 @@ class AuthResponse(BaseModel):
 @router.post("/register", response_model=AuthResponse)
 def register(body: RegisterRequest, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == body.email).first():
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise HTTPException(status_code=400, detail="E-posta zaten kayıtlı")
+
+    if body.username and db.query(User).filter(User.username == body.username).first():
+        raise HTTPException(status_code=400, detail="Kullanıcı adı zaten alınmış")
 
     user = User(
         email=body.email,
         username=body.username or body.email.split("@")[0],
         hashed_password=hash_password(body.password),
     )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+    try:
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Kayıt işlemi sırasında bir hata oluştu")
 
     token = create_access_token(user.id, user.email)
     return AuthResponse(access_token=token, user_id=user.id, email=user.email)

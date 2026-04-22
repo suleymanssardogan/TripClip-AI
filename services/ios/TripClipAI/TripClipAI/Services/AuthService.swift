@@ -67,8 +67,8 @@ class AuthService: ObservableObject {
     func register(email: String, password: String, username: String?) async throws {
         var body: [String: Any] = ["email": email, "password": password]
         if let u = username { body["username"] = u }
-        let response = try await post("/auth/register", body: body)
-        saveSession(response)
+        // Kayıt başarılı olsa bile oturum AÇILMAZ — kullanıcı giriş ekranına yönlendirilir
+        _ = try await post("/auth/register", body: body)
     }
 
     // MARK: - Logout

@@ -122,6 +122,8 @@ struct EnrichedLocation: Codable {
 struct PlaceData: Codable {
     let name: String?
     let type: String?
+    let category: String?       // Müze, Kafe, Tarihi Alan…
+    let importance: Double?
     let location: LocationCoordinate?
 }
 
