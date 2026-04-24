@@ -1,5 +1,5 @@
 services:
-  # Databases
+  # ── Veritabanları ─────────────────────────────────────────────────────────
   postgres:
     image: postgres:15
     container_name: tripclip-postgres
@@ -11,6 +11,12 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tripclip -d tripclip"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
@@ -19,7 +25,13 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-  
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
   qdrant:
     image: qdrant/qdrant:latest
     container_name: tripclip-qdrant
@@ -28,6 +40,12 @@ services:
       - "6334:6334"
     volumes:
       - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6333/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   mongodb:
     image: mongo:7
@@ -36,47 +54,71 @@ services:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
-  # Core API
+  # ── Core API ──────────────────────────────────────────────────────────────
   core-api:
     build: ./services/core-api
     container_name: tripclip-core-api
     ports:
       - "8000:8000"
     depends_on:
-      - postgres
-      - redis
-      - mongodb
+      postgres:
+        condition: service_healthy   # ← postgres tamamen hazır olana kadar bekle
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_started   # mongo healthcheck daha yavaş olabilir
     environment:
       - DATABASE_URL=postgresql://tripclip:tripclip123@postgres:5432/tripclip
       - REDIS_URL=redis://redis:6379/0
       - MONGODB_URL=mongodb://mongodb:27017/tripclip
+      - UPLOAD_DIR=/app/uploads/videos
+      # Production'da domain ekle: ALLOWED_ORIGINS=https://tripclip.app,https://www.tripclip.app
+      - ALLOWED_ORIGINS=
+    volumes:
+      - uploads_data:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
-  # Mobile BFF
+  # ── Mobile BFF ────────────────────────────────────────────────────────────
   mobile-bff:
     build: ./services/mobile-bff
     container_name: tripclip-mobile-bff
     ports:
       - "8001:8001"
     depends_on:
-      - core-api
+      core-api:
+        condition: service_healthy   # ← core-api /health dönene kadar bekle
     environment:
       - CORE_API_URL=http://core-api:8000
+      - ALLOWED_ORIGINS=
 
-  # Web BFF
+  # ── Web BFF ───────────────────────────────────────────────────────────────
   web-bff:
     build: ./services/web-bff
     container_name: tripclip-web-bff
     ports:
       - "8002:8002"
     depends_on:
-      - core-api
+      core-api:
+        condition: service_healthy
     environment:
       - CORE_API_URL=http://core-api:8000
+      - ALLOWED_ORIGINS=
 
 volumes:
   postgres_data:
   redis_data:
   mongo_data:
   qdrant_data:
-  
+  uploads_data:

@@ -11,27 +11,28 @@ class RAGService:
     def __init__(self):
         self.ollama_url = "http://host.docker.internal:11434"
         self.model = "mistral"
+        self._ollama_available: bool = True   # ilk hata sonrası False yapılır
         logger.info("RAGService initialized")
 
     def _generate(self, prompt: str) -> str:
-        """Mistral ile metin üret"""
+        """Mistral ile metin üret. Ollama yoksa hızlıca skip et."""
+        if not self._ollama_available:
+            return ""
         try:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
-                json={
-                    "model": self.model,
-                    "prompt": prompt,
-                    "stream": False
-                },
-                timeout=60
+                json={"model": self.model, "prompt": prompt, "stream": False},
+                timeout=10   # 60s → 10s (Ollama yoksa uzun bekleme anlamsız)
             )
             if response.status_code == 200:
                 return response.json().get("response", "")
             else:
-                logger.error(f"Ollama error: {response.status_code}")
+                logger.warning(f"Ollama error: {response.status_code}")
                 return ""
         except Exception as e:
-            logger.error(f"Ollama request failed: {e}")
+            # Bağlantı hatası → bu session'da Ollama yok, tekrar deneme
+            logger.warning(f"Ollama unavailable, RAG devre dışı: {type(e).__name__}")
+            self._ollama_available = False
             return ""
 
     def generate_travel_tips(self, locations: List[Dict]) -> Dict:

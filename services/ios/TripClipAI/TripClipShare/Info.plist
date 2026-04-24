@@ -8,12 +8,17 @@
 		<dict>
 			<key>NSExtensionActivationRule</key>
 			<dict>
+				<!-- Video dosyası (galeriden paylaş) -->
 				<key>NSExtensionActivationSupportsMovieWithMaxCount</key>
+				<integer>1</integer>
+				<!-- Instagram/web URL paylaşımı (Reels paylaş butonu) -->
+				<key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
 				<integer>1</integer>
 			</dict>
 		</dict>
-		<key>NSExtensionMainStoryboard</key>
-		<string>MainInterface</string>
+		<!-- Storyboard yerine doğrudan class kullan -->
+		<key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.ui-services</string>
 	</dict>

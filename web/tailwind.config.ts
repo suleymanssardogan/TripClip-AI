@@ -19,25 +19,27 @@ const config: Config = {
         ice:       "#E2F0FF",
         muted:     "#4A5568",
         dim:       "#1A2535",
+        gold:      "#F5C842",
+        "bento-orange": "#2A1205",
+        "bento-navy":   "#080B2A",
+        "bento-green":  "#091A12",
+        "bento-purple": "#130A28",
       },
       fontFamily: {
-        display: ["var(--font-jakarta)", "sans-serif"],
-        sans:    ["var(--font-inter)", "sans-serif"],
+        display:  ["var(--font-jakarta)", "sans-serif"],
+        serif:    ["var(--font-playfair)", "Georgia", "serif"],
+        sans:     ["var(--font-inter)", "sans-serif"],
       },
-      backgroundImage: {
-        "grid-pattern": "linear-gradient(rgba(78,205,196,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(78,205,196,0.03) 1px, transparent 1px)",
-        "noise": "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.4'/%3E%3C/svg%3E\")",
-      },
-      backgroundSize: {
-        "grid": "40px 40px",
+      borderRadius: {
+        "4xl": "2rem",
+        "5xl": "2.5rem",
       },
       animation: {
         "float":       "float 6s ease-in-out infinite",
         "glow-pulse":  "glow-pulse 3s ease-in-out infinite",
         "slide-up":    "slide-up 0.6s cubic-bezier(0.16,1,0.3,1) forwards",
         "fade-in":     "fade-in 0.8s ease forwards",
-        "scan":        "scan 3s linear infinite",
-        "border-spin": "border-spin 4s linear infinite",
+        "ticker":      "ticker 25s linear infinite",
       },
       keyframes: {
         float: {
@@ -56,18 +58,16 @@ const config: Config = {
           from: { opacity: "0" },
           to:   { opacity: "1" },
         },
-        scan: {
-          "0%":   { transform: "translateY(-100%)" },
-          "100%": { transform: "translateY(100vh)" },
-        },
-        "border-spin": {
-          "100%": { transform: "rotate(360deg)" },
+        ticker: {
+          from: { transform: "translateX(0)" },
+          to:   { transform: "translateX(-33.33%)" },
         },
       },
       boxShadow: {
         "neon":    "0 0 30px rgba(77,255,195,0.3)",
         "violet":  "0 0 30px rgba(139,92,246,0.3)",
         "coral":   "0 0 30px rgba(255,107,74,0.3)",
+        "gold":    "0 0 30px rgba(245,200,66,0.3)",
         "card":    "0 4px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)",
       },
     },

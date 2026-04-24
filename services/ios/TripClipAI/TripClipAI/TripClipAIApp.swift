@@ -19,10 +19,18 @@ struct TripClipAIApp: App {
                 }
                 .environmentObject(auth)
                 .onOpenURL { url in
-                    if url.scheme == "tripclip", let id = Int(url.lastPathComponent) {
-                        sharedVideoId = id
+                    guard url.scheme == "tripclip" else { return }
+
+                    // tripclip://123  → video sonuçlarına git
+                    if let id = Int(url.lastPathComponent) {
+                        sharedVideoId   = id
                         navigateToVideo = true
+                        return
                     }
+
+                    // tripclip://share?url=https://instagram.com/reel/...
+                    // Share extension'dan gelen Instagram URL'i — şimdilik sadece aç
+                    // (ileride URL'den video indirme eklenebilir)
                 }
             } else {
                 LoginView().environmentObject(auth)

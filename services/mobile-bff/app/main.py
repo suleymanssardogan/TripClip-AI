@@ -17,12 +17,26 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# Mobile BFF: iOS native app CORS göndermez.
+# Yalnızca local geliştirme araçları (Swagger, Postman web) için origin kısıtlaması.
+import os as _os
+_raw = _os.getenv("ALLOWED_ORIGINS", "")
+_MOBILE_ORIGINS = (
+    [o.strip() for o in _raw.split(",") if o.strip()]
+    if _raw
+    else [
+        "http://localhost:3001",    # Next.js (Swagger erişimi için)
+        "http://127.0.0.1:3001",
+        "http://localhost:8000",    # core-api Swagger UI
+    ]
+)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_MOBILE_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 app.include_router(auth.router, prefix="/api/mobile")

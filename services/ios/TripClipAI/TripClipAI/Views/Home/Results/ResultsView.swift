@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import UniformTypeIdentifiers
 
 // MARK: - Ana View
 
@@ -7,27 +8,40 @@ struct ResultsView: View {
     let videoId: Int
     var preloadedData: AIResults? = nil
 
+    @Environment(\.dismiss) private var dismiss
+
     @State private var videoData: VideoResponse?
     @State private var isLoading = true
     @State private var errorMessage: String?
-    @State private var analysisStage = 0
-    @State private var stageTimer: Timer?
     @State private var selectedLocation: EnrichedLocation?
     @State private var showShareSheet = false
     @State private var showInstagramShare = false
     @State private var pdfData: Data?
     @State private var shareImage: UIImage?
 
-    // Analiz aşamaları
-    let stages: [(icon: String, text: String)] = [
-        ("video.fill",               "Video çerçeveleri ayrıştırılıyor..."),
-        ("eye.fill",                 "Görüntüler AI ile analiz ediliyor..."),
-        ("text.viewfinder",          "Metin ve tabelalar okunuyor..."),
-        ("waveform",                 "Ses transkripsiyonu yapılıyor..."),
-        ("brain.head.profile",       "Yerler ve mekanlar tanımlanıyor..."),
-        ("map.fill",                 "Rota optimize ediliyor..."),
-        ("sparkles",                 "Seyahat ipuçları oluşturuluyor..."),
+    // Gerçek zamanlı ilerleme (Redis polling)
+    @State private var progressStage: String = "metadata"
+    @State private var progressPercent: Int = 5
+    @State private var elapsedSeconds: Int = 0
+    @State private var elapsedTimer: Timer?
+
+    // Aşama → (ikon, Türkçe metin)
+    static let stageMap: [String: (icon: String, text: String)] = [
+        "metadata":    ("doc.text.fill",           "Video bilgileri okunuyor..."),
+        "frames":      ("film.stack",              "Kareler çıkarılıyor..."),
+        "ai_parallel": ("eye.fill",                "Görüntü ve ses AI ile analiz ediliyor..."),
+        "ner":         ("brain.head.profile",      "Yer isimleri tanımlanıyor..."),
+        "ner_ocr":     ("text.viewfinder",         "Tabelalar filtreleniyor..."),
+        "geocoding":   ("mappin.and.ellipse",      "Koordinatlar bulunuyor..."),
+        "overpass":    ("map.fill",                "Harita verileri sorgulanıyor..."),
+        "dedup":       ("checkmark.seal.fill",     "Mekanlar temizleniyor..."),
+        "route":       ("point.3.filled.connected.trianglepath.dotted", "Rota optimize ediliyor..."),
+        "rag":         ("sparkles",                "Seyahat ipuçları oluşturuluyor..."),
     ]
+
+    var currentStageInfo: (icon: String, text: String) {
+        ResultsView.stageMap[progressStage] ?? ("cpu.fill", "İşleniyor...")
+    }
 
     var body: some View {
         ZStack {
@@ -53,13 +67,14 @@ struct ResultsView: View {
             if let video = videoData {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
+                        // Instagram Stories'e direkt paylaş
                         Button {
-                            shareImage = TripShareCard.render(video: video)
-                            showShareSheet = true
+                            shareToInstagramStories(image: TripShareCard.render(video: video))
                         } label: {
-                            Label("Instagram'da Paylaş", systemImage: "camera.filters")
+                            Label("Instagram Story'de Paylaş", systemImage: "camera.filters")
                         }
 
+                        // Sistem share sheet (her uygulamaya)
                         Button {
                             shareImage = TripShareCard.render(video: video)
                             showShareSheet = true
@@ -97,78 +112,183 @@ struct ResultsView: View {
                                           duration: nil, aiResults: preloaded)
                 isLoading = false
             } else {
-                startStageAnimation()
+                startElapsedTimer()
                 await pollVideoStatus()
             }
         }
-        .onDisappear { stageTimer?.invalidate() }
+        .onDisappear { elapsedTimer?.invalidate() }
     }
 
     // MARK: - Analiz Yükleme Ekranı
 
     var analysisLoadingView: some View {
-        VStack(spacing: 32) {
-            // Dönen ikon
+        VStack(spacing: 36) {
+            Spacer()
+
+            // Dairesel progress
             ZStack {
+                // Arka plan halkası
                 Circle()
-                    .fill(Color.blue.opacity(0.1))
-                    .frame(width: 110, height: 110)
+                    .stroke(Color.white.opacity(0.08), lineWidth: 6)
+                    .frame(width: 130, height: 130)
+
+                // Gerçek ilerleme yayı
                 Circle()
-                    .stroke(Color.blue.opacity(0.3), lineWidth: 2)
-                    .frame(width: 110, height: 110)
-                Image(systemName: stages[analysisStage].icon)
-                    .font(.system(size: 36))
-                    .foregroundColor(.blue)
-                    .id(analysisStage) // animasyon için
-                    .transition(.scale.combined(with: .opacity))
-                    .animation(.spring(response: 0.4), value: analysisStage)
+                    .trim(from: 0, to: CGFloat(progressPercent) / 100)
+                    .stroke(
+                        LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing),
+                        style: StrokeStyle(lineWidth: 6, lineCap: .round)
+                    )
+                    .frame(width: 130, height: 130)
+                    .rotationEffect(.degrees(-90))
+                    .animation(.easeInOut(duration: 0.6), value: progressPercent)
+
+                // İkon + yüzde
+                VStack(spacing: 4) {
+                    Image(systemName: currentStageInfo.icon)
+                        .font(.system(size: 28))
+                        .foregroundColor(.blue)
+                        .id(progressStage)
+                        .transition(.scale.combined(with: .opacity))
+                        .animation(.spring(response: 0.4), value: progressStage)
+
+                    Text("%\(progressPercent)")
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.6))
+                }
             }
 
-            VStack(spacing: 8) {
+            // Aşama metni
+            VStack(spacing: 6) {
                 Text("AI Analiz Ediyor")
                     .font(.title2).fontWeight(.bold)
                     .foregroundColor(.white)
-                Text(stages[analysisStage].text)
+
+                Text(currentStageInfo.text)
                     .font(.subheadline)
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(.white.opacity(0.55))
                     .multilineTextAlignment(.center)
-                    .animation(.easeInOut, value: analysisStage)
-                    .id(analysisStage)
+                    .id(progressStage)
+                    .transition(.opacity)
+                    .animation(.easeInOut(duration: 0.35), value: progressStage)
             }
 
-            // Aşama ilerleme barları
-            HStack(spacing: 6) {
-                ForEach(0..<stages.count, id: \.self) { i in
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(i <= analysisStage ? Color.blue : Color.white.opacity(0.15))
-                        .frame(height: 4)
-                        .animation(.easeInOut(duration: 0.4), value: analysisStage)
+            // Adım noktaları
+            let orderedStages = ["metadata","frames","ai_parallel","ner","ner_ocr","geocoding","overpass","dedup","route","rag"]
+            let currentIdx = orderedStages.firstIndex(of: progressStage) ?? 0
+            HStack(spacing: 5) {
+                ForEach(Array(orderedStages.enumerated()), id: \.element) { i, _ in
+                    Circle()
+                        .fill(i <= currentIdx ? Color.blue : Color.white.opacity(0.15))
+                        .frame(width: i == currentIdx ? 10 : 6, height: i == currentIdx ? 10 : 6)
+                        .animation(.spring(response: 0.3), value: progressStage)
                 }
             }
-            .padding(.horizontal, 40)
 
-            Text("Bu işlem 1-5 dakika sürebilir")
+            // Geçen süre
+            Text("⏱ \(formattedElapsed())  ·  Bu işlem 1-3 dakika sürebilir")
                 .font(.caption)
-                .foregroundColor(.white.opacity(0.35))
+                .foregroundColor(.white.opacity(0.3))
+
+            Spacer()
         }
         .padding(40)
+    }
+
+    func formattedElapsed() -> String {
+        let m = elapsedSeconds / 60
+        let s = elapsedSeconds % 60
+        return m > 0 ? "\(m)d \(String(format: "%02d", s))s" : "\(s)s"
     }
 
     // MARK: - Hata
 
     func errorView(message: String) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 50))
-                .foregroundColor(.orange)
-            Text(message)
+        VStack(spacing: 0) {
+            Spacer()
+
+            // İkon
+            ZStack {
+                Circle()
+                    .fill(Color.red.opacity(0.12))
+                    .frame(width: 110, height: 110)
+                Circle()
+                    .stroke(Color.red.opacity(0.25), lineWidth: 1)
+                    .frame(width: 110, height: 110)
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 44))
+                    .foregroundStyle(
+                        LinearGradient(colors: [.orange, .red], startPoint: .top, endPoint: .bottom)
+                    )
+            }
+
+            Spacer().frame(height: 28)
+
+            Text("İşlem Başarısız")
+                .font(.title2).fontWeight(.bold)
                 .foregroundColor(.white)
+
+            Spacer().frame(height: 10)
+
+            Text(friendlyError(message))
+                .font(.subheadline)
+                .foregroundColor(.white.opacity(0.55))
                 .multilineTextAlignment(.center)
-                .padding(.horizontal)
-            Button("Tekrar Dene") { Task { await pollVideoStatus() } }
-                .foregroundColor(.blue)
+                .padding(.horizontal, 32)
+
+            Spacer().frame(height: 36)
+
+            // Tekrar dene
+            Button {
+                Task {
+                    await MainActor.run {
+                        errorMessage = nil
+                        isLoading = true
+                        progressPercent = 5
+                        progressStage = "metadata"
+                        elapsedSeconds = 0
+                    }
+                    startElapsedTimer()
+                    await pollVideoStatus()
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.clockwise")
+                    Text("Tekrar Dene")
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(Color.blue)
+                .foregroundColor(.white)
+                .cornerRadius(14)
+                .padding(.horizontal, 40)
+            }
+
+            Spacer().frame(height: 16)
+
+            // Geri dön
+            Button("Ana Sayfaya Dön") {
+                dismiss()
+            }
+            .font(.subheadline)
+            .foregroundColor(.white.opacity(0.4))
+
+            Spacer()
         }
         .padding()
+    }
+
+    func friendlyError(_ raw: String) -> String {
+        if raw.contains("timeout") || raw.contains("timed out") {
+            return "Video işleme zaman aşımına uğradı.\nDaha kısa bir video deneyin."
+        }
+        if raw.contains("failed") || raw.contains("başarısız") {
+            return "Video işlenemedi.\nFarklı bir video dosyası deneyin."
+        }
+        if raw.contains("404") { return "Video bulunamadı." }
+        if raw.contains("500") { return "Sunucu hatası. Lütfen daha sonra tekrar deneyin." }
+        return "Beklenmedik bir hata oluştu.\nLütfen tekrar deneyin."
     }
 
     // MARK: - Sonuçlar
@@ -392,39 +512,83 @@ struct ResultsView: View {
         return "storefront.fill"
     }
 
+    // MARK: - Instagram Stories Paylaşım
+
+    func shareToInstagramStories(image: UIImage) {
+        let storiesURL = URL(string: "instagram-stories://share?source_application=com.suleymanssardogan.TripClipAI")!
+
+        guard UIApplication.shared.canOpenURL(storiesURL) else {
+            // Instagram kurulu değil → sistem share sheet'e düş
+            shareImage     = image
+            showShareSheet = true
+            return
+        }
+
+        guard let imageData = image.pngData() else { return }
+
+        // Görseli pasteboard'a koy, Instagram oradan okur
+        UIPasteboard.general.setItems(
+            [[UTType.png.identifier: imageData]],
+            options: [.expirationDate: Date().addingTimeInterval(300)] // 5 dk geçerli
+        )
+
+        UIApplication.shared.open(storiesURL)
+    }
+
     // MARK: - Polling
 
-    func startStageAnimation() {
-        stageTimer = Timer.scheduledTimer(withTimeInterval: 12, repeats: true) { _ in
-            withAnimation {
-                analysisStage = (analysisStage + 1) % stages.count
-            }
+    func startElapsedTimer() {
+        elapsedSeconds = 0
+        elapsedTimer?.invalidate()
+        elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            elapsedSeconds += 1
         }
     }
 
     func pollVideoStatus() async {
         isLoading = true
-        for _ in 0..<120 {
+        // Her 3 saniyede video durumunu kontrol et; her 2 saniyede progress'i güncelle
+        var pollCount = 0
+        let maxPolls = 200 // ~10 dakika
+        while pollCount < maxPolls {
+            pollCount += 1
+
+            // Progress güncelle (her iterasyonda — sunucudan gerçek değer)
+            if let prog = try? await APIService.shared.getVideoProgress(id: videoId) {
+                await MainActor.run {
+                    withAnimation {
+                        if let s = prog.stage   { progressStage   = s }
+                        if let p = prog.percent { progressPercent = p }
+                    }
+                }
+            }
+
+            // Video durumunu kontrol et
             do {
                 let video = try await APIService.shared.getVideoStatus(id: videoId)
                 if video.status == "completed" {
                     PersistenceService.shared.saveVideoResult(video)
-                    stageTimer?.invalidate()
-                    await MainActor.run { videoData = video; isLoading = false }
+                    elapsedTimer?.invalidate()
+                    await MainActor.run {
+                        withAnimation { progressPercent = 100 }
+                        videoData = video
+                        isLoading = false
+                    }
                     return
                 } else if video.status == "failed" {
-                    stageTimer?.invalidate()
+                    elapsedTimer?.invalidate()
                     await MainActor.run { errorMessage = "Video işleme başarısız oldu."; isLoading = false }
                     return
                 }
-                try await Task.sleep(nanoseconds: 5_000_000_000)
             } catch {
-                stageTimer?.invalidate()
+                elapsedTimer?.invalidate()
                 await MainActor.run { errorMessage = error.localizedDescription; isLoading = false }
                 return
             }
+
+            try? await Task.sleep(nanoseconds: 3_000_000_000) // 3s
         }
-        stageTimer?.invalidate()
+        elapsedTimer?.invalidate()
         await MainActor.run { errorMessage = "Zaman aşımı — lütfen tekrar deneyin."; isLoading = false }
     }
 }
@@ -495,95 +659,146 @@ struct LocationDetailSheet: View {
     let location: EnrichedLocation
     @Environment(\.dismiss) var dismiss
 
+    private var hasCoords: Bool {
+        location.placeData?.location?.lat != nil
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
                 Color(hex: "0A0E1A").ignoresSafeArea()
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 0) {
 
-                        // Mini harita
+                        // ── Mini Harita ─────────────────────────────────
                         if let lat = location.placeData?.location?.lat,
                            let lng = location.placeData?.location?.lng {
                             let coord = CLLocationCoordinate2D(latitude: lat, longitude: lng)
-                            Map(coordinateRegion: .constant(
-                                MKCoordinateRegion(center: coord,
-                                                   latitudinalMeters: 2000,
-                                                   longitudinalMeters: 2000)
-                            ), annotationItems: [location]) { loc in
-                                MapPin(coordinate: coord, tint: .blue)
-                            }
-                            .frame(height: 200)
-                            .cornerRadius(16)
-                        }
-
-                        // Bilgiler
-                        VStack(alignment: .leading, spacing: 12) {
-                            if let cat = location.placeData?.category {
-                                Text(categoryEmoji(cat) + " " + cat)
-                                    .font(.caption).fontWeight(.semibold)
-                                    .foregroundColor(.orange)
-                                    .padding(.horizontal, 10).padding(.vertical, 4)
-                                    .background(Color.orange.opacity(0.12))
-                                    .cornerRadius(8)
-                            }
-
-                            Text(location.originalName.capitalized)
-                                .font(.title2).fontWeight(.bold).foregroundColor(.white)
-
-                            if let name = location.placeData?.name {
-                                Text(name)
-                                    .font(.subheadline).foregroundColor(.white.opacity(0.5))
-                            }
-
-                            if let imp = location.placeData?.importance {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "star.fill").font(.caption).foregroundColor(.yellow)
-                                    Text("Önem skoru: \(String(format: "%.2f", imp))")
-                                        .font(.caption).foregroundColor(.white.opacity(0.5))
-                                }
-                            }
-                        }
-
-                        // Apple Maps butonu
-                        if let lat = location.placeData?.location?.lat,
-                           let lng = location.placeData?.location?.lng {
-                            Button {
-                                let url = URL(string: "maps://?daddr=\(lat),\(lng)&dirflg=d")!
-                                UIApplication.shared.open(url)
-                            } label: {
-                                HStack {
+                            DetailMapView(coordinate: coord, title: location.originalName.capitalized)
+                                .frame(height: 220)
+                                .ignoresSafeArea(edges: .horizontal)
+                        } else {
+                            // Koordinat yok — placeholder
+                            ZStack {
+                                Color.white.opacity(0.04)
+                                VStack(spacing: 8) {
                                     Image(systemName: "map.fill")
-                                    Text("Apple Maps'te Aç")
-                                        .fontWeight(.semibold)
+                                        .font(.system(size: 36))
+                                        .foregroundColor(.white.opacity(0.2))
+                                    Text("Konum bulunamadı")
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.3))
                                 }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.blue)
-                                .foregroundColor(.white)
-                                .cornerRadius(14)
+                            }
+                            .frame(height: 120)
+                        }
+
+                        VStack(alignment: .leading, spacing: 20) {
+
+                            // ── Başlık Bilgi Kartı ───────────────────────
+                            VStack(alignment: .leading, spacing: 10) {
+                                // Kategori rozeti
+                                if let cat = location.placeData?.category {
+                                    Text(categoryEmoji(cat) + "  " + cat)
+                                        .font(.caption).fontWeight(.semibold)
+                                        .foregroundColor(.orange)
+                                        .padding(.horizontal, 10).padding(.vertical, 5)
+                                        .background(Color.orange.opacity(0.12))
+                                        .cornerRadius(20)
+                                }
+
+                                Text(location.originalName.capitalized)
+                                    .font(.title2).fontWeight(.bold).foregroundColor(.white)
+
+                                if let name = location.placeData?.name,
+                                   name.lowercased() != location.originalName.lowercased() {
+                                    Text(name)
+                                        .font(.subheadline).foregroundColor(.white.opacity(0.45))
+                                }
                             }
 
-                            Button {
-                                let url = URL(string: "https://www.google.com/maps/search/?api=1&query=\(lat),\(lng)")!
-                                UIApplication.shared.open(url)
-                            } label: {
-                                HStack {
-                                    Image(systemName: "globe")
-                                    Text("Google Maps'te Aç")
-                                        .fontWeight(.semibold)
+                            // ── Koordinat bilgisi ────────────────────────
+                            if let lat = location.placeData?.location?.lat,
+                               let lng = location.placeData?.location?.lng {
+                                HStack(spacing: 20) {
+                                    DetailInfoTile(icon: "location.fill", label: "Enlem",  value: String(format: "%.4f°", lat), color: .blue)
+                                    DetailInfoTile(icon: "location.fill", label: "Boylam", value: String(format: "%.4f°", lng), color: .purple)
                                 }
-                                .frame(maxWidth: .infinity)
-                                .padding()
-                                .background(Color.white.opacity(0.08))
-                                .foregroundColor(.white)
-                                .cornerRadius(14)
-                                .overlay(RoundedRectangle(cornerRadius: 14)
-                                    .stroke(Color.white.opacity(0.1), lineWidth: 1))
+                            }
+
+                            // ── Önem skoru ──────────────────────────────
+                            if let imp = location.placeData?.importance {
+                                let pct = min(Int(imp * 100), 100)
+                                VStack(alignment: .leading, spacing: 6) {
+                                    HStack {
+                                        Image(systemName: "star.fill").font(.caption).foregroundColor(.yellow)
+                                        Text("Popülerlik")
+                                            .font(.caption).foregroundColor(.white.opacity(0.5))
+                                        Spacer()
+                                        Text("%\(pct)")
+                                            .font(.caption).fontWeight(.bold).foregroundColor(.white)
+                                    }
+                                    GeometryReader { geo in
+                                        ZStack(alignment: .leading) {
+                                            RoundedRectangle(cornerRadius: 4)
+                                                .fill(Color.white.opacity(0.08))
+                                            RoundedRectangle(cornerRadius: 4)
+                                                .fill(LinearGradient(colors: [.yellow, .orange],
+                                                                     startPoint: .leading, endPoint: .trailing))
+                                                .frame(width: geo.size.width * CGFloat(pct) / 100)
+                                        }
+                                    }
+                                    .frame(height: 6)
+                                }
+                                .padding(14)
+                                .background(Color.white.opacity(0.05))
+                                .cornerRadius(12)
+                            }
+
+                            // ── Harita Butonları ─────────────────────────
+                            if let lat = location.placeData?.location?.lat,
+                               let lng = location.placeData?.location?.lng {
+                                VStack(spacing: 10) {
+                                    Button {
+                                        let url = URL(string: "maps://?daddr=\(lat),\(lng)&dirflg=d")!
+                                        UIApplication.shared.open(url)
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: "map.fill")
+                                            Text("Apple Maps'te Yol Tarifi Al")
+                                                .fontWeight(.semibold)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 15)
+                                        .background(Color.blue)
+                                        .foregroundColor(.white)
+                                        .cornerRadius(14)
+                                    }
+
+                                    Button {
+                                        let encoded = location.originalName
+                                            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+                                        let url = URL(string: "https://www.google.com/maps/search/?api=1&query=\(encoded)&center=\(lat),\(lng)")!
+                                        UIApplication.shared.open(url)
+                                    } label: {
+                                        HStack {
+                                            Image(systemName: "globe")
+                                            Text("Google Maps'te Ara")
+                                                .fontWeight(.semibold)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 15)
+                                        .background(Color.white.opacity(0.07))
+                                        .foregroundColor(.white)
+                                        .cornerRadius(14)
+                                        .overlay(RoundedRectangle(cornerRadius: 14)
+                                            .stroke(Color.white.opacity(0.1), lineWidth: 1))
+                                    }
+                                }
                             }
                         }
+                        .padding(20)
                     }
-                    .padding()
                 }
             }
             .navigationTitle(location.originalName.capitalized)
@@ -608,15 +823,75 @@ struct LocationDetailSheet: View {
     }
 }
 
-// MARK: - Harita
+// MARK: - Yardımcı: Detay Bilgi Kartı
+
+struct DetailInfoTile: View {
+    let icon: String
+    let label: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Image(systemName: icon).font(.caption2).foregroundColor(color)
+                Text(label).font(.caption2).foregroundColor(.white.opacity(0.4))
+            }
+            Text(value)
+                .font(.system(.caption, design: .monospaced))
+                .fontWeight(.medium)
+                .foregroundColor(.white)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.05))
+        .cornerRadius(10)
+    }
+}
+
+// MARK: - Detay Harita (UIKit wrapper — koordinat pin'i)
+
+struct DetailMapView: UIViewRepresentable {
+    let coordinate: CLLocationCoordinate2D
+    let title: String
+
+    func makeUIView(context: Context) -> MKMapView {
+        let map = MKMapView()
+        map.mapType = .standard
+        map.isScrollEnabled = false
+        map.isZoomEnabled = false
+        map.isUserInteractionEnabled = false
+        map.layer.cornerRadius = 0
+        return map
+    }
+
+    func updateUIView(_ mapView: MKMapView, context: Context) {
+        mapView.removeAnnotations(mapView.annotations)
+        let pin = MKPointAnnotation()
+        pin.coordinate = coordinate
+        pin.title = title
+        mapView.addAnnotation(pin)
+        mapView.setRegion(
+            MKCoordinateRegion(center: coordinate,
+                               latitudinalMeters: 1500,
+                               longitudinalMeters: 1500),
+            animated: false
+        )
+    }
+}
+
+// MARK: - Rota Haritası (numaralı pinler + çizgi)
 
 struct TripMapView: UIViewRepresentable {
     let locations: [EnrichedLocation]
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
         map.mapType = .standard
         map.showsUserLocation = false
+        map.delegate = context.coordinator
         return map
     }
 
@@ -630,28 +905,77 @@ struct TripMapView: UIViewRepresentable {
                   let lng = loc.placeData?.location?.lng else { continue }
             let c = CLLocationCoordinate2D(latitude: lat, longitude: lng)
             coords.append(c)
-            let pin = MKPointAnnotation()
+            let pin = NumberedAnnotation(index: i + 1)
             pin.coordinate = c
-            pin.title = "\(i+1). \(loc.originalName.capitalized)"
+            pin.title = "\(i + 1). \(loc.originalName.capitalized)"
             mapView.addAnnotation(pin)
         }
 
-        // Rota çizgisi
         if coords.count > 1 {
             let polyline = MKPolyline(coordinates: coords, count: coords.count)
             mapView.addOverlay(polyline)
         }
 
-        // Zoom
         if !coords.isEmpty {
             let rect = coords.reduce(MKMapRect.null) { rect, c in
-                let point = MKMapPoint(c)
-                let r = MKMapRect(x: point.x, y: point.y, width: 0, height: 0)
-                return rect.union(r)
+                let pt = MKMapPoint(c)
+                return rect.union(MKMapRect(x: pt.x, y: pt.y, width: 0, height: 0))
             }
-            mapView.setVisibleMapRect(rect, edgePadding: UIEdgeInsets(top: 40, left: 40, bottom: 40, right: 40), animated: false)
+            mapView.setVisibleMapRect(
+                rect,
+                edgePadding: UIEdgeInsets(top: 44, left: 44, bottom: 44, right: 44),
+                animated: false
+            )
         }
     }
+
+    // MARK: Coordinator (delegate)
+    class Coordinator: NSObject, MKMapViewDelegate {
+        func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            if let polyline = overlay as? MKPolyline {
+                let r = MKPolylineRenderer(polyline: polyline)
+                r.strokeColor = UIColor.systemBlue.withAlphaComponent(0.7)
+                r.lineWidth = 2.5
+                r.lineDashPattern = [6, 4]
+                return r
+            }
+            return MKOverlayRenderer(overlay: overlay)
+        }
+
+        func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
+            guard let numbered = annotation as? NumberedAnnotation else { return nil }
+            let id = "numbered"
+            let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
+                ?? MKAnnotationView(annotation: annotation, reuseIdentifier: id)
+            view.annotation = annotation
+
+            // Numaralı daire çiz
+            let size: CGFloat = 26
+            let label = UILabel(frame: CGRect(x: 0, y: 0, width: size, height: size))
+            label.text = "\(numbered.index)"
+            label.textAlignment = .center
+            label.font = .boldSystemFont(ofSize: 11)
+            label.textColor = .white
+            label.backgroundColor = UIColor.systemBlue
+            label.layer.cornerRadius = size / 2
+            label.layer.masksToBounds = true
+
+            UIGraphicsBeginImageContextWithOptions(CGSize(width: size, height: size), false, 0)
+            label.layer.render(in: UIGraphicsGetCurrentContext()!)
+            view.image = UIGraphicsGetImageFromCurrentImageContext()
+            UIGraphicsEndImageContext()
+
+            view.centerOffset = CGPoint(x: 0, y: -size / 2)
+            view.canShowCallout = true
+            return view
+        }
+    }
+}
+
+class NumberedAnnotation: MKPointAnnotation {
+    let index: Int
+    init(index: Int) { self.index = index; super.init() }
+    required init?(coder: NSCoder) { fatalError() }
 }
 
 // MARK: - FlowLayout

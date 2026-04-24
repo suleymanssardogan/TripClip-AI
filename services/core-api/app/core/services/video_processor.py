@@ -1,27 +1,16 @@
 from pathlib import Path
 import uuid
-import ffmpeg
 import re as _re
 from difflib import SequenceMatcher
 from typing import List, Dict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import time
-import redis as _redis
 import json as _json
-from app.ml.ocr_service import OCRService
-from app.ml.computer_vision import ObjectDetectionService
-from app.ml.computer_vision import LandmarkDetectionService
-from app.ml.speech_to_text import AudioProcessingService
-from app.ml.ner_service import NERService
-from app.ml.places_service import PlacesService
-from app.ml.location_deduplicator import LocationDeduplicator
-from app.ml.qdrant_service import QdrantService
-from app.ml.route_optimizer import RouteOptimizer
-from app.ml.rag_service import RAGService
 
 # Redis progress store (opsiyonel — bağlantı yoksa atla)
 try:
+    import redis as _redis
     _progress_redis = _redis.Redis(host="redis", port=6379, db=1, decode_responses=True)
     _progress_redis.ping()
 except Exception:
@@ -48,24 +37,40 @@ class VideoProcessingService:
 
     def __init__(self):
         self.frames_dir = Path("/app/uploads/frames")
-        self.frames_dir.mkdir(parents=True,exist_ok=True)
-        # AI: Object detection service
-        self.detector = ObjectDetectionService()
-        self.vision_detector = LandmarkDetectionService()
-        self.ocr = OCRService()
-        self.audio_processor = AudioProcessingService()
-        self.ner = NERService()
-        self.places = PlacesService()
-        self.deduplicator = LocationDeduplicator(distance_threshold_km=2.0)
+        self.frames_dir.mkdir(parents=True, exist_ok=True)
         # Hız: video uzunluğuna göre adaptif FPS seçimi
         self.base_fps = 0.25   # her 4 saniyede 1 frame (0.5'ten düşürüldü)
-        self.qdrant = QdrantService()
-        self.route_optimizer = RouteOptimizer()
-        self.rag = RAGService()
+
+        # ML servisleri — lazy import (test ortamında kurulu olmayabilir)
+        try:
+            import ffmpeg as _ffmpeg_module  # noqa: F401 — varlık kontrolü
+            from app.ml.computer_vision import ObjectDetectionService, LandmarkDetectionService
+            from app.ml.ocr_service import OCRService
+            from app.ml.speech_to_text import AudioProcessingService
+            from app.ml.ner_service import NERService
+            from app.ml.places_service import PlacesService
+            from app.ml.location_deduplicator import LocationDeduplicator
+            from app.ml.qdrant_service import QdrantService
+            from app.ml.route_optimizer import RouteOptimizer
+            from app.ml.rag_service import RAGService
+            self.detector = ObjectDetectionService()
+            self.vision_detector = LandmarkDetectionService()
+            self.ocr = OCRService()
+            self.audio_processor = AudioProcessingService()
+            self.ner = NERService()
+            self.places = PlacesService()
+            self.deduplicator = LocationDeduplicator(distance_threshold_km=2.0)
+            self.qdrant = QdrantService()
+            self.route_optimizer = RouteOptimizer()
+            self.rag = RAGService()
+            self._ml_available = True
+        except ImportError as e:
+            logger.warning(f"ML servisleri yüklenemedi (test modu?): {e}")
+            self._ml_available = False
 
 
     
-    def process_video(self,video_path:str,video_id:int) -> Dict:
+    def process_video(self, video_path: str, video_id: int) -> Dict:
         """
         Videoyu İşle
         1. Metadata çıkar
@@ -74,6 +79,11 @@ class VideoProcessingService:
         4. Google Vision: Landmark Detection
         5. Text Exraction (OCR)
         """
+        if not self._ml_available:
+            raise RuntimeError("ML servisleri mevcut değil — Docker ortamında çalıştırın")
+
+        import ffmpeg  # Docker'da her zaman mevcut
+
         start_time = time.time()
         try:
             logger.info(f"Processing video {video_id}")
@@ -94,6 +104,9 @@ class VideoProcessingService:
 
             # 3. Thumbnail
             thumbnail = self._create_thumbnail(frames[0] if frames else None)
+
+            t_frames = time.time()
+            logger.info(f"⏱ Frame extraction: {t_frames - start_time:.1f}s")
 
             # ── PARALEL AŞAMA: Vision + OCR + Audio aynı anda ─────────────────
             # Her biri farklı kaynak kullandığından paralel çalıştırmak güvenli:
@@ -117,19 +130,20 @@ class VideoProcessingService:
             detections = self.detector.remove_duplicate_detections(detections)
             landmarks  = self.detector.get_landmark_candidates(detections)
             summary    = self.detector.get_detection_summary(detections)
+            t_parallel = time.time()
+            logger.info(f"⏱ Paralel AI (Vision+OCR+Whisper): {t_parallel - t_frames:.1f}s")
             logger.info(f"✅ Paralel AI tamamlandı — OCR: {len(extracted_texts)} metin, "
                         f"Vision: {len(vision_landmarks)} landmark")
 
-            # 7. NER: audio + OCR text birleştirip lokasyon çıkar
+            # 7. NER: sadece audio transcript üzerinden lokasyon çıkar
+            # OCR metinleri zaten display_pois pipeline'ından geçiyor — NER'e de
+            # verilirse 7+ tekrar lokasyon çıkıyor ve geocoding 2x yavaşlıyor.
             _set_progress(video_id, "ner", 55)
             extracted_locations = []
-            combined_text = ""
-            if transcription and transcription.get("transcript"):
-                combined_text += transcription["transcript"] + " "
-            if extracted_texts:
-                combined_text += " ".join(extracted_texts)
-            if combined_text.strip():
-                extracted_locations = self.ner.extract_locations_from_transcript(combined_text)
+            transcript_text = (transcription.get("transcript", "") if transcription else "").strip()
+            if transcript_text:
+                extracted_locations = self.ner.extract_locations_from_transcript(transcript_text)
+                logger.info(f"NER ({len(transcript_text)} char transcript) → {len(extracted_locations)} lokasyon")
 
             # ── OCR POI filtreleme ──────────────────────────────────────────────
 
@@ -162,24 +176,51 @@ class VideoProcessingService:
                 "büfesi", "fırını", "pastanesi", "lokantası", "restoranı",
                 # Büyük şehirler NER'den gelsin, OCR'dan değil
                 "istanbul", "ankara", "izmir",
+                # Menü / tabela / sosyal medya kelimeleri
+                "market", "deneme", "gerekenler", "durumu", "masaya", "masasi",
+                "lutfen", "yiyecek", "icecek", "siparis", "ucretsiz", "ucret",
+                "ntep", "disin", "disi", "bufe", "bufesi",
             }
 
             # Mekan türü sinyal kelimeleri (tarihi/turistik/doğa)
             geo_signals = {
                 "han", "kafe", "cafe", "restoran", "müze", "cami", "kilise",
-                "köprü", "kalesi", "sarayı", "parkı", "gölü", "plajı", "şelalesi",
-                "mağarası", "tepesi", "dağı", "vadisi", "konak", "çarşı",
-                "pazar", "hamam", "türbe", "anıt", "kervansaray", "ören",
-                "sokağı", "mahallesi", "kapısı", "kulesi", "camii", "hamamı",
-                "bahçesi", "ormanı", "göleti", "barajı", "köprüsü",
+                "köprü", "kale", "kalesi", "kaleici", "sarayı", "parkı", "gölü",
+                "plajı", "plaji",         # ASCII-OCR varyantı (ı→i)
+                "şelalesi", "selalesi",   # ASCII-OCR varyantı
+                "mağarası", "magarasi", "tepesi", "dağı", "dagi", "vadisi",
+                "konak", "çarşı", "carsi", "pazar", "hamam", "türbe", "turbe",
+                "anıt", "anit", "kervansaray", "ören",
+                "sokağı", "sokagi", "mahallesi", "kapısı", "kapisi",
+                "kulesi", "camii", "hamamı", "hamami",
+                "bahçesi", "bahcesi", "ormanı", "ormani", "göleti", "barajı",
+                "köprüsü", "koprüsü",
                 # Doğal coğrafya
-                "koyu", "körfez", "limanı", "kayalığı", "adası", "yarımadası",
-                "kanyonu", "platosu", "ovasına", "göleti", "çayı", "irmağı",
-                "yaylası", "ormanı", "milliparkı",
+                "koyu", "körfez", "korfez", "limanı", "limani",
+                "kayalığı", "kayaligi", "adası", "adasi", "yarımadası",
+                "kanyonu", "platosu", "göleti", "çayı", "cayi", "irmağı",
+                "yaylası", "yaylasi", "milliparkı",
                 # Ören / tarihi
-                "harabeleri", "höyüğü", "mezarlığı", "kilisesi", "manastırı",
-                "hamamı", "köprüsü", "kalıntıları",
+                "harabeleri", "höyüğü", "hoyugu", "mezarlığı", "mezarligi",
+                "kilisesi", "manastırı", "manastiri", "kalıntıları",
             }
+
+            def _ascii_fold(s: str) -> str:
+                """OCR hatalarını tolere etmek için Türkçe → ASCII dönüşümü."""
+                return (s.replace("ğ", "g").replace("ü", "u").replace("ş", "s")
+                         .replace("ı", "i").replace("ö", "o").replace("ç", "c")
+                         .replace("â", "a").replace("î", "i").replace("û", "u"))
+
+            def _has_geo_signal(text: str) -> bool:
+                """Geo sinyal içeriyor mu? ASCII-fold ile OCR ı→i hatalarını tolere eder."""
+                t_l = tr_lower(text)
+                if any(s in t_l for s in geo_signals):
+                    return True
+                # Geo sinyal ASCII-folded olarak da dene
+                t_f = _ascii_fold(t_l)
+                if any(_ascii_fold(s) in t_f for s in geo_signals):
+                    return True
+                return False
 
             # İşletme türü sinyal kelimeleri (Nominatim'e gönderilmez, sadece gösterimde)
             biz_signals = {
@@ -275,56 +316,59 @@ class VideoProcessingService:
                         return True
                 return False
 
-            display_pois = []
+            # ── Aşama 1: Noise filtresi + dedup (hızlı) ─────────────────────────
+            candidate_pois = []
             seen_display = set()
-            seen_norms: list = []   # fuzzy dedup için normalize edilmiş liste
-            MAX_DISPLAY_POIS = 18   # çok fazla item → Overpass zinciri saatler sürer
+            seen_norms: list = []
 
             if extracted_texts:
                 for t in extracted_texts:
-                    if len(display_pois) >= MAX_DISPLAY_POIS:
-                        logger.info(f"display_pois sınırına ulaşıldı ({MAX_DISPLAY_POIS}), kalan atlandı")
-                        break
-                    t_clean = _split_camelcase(t.strip())  # "ManavgatSelalesi" → "Manavgat Selalesi"
-                    t_lower = tr_lower(t_clean)   # Türkçe-doğru lowercase (İ→i fix)
+                    t_clean = _split_camelcase(t.strip())
+                    t_lower = tr_lower(t_clean)
                     if is_noise(t_clean): continue
-                    if t_lower in seen_display: continue  # exact dedup
-                    if _is_fuzzy_dup(t_clean, seen_norms): continue  # fuzzy dedup
-
+                    if t_lower in seen_display: continue
+                    if _is_fuzzy_dup(t_clean, seen_norms): continue
                     words = t_clean.split()
-
-                    # Tek kelime + generic tip kelimesi → yer ismi değil, atla
                     if len(words) == 1 and t_lower in generic_type_words:
-                        logger.debug(f"Generic tip kelimesi atlandı: '{t_clean}'")
                         continue
+                    seen_display.add(t_lower)
+                    seen_norms.append(_norm_for_dedup(t_clean))
+                    candidate_pois.append(t_clean)
 
-                    has_signal = any(s in t_lower for s in all_poi_signals)
-
-                    # Heuristic eşleme: sinyal kelimesi VEYA 2+ kelime
-                    # NER.is_location() her satır için çağrılmıyordu — 50 text × 2s BERT = 100s+
-                    # NER zaten audio+OCR combined text üzerinden extract_locations ile çalışıyor.
-                    heuristic_match = has_signal or len(words) >= 2
-
-                    if heuristic_match:
-                        seen_display.add(t_lower)
-                        seen_norms.append(_norm_for_dedup(t_clean))
-                        display_pois.append(t_clean)
-
-            # ── Liste 2: Geocoding POI'ları (Nominatim'e gönderilecek, sıkı) ──
-            # Sadece geo sinyali içerenler veya 2+ kelime + geo sinyal
-            geocode_pois = []
-            seen_geo = set()
-            for t in display_pois:
-                t_lower = t.lower()
-                has_geo = any(s in t_lower for s in geo_signals)
-                if has_geo and t_lower not in seen_geo:
-                    seen_geo.add(t_lower)
-                    geocode_pois.append(t)
+            # ── Aşama 2: Batch NER filtresi (1 inference — hardcode yok) ─────────
+            # Tüm adaylar tek seferde NER'den geçer. Model LOC/GPE olmayanları atar.
+            # "LUTFEN BU MASAYA" → LOC değil → atılır (video bağımsız, genellenebilir)
+            # "Duden Selalesi"   → LOC       → geçer
+            #
+            # Fallback: NER modeli ASCII Türkçe ("Goynuk" yerine "Göynük") isimlerini
+            # düşük skorda ret edebilir. Sıfır sonuçta geo_signal heuristic devreye girer.
+            MAX_DISPLAY_POIS = 18
+            if candidate_pois:
+                _set_progress(video_id, "ner_ocr", 58)
+                ner_filtered = self.ner.filter_locations_from_ocr(candidate_pois)
+                if ner_filtered:
+                    display_pois = ner_filtered[:MAX_DISPLAY_POIS]
+                    logger.info(f"NER batch filter: {len(candidate_pois)} → {len(display_pois)} POI")
+                else:
+                    # NER hiçbir şey döndürmedi (ASCII OCR veya model belirsizliği).
+                    # Heuristic fallback: geo sinyal içeren VEYA 2+ kelimeli adlar.
+                    display_pois = [
+                        t for t in candidate_pois
+                        if _has_geo_signal(t) or len(t.split()) >= 2
+                    ][:MAX_DISPLAY_POIS]
+                    logger.info(
+                        f"NER batch: 0 sonuç → heuristic fallback: "
+                        f"{len(candidate_pois)} aday → {len(display_pois)} POI"
+                    )
+            else:
+                display_pois = []
 
             # Geriye dönük uyumluluk: ocr_pois = gösterim listesi
             ocr_pois = display_pois
             logger.info(f"OCR display POIs ({len(display_pois)}): {display_pois}")
-            logger.info(f"OCR geocode POIs ({len(geocode_pois)}): {geocode_pois}")
+
+            t_ner = time.time()
+            logger.info(f"⏱ NER extraction: {t_ner - t_parallel:.1f}s")
 
             # 8. Nominatim: NER lokasyonlarını zenginleştir
             _set_progress(video_id, "geocoding", 65)
@@ -340,8 +384,8 @@ class VideoProcessingService:
                 if first_city.get("location"):
                     lat = first_city["location"]["lat"]
                     lng = first_city["location"]["lng"]
-                    # Şehir etrafında ~165km box (plajlar, ilçeler daha uzakta olabilir)
-                    city_bbox = (lat - 1.5, lng - 1.5, lat + 1.5, lng + 1.5)
+                    # Şehir etrafında ~220km box — Kaş (~190km) ve Alanya'yı kapsar
+                    city_bbox = (lat - 2.0, lng - 2.0, lat + 2.0, lng + 2.0)
                     logger.info(f"City bbox for Overpass: {city_bbox}")
 
             # OCR POI'ları zenginleştir
@@ -349,10 +393,9 @@ class VideoProcessingService:
             # Geo sinyal = fiziksel yer (plaj, koyu, şelale, cami...) belirten kelimeler.
             # Geo sinyali olmayan adlar (kafeler, çarşılar vb.) → sadece Nominatim.
             _set_progress(video_id, "overpass", 75)
-            overpass_pois  = [p for p in display_pois
-                              if any(s in tr_lower(p) for s in geo_signals)]
-            nominatim_pois = [p for p in display_pois
-                              if p not in overpass_pois]
+            # ASCII-fold farkına karşı _has_geo_signal kullan
+            overpass_pois  = [p for p in display_pois if _has_geo_signal(p)]
+            nominatim_pois = [p for p in display_pois if not _has_geo_signal(p)]
 
             logger.info(f"OCR POI split → Overpass: {len(overpass_pois)}, "
                         f"Nominatim-only: {len(nominatim_pois)}")
@@ -385,6 +428,9 @@ class VideoProcessingService:
             enriched_locations = ner_enriched + ocr_enriched + vision_enriched
             logger.info(f"Total enriched: {len(ner_enriched)} NER + {len(ocr_enriched)} OCR + {len(vision_enriched)} Vision = {len(enriched_locations)}")
 
+            t_geocode = time.time()
+            logger.info(f"⏱ Geocoding (Nominatim+Overpass): {t_geocode - t_ner:.1f}s")
+
             # 9. Deduplication
             _set_progress(video_id, "dedup", 85)
             deduplicated_locations = []
@@ -412,7 +458,9 @@ class VideoProcessingService:
                     logger.info(f"✅ Added {len(enriched_locations)} locations to Qdrant")
                 except Exception as e:
                     logger.warning(f"Qdrant error (non-critical): {e}")
-            total_time = time.time() -start_time
+            t_end = time.time()
+            logger.info(f"⏱ Dedup+Route+RAG+Qdrant: {t_end - t_geocode:.1f}s")
+            total_time = t_end - start_time
             logger.info(f"Performance: ")
             logger.info(f"Total Time: {total_time:.2f}s")
             logger.info(f" Frames/sec: {len(frames)/total_time:.2f}")
@@ -449,8 +497,9 @@ class VideoProcessingService:
             logger.error(f"Video processing failed: {e}")
             raise
     
-    def _get_metadata(self,video_path:str) -> Dict:
+    def _get_metadata(self, video_path: str) -> Dict:
         """FFmpeg ile metadata çıkar"""
+        import ffmpeg
         try:
             probe = ffmpeg.probe(video_path)
             video_stream = next(
@@ -479,9 +528,10 @@ class VideoProcessingService:
         Video'dan frame'ler çıkar
         fps=1 → saniyede 1 frame
         """
+        import ffmpeg
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # FFmpeg ile frame extraction
             (
                 ffmpeg
@@ -507,10 +557,11 @@ class VideoProcessingService:
         """İlk frame'den thumbnail oluştur (320px width)"""
         if not first_frame:
             return None
-        
+
+        import ffmpeg
         try:
             thumb_path = Path(first_frame).parent / "thumbnail.jpg"
-            
+
             (
                 ffmpeg
                 .input(first_frame)

@@ -15,6 +15,11 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>instagram-stories</string>
+		<string>instagram</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

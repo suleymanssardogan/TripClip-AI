@@ -31,7 +31,10 @@ def test_register_duplicate_email(client):
 
     r2 = client.post("/internal/auth/register", json=payload)
     assert r2.status_code == 400
-    assert "kayıtlı" in r2.json()["detail"].lower() or "already" in r2.json()["detail"].lower()
+    body = r2.json()
+    # Global error handler → {"error": {"code": ..., "message": ...}}
+    assert body["error"]["code"] == "DUPLICATE_EMAIL"
+    assert "kayıtlı" in body["error"]["message"].lower()
 
 
 def test_register_duplicate_username(client):

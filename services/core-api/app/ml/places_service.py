@@ -1,4 +1,5 @@
 import requests
+from difflib import SequenceMatcher
 from typing import List, Dict, Optional, Tuple
 from math import radians, sin, cos, sqrt, atan2
 import logging
@@ -32,6 +33,8 @@ class PlacesService:
         # Overpass rate limiter — community service, max 1 req/3s
         self._last_overpass_ts: float = 0.0
         self._overpass_min_interval: float = 3.0
+        # DNS/ağ hatası olursa geri kalan Overpass çağrılarını atla
+        self._overpass_unavailable: bool = False
         try:
             self.cache = redis.Redis(host='redis', port=6379, db=0, decode_responses=True)
             self.cache.ping()
@@ -53,7 +56,13 @@ class PlacesService:
             return None
         try:
             raw = self.cache.get(key)
-            return json.loads(raw) if raw else None
+            if not raw:
+                return None
+            data = json.loads(raw)
+            # Negatif sonuç sentinel — "bulunamadı" olarak cache'lendi
+            if isinstance(data, dict) and data.get("__not_found__"):
+                return {"__not_found__": True}
+            return data
         except Exception:
             return None
 
@@ -173,6 +182,8 @@ class PlacesService:
         key = self._cache_key("ovp", name)
         cached = self._cache_get(key)
         if cached:
+            if cached.get("__not_found__"):
+                return None   # negatif cache — Overpass çağrısı yapma
             logger.info(f"⚡ Overpass cache hit: {name}")
             return cached
 
@@ -193,24 +204,29 @@ class PlacesService:
 out center 3;
 """
         try:
+            # Bu session'da DNS/network hatası olduysa Overpass'ı tamamen atla
+            if self._overpass_unavailable:
+                logger.debug(f"Overpass unavailable (önceki hata), atlanıyor: '{name}'")
+                return None
+
             # Rate limiter: Overpass community API — min 3s arayla çağır
             elapsed = time.time() - self._last_overpass_ts
             if elapsed < self._overpass_min_interval:
                 time.sleep(self._overpass_min_interval - elapsed)
             self._last_overpass_ts = time.time()
 
-            # 429 gelirse bir kez 8s bekle ve dene
+            # timeout=5s (eskiden 15s — timeout başına 10s kazanıyoruz)
             resp = requests.post(
                 self.overpass_url, data={"data": query},
-                headers=self.headers, timeout=15
+                headers=self.headers, timeout=5
             )
             if resp.status_code == 429:
-                logger.warning("Overpass 429 → 8s bekleniyor...")
-                time.sleep(8)
+                logger.warning("Overpass 429 → 5s bekleniyor...")
+                time.sleep(5)
                 self._last_overpass_ts = time.time()
                 resp = requests.post(
                     self.overpass_url, data={"data": query},
-                    headers=self.headers, timeout=15
+                    headers=self.headers, timeout=5
                 )
 
             if resp.status_code != 200:
@@ -220,6 +236,8 @@ out center 3;
             elements = resp.json().get("elements", [])
             if not elements:
                 logger.info(f"Overpass: no results for '{name}'")
+                # Negatif sonucu kısa TTL ile cache'le → aynı isim tekrar gelirse 1s uyuma
+                self._cache_set(key, {"__not_found__": True})
                 return None
 
             # En iyi eşleşmeyi seç (tam isim eşleşmesi önce)
@@ -271,7 +289,14 @@ out center 3;
             return data
 
         except Exception as e:
-            logger.error(f"Overpass error for '{name}': {e}")
+            err_str = str(e)
+            # DNS / bağlantı hatası → Overpass bu session'da çalışmıyor, sonraki çağrıları atla
+            if "NameResolutionError" in err_str or "Failed to resolve" in err_str or \
+               "ConnectionError" in err_str or "NewConnectionError" in err_str:
+                logger.warning(f"Overpass DNS/network hatası — session boyunca devre dışı: {e}")
+                self._overpass_unavailable = True
+            else:
+                logger.error(f"Overpass error for '{name}': {e}")
             return None
 
     def _overpass_class(self, tags: Dict) -> str:
@@ -286,14 +311,61 @@ out center 3;
     # Ana enrichment — tüm lokasyonları zenginleştir
     # ─────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _restore_ocr_turkish(name: str) -> Optional[str]:
+        """
+        OCR Latin→Türkçe karakter düzeltmesi.
+        RapidOCR (Latin model): ş→s, ğ→g, ö→o, ü→u, ı→i veya l
+        Sadece yer isimlerinde çok geçen kalıplara dokunur — false positive riski düşük.
+        """
+        result = name
+
+        # ── 1. Suffix düzeltmeleri (yüksek güven) ─────────────────────────
+        suffix_fixes = [
+            # Türkçe iyelik ekleri: "Plajl" / "Plaji" → "Plajı"
+            ("Plajl",    "Plajı"),   ("plajl",    "plajı"),
+            ("Plaji",    "Plajı"),   ("plaji",    "plajı"),
+            # "Tarlasl" → "Tarlası"
+            ("Tarlasl",  "Tarlası"), ("tarlasl",  "tarlası"),
+            # "Hali " → "Halı " (karpet/tarla isimlerinde)
+            ("Hali ",    "Halı "),   ("hali ",    "halı "),
+        ]
+        for bad, good in suffix_fixes:
+            result = result.replace(bad, good)
+
+        # ── 2. Kelime bazlı düzeltmeler (sık geçen yer isimleri) ──────────
+        word_map = {
+            "goynuk":    "Göynük",
+            "goynak":    "Göynük",
+            "camlik":    "Çamlık",
+            "camli":     "Çamlı",
+            "magarali":  "Mağaralı",
+            "magara":    "Mağara",
+            "kalekoy":   "Kaleköy",
+            "kaleici":   "Kaleiçi",
+            "selalesi":  "Şelalesi",
+            "selale":    "Şelale",
+            "gozu":      "Gözü",
+            "gozlu":     "Gözlü",
+            "hidayet":   "Hidayet",   # zaten doğru, değiştirme
+        }
+        words = result.split()
+        new_words = [word_map.get(w.lower(), w) for w in words]
+        result = " ".join(new_words)
+
+        return result if result != name else None
+
     def _ocr_fallback_variants(self, name: str) -> List[str]:
         """
-        OCR hatalarına karşı generic varyantlar üretir.
-        Hardcode düzeltme yok — karakteristik OCR hata kalıplarına göre:
-          • Sondaki yanlış karakter (Mağaral → Mağara)
-          • C/G başlangıç karışıklığı (Cöynük → Göynük)
-          • İlk veya son kelimeyle tek başına deneme
+        OCR hatalarına karşı varyantlar üretir:
+          1. Sondaki yanlış karakter kaldırma (Mağaral → Mağara)
+          2. İlk / son kelime yalnız deneme
+          3. C↔G başlangıç karışıklığı
+          4. Turkish OCR char restoration (ş←s, ğ←g, ö←o, ü←u, ı←l)
         """
+        # Turkish restore zaten enrich_locations'da pre-processing olarak yapılıyor.
+        # Burada sadece 2 minimal varyant: trailing char + ilk kelime.
+        # 4 varyant → 4 Nominatim/Overpass çağrısı = çok yavaş; 2 varyant yeterli.
         words = name.split()
         variants: List[str] = []
 
@@ -302,27 +374,9 @@ out center 3;
         if len(last) > 4:
             variants.append(" ".join(words[:-1] + [last[:-1]]))
 
-        # 2. Sadece ilk kelime (genellikle asıl yer ismi)
+        # 2. Sadece ilk kelime (genellikle asıl yer ismi — en bilgilendirici kısım)
         if len(words) > 1 and len(words[0]) > 3:
             variants.append(words[0])
-
-        # 3. Sadece son kelime (bazı kompozit isimlerde)
-        if len(words) > 1 and len(words[-1]) > 3:
-            variants.append(words[-1])
-
-        # 4. C↔G karışıklığı (yaygın OCR hatası — Türkçe'de sık)
-        for i, word in enumerate(words):
-            if not word:
-                continue
-            swapped = None
-            if word[0] in "Cc":
-                swapped = ("G" if word[0].isupper() else "g") + word[1:]
-            elif word[0] in "Gg":
-                swapped = ("C" if word[0].isupper() else "c") + word[1:]
-            if swapped:
-                v = words.copy()
-                v[i] = swapped
-                variants.append(" ".join(v))
 
         # Orijinali tekrarlama
         return [v for v in variants if v.lower() != name.lower()]
@@ -346,6 +400,13 @@ out center 3;
                 (city_bbox[1] + city_bbox[3]) / 2,   # orta lon
             )
 
+        # Tek başına tip kelimesi olan girişleri filtrele
+        # ("Koyu", "Plaj" gibi kelimeler NER pipeline'ından da gelebilir)
+        _generic_words = {
+            "koyu", "koy", "köy", "plaj", "plajı", "sahil", "dağ", "göl", "gol",
+            "şelale", "selale", "orman", "vadi", "tepe", "kale", "ada", "liman",
+        }
+
         enriched = []
 
         for location in locations:
@@ -354,12 +415,50 @@ out center 3;
             if location.endswith(("-", "?", "'")):
                 continue
 
-            # Büyük harf → son anlamlı kelimeyi al
+            # Generic tek kelime → yer ismi değil, atla
+            if self.tr_lower(location.strip()) in _generic_words:
+                logger.debug(f"Generic kelime atlandı: '{location}'")
+                continue
+
+            # ALL-CAPS OCR metni → ilk kelimeyi al (genellikle yer ismi başı)
+            # Son kelimeyi almıyoruz: "AZIANTEP DIS" → "Dis" (havalimanı) yanlış eşleşmesi.
+            # Şehir tespiti için fuzzy match: "AZIANTEP" → "Gaziantep"
             if location.isupper():
-                last = location.split()[-1].title()
-                if len(last) < 3:
-                    continue
-                location = last
+                words_caps = location.split()
+                # Fuzzy şehir tespiti: "AZIANTEP" → "Gaziantep"
+                _tr_cities = {
+                    "gaziantep", "antalya", "istanbul", "ankara", "izmir", "bursa",
+                    "adana", "konya", "mersin", "kayseri", "eskisehir", "trabzon",
+                    "diyarbakir", "samsun", "malatya", "kahramanmaras", "erzurum",
+                }
+                city_match = None
+                for w in words_caps:
+                    wl = w.lower()
+                    for city in _tr_cities:
+                        ratio = SequenceMatcher(None, wl, city).ratio()
+                        if ratio >= 0.82 and abs(len(wl) - len(city)) <= 2:
+                            city_match = city.title()
+                            break
+                    if city_match:
+                        break
+                if city_match:
+                    location = city_match
+                    logger.info(f"🏙️ ALL-CAPS şehir tespiti: '{location}' → '{city_match}'")
+                else:
+                    # Şehir bulunamazsa ilk kelimeyi al (en az 5 karakter)
+                    first = words_caps[0].title()
+                    if len(first) < 5:
+                        continue
+                    location = first
+
+            # ── OCR Turkish char pre-processing ──────────────────────────────
+            # Variant olarak değil, ANA arama olarak düzelt → extra Overpass çağrısı yok
+            # "Kaputas Plajl" → "Kaputas Plajı" (Nominatim unaccent ile bulur)
+            # "Goynuk Kanyonu" → "Göynük Kanyonu"
+            restored = self._restore_ocr_turkish(location)
+            if restored:
+                logger.info(f"🔤 OCR restored: '{location}' → '{restored}'")
+                location = restored
 
             # ── 1. Nominatim — önce bbox'lı ara (yanlış şehir engeli)
             # Bbox boş dönerse unbounded tekrar dene + _within_city_area ile validate et.

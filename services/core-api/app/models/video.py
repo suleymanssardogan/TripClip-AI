@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Enum, ForeignKey,Float,JSON
+from sqlalchemy import Column, Integer, String, DateTime, Enum, ForeignKey, Float, JSON, Index
 from app.core.database import Base
 from datetime import datetime
 import enum
@@ -11,14 +11,25 @@ class VideoStatus(str, enum.Enum):
 
 class Video(Base):
     __tablename__ = "videos"
-    
+
+    # — Primary key —
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    filename = Column(String, nullable=False)  
-    file_path = Column(String, nullable=False)
-    status = Column(Enum(VideoStatus), default=VideoStatus.UPLOADED)
-    duration = Column(Integer)
-    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # — Ownership & metadata —
+    user_id    = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    filename   = Column(String, nullable=False)
+    file_path  = Column(String, nullable=False)
+    status     = Column(Enum(VideoStatus), default=VideoStatus.UPLOADED, index=True)
+    duration   = Column(Integer)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    # — Composite indexes for common query patterns —
+    __table_args__ = (
+        # Kullanıcının videolarını tarihe göre sıralamak için (dashboard feed)
+        Index("ix_videos_user_created", "user_id", "created_at"),
+        # Public feed: tamamlanan videoları yeniye göre listelemek için
+        Index("ix_videos_status_created", "status", "created_at"),
+    )
 
     # AI Results
     processing_time = Column(Float, nullable=True)

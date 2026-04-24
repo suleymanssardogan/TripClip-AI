@@ -1,7 +1,14 @@
-from fastapi import APIRouter, HTTPException
+"""
+Mobile BFF — Auth route handler'ları.
+Tüm Core API hataları mobile_error_wrapper aracılığıyla iOS dostu mesajlara çevrilir.
+"""
+from fastapi import APIRouter
 from pydantic import BaseModel
 import httpx
 import os
+import uuid
+
+from app.core.error_wrapper import mobile_error_wrapper, raise_from_response
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -24,37 +31,28 @@ class AppleSignInRequest(BaseModel):
     full_name: str | None = None
 
 
-async def _forward(path: str, body: dict) -> dict:
-    try:
+async def _forward(path: str, body: dict, rid: str) -> dict:
+    async with mobile_error_wrapper(request_id=rid):
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(f"{CORE_API_URL}{path}", json=body)
-        
         if resp.status_code >= 400:
-            try:
-                detail = resp.json().get("detail", "İşlem başarısız")
-            except:
-                detail = f"Backend Hatası: {resp.status_code}"
-            raise HTTPException(status_code=resp.status_code, detail=detail)
-        
+            raise_from_response(resp, request_id=rid)
         return resp.json()
-    except httpx.ConnectError:
-        raise HTTPException(status_code=503, detail="Core API hizmetine erişilemiyor")
-    except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/register")
 async def register(body: RegisterRequest):
-    return await _forward("/internal/auth/register", body.model_dump())
+    rid = str(uuid.uuid4())[:8]
+    return await _forward("/internal/auth/register", body.model_dump(), rid)
 
 
 @router.post("/login")
 async def login(body: LoginRequest):
-    return await _forward("/internal/auth/login", body.model_dump())
+    rid = str(uuid.uuid4())[:8]
+    return await _forward("/internal/auth/login", body.model_dump(), rid)
 
 
 @router.post("/apple")
 async def apple_sign_in(body: AppleSignInRequest):
-    return await _forward("/internal/auth/apple", body.model_dump())
+    rid = str(uuid.uuid4())[:8]
+    return await _forward("/internal/auth/apple", body.model_dump(), rid)

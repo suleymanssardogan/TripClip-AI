@@ -1,16 +1,21 @@
 import type { Metadata } from "next";
-import { Inter, Plus_Jakarta_Sans } from "next/font/google";
+import { Inter, Plus_Jakarta_Sans, Playfair_Display } from "next/font/google";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
-const jakarta = Plus_Jakarta_Sans({ 
-  subsets: ["latin"], 
-  variable: "--font-jakarta" 
+const jakarta = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  variable: "--font-jakarta",
+});
+const playfair = Playfair_Display({
+  subsets: ["latin"],
+  variable: "--font-playfair",
+  weight: ["400", "700", "800", "900"],
 });
 
 export const metadata: Metadata = {
-  title: "TripClip AI | Visual Guide",
-  description: "Reels videolarını akıllı seyahat rotalarına dönüştür.",
+  title: "TripClip AI | Gezi Planı Oluştur",
+  description: "Gezi videolarını akıllı seyahat rotalarına dönüştür.",
 };
 
 export default function RootLayout({
@@ -20,11 +25,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="tr" className="dark">
-      <head>
-        {/* Material Symbols for some legacy components */}
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" />
-      </head>
-      <body className={`${inter.variable} ${jakarta.variable} font-body bg-surface text-on-surface antialiased`}>
+      <body
+        className={`${inter.variable} ${jakarta.variable} ${playfair.variable} font-sans bg-bg text-ice antialiased`}
+      >
         {children}
       </body>
     </html>

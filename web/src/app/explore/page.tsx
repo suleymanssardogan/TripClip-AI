@@ -2,74 +2,97 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  Search, MapPin, Clock, Sparkles, TrendingUp,
-  ArrowRight, Filter, Globe, RotateCcw
-} from "lucide-react";
-import Navbar from "@/components/Navbar";
+import { Search, MapPin, Clock, ArrowRight, Filter, RotateCcw } from "lucide-react";
+import LuxuryNavbar from "@/components/LuxuryNavbar";
 import Link from "next/link";
 import { getPlans, getStats, Plan, PlatformStats } from "@/lib/api";
 
+/* ─── Sabitler ────────────────────────────────────────────── */
 const CITY_FILTERS = [
   "Tümü", "İstanbul", "Ankara", "İzmir", "Antalya",
-  "Gaziantep", "Kapadokya", "Trabzon", "Bodrum", "Mardin"
+  "Gaziantep", "Kapadokya", "Trabzon", "Bodrum", "Mardin",
 ];
 
+const DEST_COLORS = [
+  { bg: "#2C1810", accent: "#8B4513" },
+  { bg: "#1A1A2E", accent: "#6B4E9B" },
+  { bg: "#0A2A1A", accent: "#1B7A4A" },
+  { bg: "#2A1A08", accent: "#C8861A" },
+  { bg: "#0A1A2A", accent: "#1A6BAA" },
+];
+
+/* ─── Plan kartı ──────────────────────────────────────────── */
 function PlanCard({ plan, index }: { plan: Plan; index: number }) {
-  const city = plan.top_location ?? "Türkiye";
-  const duration = plan.duration ? `${Math.round(plan.duration)}s` : "—";
-  const createdAt = new Date(plan.created_at).toLocaleDateString("tr-TR", {
-    day: "numeric", month: "short"
+  const city    = plan.top_location ?? "Türkiye";
+  const colorSet = DEST_COLORS[plan.id % DEST_COLORS.length];
+  const created = new Date(plan.created_at).toLocaleDateString("tr-TR", {
+    day: "numeric", month: "long", year: "numeric",
   });
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 20 }}
+      initial={{ opacity: 0, y: 24 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.05 }}
+      transition={{ delay: index * 0.05, duration: 0.5, ease: "easeOut" }}
     >
       <Link href={`/analyze/${plan.id}`} className="block group">
-        <div className="neon-card rounded-2xl overflow-hidden h-full">
-          {/* Renk banner — thumbnail yoksa gradient */}
-          <div className={`h-36 relative flex items-end p-4 ${gradientForId(plan.id)}`}>
-            <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent" />
-            <div className="relative z-10">
-              <span className="tag text-[10px]">
-                {plan.locations_count} Mekan
-              </span>
-            </div>
-            <div className="absolute top-3 right-3">
-              <div className="w-2 h-2 rounded-full bg-neon animate-pulse" />
+        <div className="luxury-card overflow-hidden">
+
+          {/* Görsel alanı */}
+          <div className="relative overflow-hidden" style={{ height: "220px" }}>
+            <div className="w-full h-full transition-transform duration-700 group-hover:scale-[1.04]"
+              style={{
+                background: `linear-gradient(135deg, ${colorSet.bg} 0%, ${colorSet.accent}99 100%)`,
+                height: "220px",
+              }}>
+              {/* Overlay */}
+              <div className="absolute inset-0"
+                style={{ background: "linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 50%)" }} />
+
+              {/* Mekan sayısı badge */}
+              <div className="absolute top-4 left-4">
+                <span className="text-[10px] font-semibold tracking-[0.15em] uppercase
+                  bg-white/10 backdrop-blur-sm text-white px-3 py-1 border border-white/20">
+                  {plan.locations_count} Mekan
+                </span>
+              </div>
+
+              {/* Şehir adı */}
+              <div className="absolute bottom-4 left-5">
+                <div className="flex items-center gap-1.5 text-white/80 mb-1">
+                  <MapPin className="w-3 h-3" />
+                  <span className="text-xs tracking-widest uppercase">{city}</span>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* İçerik */}
-          <div className="p-4">
-            <div className="flex items-center gap-1.5 text-neon text-xs font-medium mb-2">
-              <MapPin className="w-3 h-3" />
-              {city}
-            </div>
-
-            <h3 className="text-ice font-semibold text-sm leading-snug mb-3 line-clamp-2 group-hover:text-neon transition-colors">
+          {/* Metin */}
+          <div className="p-5">
+            <h3 className="font-serif font-bold text-charcoal text-[15px] leading-snug mb-2
+              group-hover:text-gold transition-colors">
               {plan.filename.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ")}
             </h3>
 
-            {/* OCR preview tags */}
             {plan.ocr_preview.length > 0 && (
-              <div className="flex flex-wrap gap-1 mb-3">
-                {plan.ocr_preview.slice(0, 3).map((t, i) => (
-                  <span key={i} className="text-[10px] text-muted bg-white/5 px-2 py-0.5 rounded-full">
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {plan.ocr_preview.slice(0, 2).map((t, i) => (
+                  <span key={i} className="text-[10px] text-charcoal-lt tracking-wide
+                    border border-warm-border px-2 py-0.5">
                     {t}
                   </span>
                 ))}
               </div>
             )}
 
-            <div className="flex items-center justify-between text-xs text-muted mt-auto pt-2 border-t border-white/5">
-              <span className="flex items-center gap-1">
-                <Clock className="w-3 h-3" /> {duration}
+            <div className="flex items-center justify-between pt-3 border-t border-warm-border">
+              <span className="flex items-center gap-1.5 text-[11px] text-charcoal-lt tracking-wide">
+                <Clock className="w-3 h-3" />
+                {created}
               </span>
-              <span>{createdAt}</span>
+              <span className="luxury-link text-[10px]">
+                Keşfet <ArrowRight className="w-3 h-3" />
+              </span>
             </div>
           </div>
         </div>
@@ -78,42 +101,41 @@ function PlanCard({ plan, index }: { plan: Plan; index: number }) {
   );
 }
 
-function gradientForId(id: number): string {
-  const gradients = [
-    "bg-gradient-to-br from-neon/30 to-violet/20",
-    "bg-gradient-to-br from-violet/30 to-coral/20",
-    "bg-gradient-to-br from-coral/30 to-neon/20",
-    "bg-gradient-to-br from-blue-500/30 to-neon/20",
-    "bg-gradient-to-br from-amber-500/30 to-coral/20",
-  ];
-  return gradients[id % gradients.length];
+/* ─── Skeleton ────────────────────────────────────────────── */
+function Skeleton() {
+  return (
+    <div className="luxury-card overflow-hidden animate-pulse">
+      <div className="bg-cream-warm" style={{ height: "220px" }} />
+      <div className="p-5 space-y-3">
+        <div className="h-4 bg-cream-warm rounded w-3/4" />
+        <div className="h-3 bg-cream-warm rounded w-1/2" />
+        <div className="h-px bg-warm-border mt-4" />
+      </div>
+    </div>
+  );
 }
 
+/* ─── Ana sayfa ─────────────────────────────────────────────── */
 export default function ExplorePage() {
-  const [plans, setPlans]       = useState<Plan[]>([]);
-  const [stats, setStats]       = useState<PlatformStats | null>(null);
-  const [loading, setLoading]   = useState(true);
-  const [search, setSearch]     = useState("");
-  const [city, setCity]         = useState("Tümü");
-  const [offset, setOffset]     = useState(0);
-  const [total, setTotal]       = useState(0);
+  const [plans, setPlans]     = useState<Plan[]>([]);
+  const [stats, setStats]     = useState<PlatformStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch]   = useState("");
+  const [city, setCity]       = useState("Tümü");
+  const [offset, setOffset]   = useState(0);
+  const [total, setTotal]     = useState(0);
   const LIMIT = 12;
 
   const fetchPlans = useCallback(async (cityFilter: string, off: number) => {
     setLoading(true);
     try {
-      const params: { city?: string; limit: number; offset: number } = {
-        limit: LIMIT, offset: off
-      };
+      const params: { city?: string; limit: number; offset: number } = { limit: LIMIT, offset: off };
       if (cityFilter !== "Tümü") params.city = cityFilter;
       const res = await getPlans(params);
       setPlans(res.plans);
       setTotal(res.total);
-    } catch {
-      setPlans([]);
-    } finally {
-      setLoading(false);
-    }
+    } catch { setPlans([]); }
+    finally { setLoading(false); }
   }, []);
 
   useEffect(() => {
@@ -129,170 +151,162 @@ export default function ExplorePage() {
   );
 
   return (
-    <div className="min-h-screen bg-bg">
-      <Navbar />
+    <div className="light-page min-h-screen">
+      <LuxuryNavbar />
 
-      {/* Hero */}
-      <section className="relative pt-28 pb-16 px-6 overflow-hidden">
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="orb w-[500px] h-[500px] bg-neon -top-40 -left-40" />
-          <div className="orb w-[400px] h-[400px] bg-violet top-0 -right-32" />
-        </div>
+      {/* ── Hero editorial başlık ────────────────────────────── */}
+      <section className="luxury-section-warm pt-36 pb-20 px-8">
+        <div className="max-w-7xl mx-auto">
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+            className="flex flex-col md:flex-row md:items-end justify-between gap-8">
 
-        <div className="relative max-w-4xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 bg-neon/10 border border-neon/20 rounded-full px-4 py-1.5 text-neon text-xs font-mono mb-6">
-            <Globe className="w-3 h-3" />
-            {stats ? `${stats.total_cities}+ şehir keşfedildi` : "Keşfet"}
-          </div>
+            <div>
+              <span className="luxury-label">Keşfet</span>
+              <h1 className="font-serif font-black text-charcoal mt-3 leading-tight"
+                style={{ fontSize: "clamp(2.5rem, 5vw, 5rem)" }}>
+                Gerçek Seyahat<br />
+                <span style={{ color: "#C8A96E" }}>Deneyimleri</span>
+              </h1>
+            </div>
 
-          <h1 className="font-display font-black text-4xl md:text-6xl text-ice mb-4 leading-tight">
-            Gerçek Seyahat<br />
-            <span className="text-neon">Deneyimleri</span>
-          </h1>
-          <p className="text-muted text-lg mb-10">
-            AI'ın analiz ettiği videolardan çıkarılan gerçek mekanlar ve rotalar
+            {stats && (
+              <div className="flex gap-10 md:gap-16 flex-shrink-0 pb-2">
+                {[
+                  { val: stats.completed_videos, label: "Video Analizi" },
+                  { val: stats.total_cities,     label: "Şehir" },
+                ].map((s, i) => (
+                  <div key={i} className="text-right">
+                    <p className="font-serif font-black text-charcoal text-3xl">{s.val}+</p>
+                    <p className="luxury-label mt-1">{s.label}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </motion.div>
+
+          <p className="text-charcoal-mid mt-6 max-w-xl leading-relaxed">
+            AI'ın analiz ettiği gerçek gezi videolarından çıkarılan mekanlar, rotalar ve seyahat hikâyeleri.
           </p>
-
-          {/* Arama kutusu */}
-          <div className="relative max-w-xl mx-auto">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Şehir, mekan veya tabela ara..."
-              className="w-full bg-white/5 border border-white/10 rounded-xl pl-11 pr-4 py-3.5 text-ice placeholder:text-muted/50 text-sm focus:outline-none focus:border-neon/40 transition-all"
-            />
-          </div>
         </div>
       </section>
 
-      {/* Stats bar */}
-      {stats && (
-        <div className="border-y border-white/5 bg-white/2 py-4 px-6">
-          <div className="max-w-7xl mx-auto flex items-center justify-center gap-10 text-sm">
-            {[
-              { label: "Analiz Edilen Video", value: stats.completed_videos },
-              { label: "Keşfedilen Şehir", value: stats.total_cities },
-              { label: "Kayıtlı Kullanıcı", value: stats.total_users },
-            ].map(s => (
-              <div key={s.label} className="text-center">
-                <div className="font-display font-black text-xl text-neon">{s.value}</div>
-                <div className="text-muted text-xs">{s.label}</div>
-              </div>
+      {/* ── Arama + filtreler ───────────────────────────────── */}
+      <div className="sticky top-[68px] z-40 bg-cream border-b border-warm-border">
+        <div className="max-w-7xl mx-auto px-8 py-3 flex items-center gap-4">
+
+          {/* Arama */}
+          <div className="relative flex-1 max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-charcoal-lt" />
+            <input
+              type="text" value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Şehir veya mekan ara..."
+              className="w-full bg-transparent border border-warm-border pl-9 pr-4 py-2.5
+                text-charcoal placeholder:text-charcoal-lt text-sm tracking-wide
+                focus:outline-none focus:border-charcoal transition-colors"
+            />
+          </div>
+
+          {/* Şehir filtreleri */}
+          <div className="hidden md:flex items-center gap-1 overflow-x-auto no-scrollbar">
+            <Filter className="w-3.5 h-3.5 text-charcoal-lt flex-shrink-0 mr-2" />
+            {CITY_FILTERS.map(c => (
+              <button key={c}
+                onClick={() => { setCity(c); setOffset(0); }}
+                className={`flex-shrink-0 px-3 py-1.5 text-xs tracking-wide transition-all ${
+                  city === c
+                    ? "bg-charcoal text-cream font-semibold"
+                    : "text-charcoal-mid hover:text-charcoal hover:bg-cream-warm"
+                }`}>
+                {c}
+              </button>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* Şehir filtreleri */}
-      <div className="sticky top-16 z-40 bg-bg/90 backdrop-blur-xl border-b border-white/5 px-6 py-3">
-        <div className="max-w-7xl mx-auto flex items-center gap-2 overflow-x-auto no-scrollbar">
-          <Filter className="w-4 h-4 text-muted flex-shrink-0" />
-          {CITY_FILTERS.map(c => (
-            <button
-              key={c}
-              onClick={() => { setCity(c); setOffset(0); }}
-              className={`flex-shrink-0 px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
-                city === c
-                  ? "bg-neon text-bg font-bold"
-                  : "bg-white/5 text-muted hover:text-ice hover:bg-white/10"
-              }`}
-            >
-              {c}
-            </button>
-          ))}
         </div>
       </div>
 
-      {/* Grid */}
-      <main className="max-w-7xl mx-auto px-6 py-10">
+      {/* ── Plan grid ────────────────────────────────────────── */}
+      <main className="max-w-7xl mx-auto px-8 py-16">
+
+        {/* Sonuç sayısı */}
+        {!loading && filtered.length > 0 && (
+          <div className="flex items-center justify-between mb-8">
+            <p className="text-charcoal-lt text-sm tracking-wide">
+              <span className="text-charcoal font-semibold">{total}</span> gezi analizi
+              {city !== "Tümü" && <span> · {city}</span>}
+            </p>
+          </div>
+        )}
+
         {loading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="h-64 rounded-2xl bg-white/5 animate-pulse" />
-            ))}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} />)}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-24">
-            <div className="text-5xl mb-4">🗺️</div>
-            <p className="text-ice font-semibold mb-2">
-              {total === 0 ? "Henüz analiz edilmiş video yok" : "Sonuç bulunamadı"}
+          <div className="text-center py-32">
+            <p className="font-serif text-4xl text-charcoal mb-3">
+              {total === 0 ? "🗺️" : "🔍"}
             </p>
-            <p className="text-muted text-sm mb-6">
-              {total === 0
-                ? "iOS uygulamasından ilk videoyu yükle!"
-                : "Farklı bir şehir veya arama dene"}
+            <h3 className="font-serif font-bold text-charcoal text-xl mb-2">
+              {total === 0 ? "Henüz video analiz edilmedi" : "Sonuç bulunamadı"}
+            </h3>
+            <p className="text-charcoal-lt text-sm mb-8">
+              {total === 0 ? "iOS uygulamasından ilk videoyu yükle!" : "Farklı bir arama dene"}
             </p>
             {search && (
-              <button
-                onClick={() => setSearch("")}
-                className="btn-neon px-4 py-2 rounded-lg text-sm flex items-center gap-2 mx-auto"
-              >
-                <RotateCcw className="w-3 h-3" /> Temizle
+              <button onClick={() => setSearch("")}
+                className="luxury-btn-outline flex items-center gap-2 mx-auto text-xs">
+                <RotateCcw className="w-3 h-3" /> Aramayı Temizle
               </button>
             )}
           </div>
         ) : (
           <>
-            <div className="flex items-center justify-between mb-6">
-              <p className="text-muted text-sm">
-                <span className="text-ice font-semibold">{total}</span> gezi analizi
-                {city !== "Tümü" && <span> · {city}</span>}
-              </p>
-              <div className="flex items-center gap-1 text-xs text-muted">
-                <TrendingUp className="w-3 h-3" /> En yeni önce
-              </div>
-            </div>
-
             <AnimatePresence mode="wait">
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                 {filtered.map((plan, i) => (
                   <PlanCard key={plan.id} plan={plan} index={i} />
                 ))}
               </div>
             </AnimatePresence>
 
-            {/* Pagination */}
+            {/* Sayfalama */}
             {total > LIMIT && (
-              <div className="flex items-center justify-center gap-3 mt-12">
+              <div className="flex items-center justify-center gap-4 mt-16 pt-8 border-t border-warm-border">
                 <button
                   onClick={() => { const o = Math.max(0, offset - LIMIT); setOffset(o); fetchPlans(city, o); }}
                   disabled={offset === 0}
-                  className="px-5 py-2 rounded-lg bg-white/5 text-sm text-muted hover:text-ice disabled:opacity-30 transition-all"
-                >
+                  className="luxury-btn-outline text-xs py-2 px-6 disabled:opacity-30">
                   ← Önceki
                 </button>
-                <span className="text-muted text-sm">
+                <span className="text-charcoal-lt text-sm tracking-wider">
                   {Math.floor(offset / LIMIT) + 1} / {Math.ceil(total / LIMIT)}
                 </span>
                 <button
                   onClick={() => { const o = offset + LIMIT; setOffset(o); fetchPlans(city, o); }}
                   disabled={offset + LIMIT >= total}
-                  className="px-5 py-2 rounded-lg bg-white/5 text-sm text-muted hover:text-ice disabled:opacity-30 transition-all flex items-center gap-1"
-                >
-                  Sonraki <ArrowRight className="w-3 h-3" />
+                  className="luxury-btn text-xs py-2 px-6 disabled:opacity-30">
+                  Sonraki →
                 </button>
               </div>
             )}
           </>
         )}
 
-        {/* CTA */}
-        <div className="mt-20 animated-border rounded-2xl">
-          <div className="bg-bg rounded-2xl p-10 text-center">
-            <Sparkles className="w-8 h-8 text-neon mx-auto mb-4" />
-            <h3 className="font-display font-black text-2xl text-ice mb-2">
-              Kendi Rotanı Oluştur
-            </h3>
-            <p className="text-muted mb-6 text-sm max-w-md mx-auto">
-              Instagram videolarından AI ile otomatik seyahat planı çıkar.
-              iOS uygulamasını indir, videoyu yükle — gerisini biz yaparız.
-            </p>
-            <Link href="/signup" className="btn-primary px-6 py-3 rounded-xl text-sm inline-block">
-              Ücretsiz Başla
-            </Link>
-          </div>
+        {/* Alt CTA */}
+        <div className="mt-28 pt-16 border-t border-warm-border text-center">
+          <span className="luxury-label">Kendi Planını Oluştur</span>
+          <h2 className="font-serif font-black text-charcoal mt-3 mb-4"
+            style={{ fontSize: "clamp(1.8rem, 3vw, 2.8rem)" }}>
+            Videonu Yükle, Rotanı Keşfet
+          </h2>
+          <p className="text-charcoal-mid mb-8 max-w-md mx-auto text-sm leading-relaxed">
+            iOS uygulamasından gezi videonu yükle. AI otomatik olarak mekanları tespit eder,
+            haritaya işler ve sana özel rota oluşturur.
+          </p>
+          <Link href="/signup" className="luxury-btn">
+            Ücretsiz Başla <ArrowRight className="w-4 h-4" />
+          </Link>
         </div>
       </main>
     </div>

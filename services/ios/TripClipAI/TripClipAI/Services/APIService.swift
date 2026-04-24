@@ -48,6 +48,20 @@ class APIService {
         return response.id
     }
 
+    // Video progress (stage + percent)
+    func getVideoProgress(id: Int) async throws -> ProgressResponse {
+        let url = URL(string: "\(baseURL)/api/mobile/videos/\(id)/progress")!
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        if let auth = authHeader() { request.setValue(auth, forHTTPHeaderField: "Authorization") }
+        let (data, httpResponse) = try await session.data(for: request)
+        if let http = httpResponse as? HTTPURLResponse, http.statusCode >= 400 {
+            throw NSError(domain: "API", code: http.statusCode,
+                          userInfo: [NSLocalizedDescriptionKey: "Progress unavailable"])
+        }
+        return try JSONDecoder().decode(ProgressResponse.self, from: data)
+    }
+
     // Video status
     func getVideoStatus(id: Int) async throws -> VideoResponse {
         let url = URL(string: "\(baseURL)/api/mobile/videos/\(id)")!
@@ -64,6 +78,11 @@ class APIService {
 }
 
 // Models
+struct ProgressResponse: Codable {
+    let stage: String?
+    let percent: Int?
+}
+
 struct UploadResponse: Codable {
     let id: Int
     let status: String

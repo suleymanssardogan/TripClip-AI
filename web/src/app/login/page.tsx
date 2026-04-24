@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import Navbar from "@/components/Navbar";
-import { LogIn, Loader2, AlertCircle, CheckCircle } from "lucide-react";
+import { motion } from "framer-motion";
+import { Loader2, AlertCircle, CheckCircle, ArrowRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { login } from "@/lib/api";
@@ -10,119 +10,154 @@ import { login } from "@/lib/api";
 export default function LoginPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [error,   setError]   = useState("");
   const [success, setSuccess] = useState(false);
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    setLoading(true);
-    setError("");
-
-    const formData = new FormData(e.currentTarget);
-    const email = formData.get("email") as string;
-    const password = formData.get("password") as string;
-
+    setLoading(true); setError("");
+    const fd = new FormData(e.currentTarget);
     try {
-      const data = await login(email, password);
-      localStorage.setItem("token", data.access_token);
+      const data = await login(fd.get("email") as string, fd.get("password") as string);
+      localStorage.setItem("token",   data.access_token);
       localStorage.setItem("user_id", String(data.user_id));
-      localStorage.setItem("email", data.email);
+      localStorage.setItem("email",   data.email);
       setSuccess(true);
       setTimeout(() => router.push("/dashboard"), 800);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Giriş bilgileri hatalı.");
-    } finally {
-      setLoading(false);
-    }
+      setError(err instanceof Error ? err.message : "E-posta veya şifre hatalı.");
+    } finally { setLoading(false); }
   };
 
   return (
-    <div className="min-h-screen bg-bg pt-24 px-6 flex items-center justify-center">
-      <Navbar />
+    <div className="light-page min-h-screen flex">
 
-      {/* Background orbs */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="orb w-96 h-96 bg-violet top-1/4 -right-48" />
-        <div className="orb w-80 h-80 bg-neon bottom-1/4 -left-40" />
+      {/* ── Sol editorial panel ────────────────────────────── */}
+      <div className="hidden lg:flex flex-col justify-between w-[480px] flex-shrink-0
+        px-16 py-14 border-r border-warm-border"
+        style={{ background: "#F2EDE3" }}>
+
+        {/* Logo */}
+        <Link href="/">
+          <div>
+            <p className="font-serif font-black text-charcoal text-2xl tracking-tight">TripClip</p>
+            <p className="text-[9px] font-semibold tracking-[0.25em] uppercase text-gold mt-0">
+              AI Travel
+            </p>
+          </div>
+        </Link>
+
+        {/* Büyük editorial metin */}
+        <div>
+          <span className="gold-line mb-8" />
+          <h2 className="font-serif font-black text-charcoal leading-[1.05]"
+            style={{ fontSize: "clamp(2.5rem, 4vw, 4rem)" }}>
+            Seyahatini<br />
+            yeniden<br />
+            <em className="italic" style={{ color: "#C8A96E" }}>keşfet.</em>
+          </h2>
+          <p className="text-charcoal-mid text-sm leading-relaxed mt-6 max-w-xs">
+            AI destekli gezi analizi ile videolarındaki her anı haritaya dönüştür,
+            optimize edilmiş rotalar keşfet.
+          </p>
+
+          {/* Mini istatistik */}
+          <div className="flex gap-8 mt-12 pt-8 border-t border-warm-border">
+            {[
+              { val: "∞", label: "Video Analizi" },
+              { val: "100%", label: "Ücretsiz" },
+            ].map((s, i) => (
+              <div key={i}>
+                <p className="font-serif font-black text-charcoal text-2xl">{s.val}</p>
+                <p className="luxury-label mt-1">{s.label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Alt */}
+        <p className="text-charcoal-lt text-xs tracking-wider">
+          Fırat Üniversitesi · 2026
+        </p>
       </div>
 
-      <div className="relative w-full max-w-md">
-        {/* Card */}
-        <div className="glass rounded-2xl p-8 border border-white/8">
-          {/* Logo mark */}
-          <div className="flex flex-col items-center mb-8">
-            <div className="w-14 h-14 bg-neon/10 border border-neon/20 rounded-2xl flex items-center justify-center mb-4">
-              <LogIn className="w-7 h-7 text-neon" />
-            </div>
-            <h1 className="font-display font-black text-2xl text-ice">Tekrar Hoş Geldin</h1>
-            <p className="text-muted text-sm mt-1">Seyahat planlarını yönetmek için giriş yap</p>
+      {/* ── Sağ form ──────────────────────────────────────── */}
+      <div className="flex-1 flex items-center justify-center px-8 py-16 bg-cream">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          className="w-full max-w-sm"
+        >
+          {/* Mobil logo */}
+          <Link href="/" className="flex flex-col mb-12 lg:hidden">
+            <p className="font-serif font-black text-charcoal text-2xl">TripClip</p>
+            <p className="text-[9px] font-semibold tracking-[0.25em] uppercase text-gold">AI Travel</p>
+          </Link>
+
+          <div className="mb-10">
+            <span className="luxury-label">Hoş Geldin</span>
+            <h1 className="font-serif font-black text-charcoal text-4xl mt-2 leading-tight">
+              Giriş Yap
+            </h1>
           </div>
 
-          {/* Error */}
+          {/* Hata */}
           {error && (
-            <div className="bg-coral/10 border border-coral/20 text-coral p-3.5 rounded-xl mb-5 text-sm flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+              className="flex items-start gap-3 border border-red-200 bg-red-50 text-red-700
+                px-4 py-3.5 mb-6 text-sm">
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
               <span>{error}</span>
-            </div>
+            </motion.div>
           )}
 
-          {/* Success */}
+          {/* Başarı */}
           {success && (
-            <div className="bg-neon/10 border border-neon/20 text-neon p-3.5 rounded-xl mb-5 text-sm flex items-center gap-2">
+            <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+              className="flex items-center gap-3 border border-green-200 bg-green-50 text-green-700
+                px-4 py-3.5 mb-6 text-sm">
               <CheckCircle className="w-4 h-4 flex-shrink-0" />
-              <span>Giriş başarılı! Yönlendiriliyorsunuz...</span>
-            </div>
+              <span>Giriş başarılı, yönlendiriliyorsunuz…</span>
+            </motion.div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label className="text-xs text-muted font-medium mb-1.5 block">E-posta</label>
-              <input
-                name="email"
-                type="email"
-                placeholder="sen@ornek.com"
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-ice placeholder:text-muted/50 text-sm focus:outline-none focus:border-neon/40 focus:bg-neon/5 transition-all"
-                required
-                disabled={loading || success}
-              />
+              <label className="luxury-label block mb-2">E-posta</label>
+              <input name="email" type="email" placeholder="sen@ornek.com"
+                className="w-full bg-white border border-warm-border px-4 py-3.5
+                  text-charcoal placeholder:text-charcoal-lt text-sm
+                  focus:outline-none focus:border-charcoal transition-colors"
+                required disabled={loading || success} />
             </div>
             <div>
-              <label className="text-xs text-muted font-medium mb-1.5 block">Şifre</label>
-              <input
-                name="password"
-                type="password"
-                placeholder="••••••••"
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-ice placeholder:text-muted/50 text-sm focus:outline-none focus:border-neon/40 focus:bg-neon/5 transition-all"
-                required
-                disabled={loading || success}
-              />
+              <label className="luxury-label block mb-2">Şifre</label>
+              <input name="password" type="password" placeholder="••••••••"
+                className="w-full bg-white border border-warm-border px-4 py-3.5
+                  text-charcoal placeholder:text-charcoal-lt text-sm
+                  focus:outline-none focus:border-charcoal transition-colors"
+                required disabled={loading || success} />
             </div>
 
-            <button
-              type="submit"
-              disabled={loading || success}
-              className="w-full btn-primary py-3.5 rounded-xl font-bold text-sm tracking-wide flex items-center justify-center gap-2 mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
+            <button type="submit" disabled={loading || success}
+              className="luxury-btn w-full justify-center mt-2 disabled:opacity-50">
               {loading ? (
-                <><Loader2 className="w-4 h-4 animate-spin" /> Giriş yapılıyor...</>
+                <><Loader2 className="w-4 h-4 animate-spin" /> Giriş yapılıyor…</>
               ) : (
-                "Giriş Yap"
+                <><span>Giriş Yap</span><ArrowRight className="w-4 h-4" /></>
               )}
             </button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-muted">
+          <hr className="luxury-divider my-8" />
+
+          <p className="text-charcoal-mid text-sm text-center">
             Hesabın yok mu?{" "}
-            <Link href="/signup" className="text-neon hover:text-neon/80 transition-colors font-medium">
-              Kaydol
+            <Link href="/signup" className="luxury-link inline-flex">
+              Kaydol <ArrowRight className="w-3 h-3" />
             </Link>
           </p>
-        </div>
-
-        {/* Footer note */}
-        <p className="text-center text-xs text-muted/40 mt-4">
-          TripClip AI · Fırat Üniversitesi Bitirme Projesi
-        </p>
+        </motion.div>
       </div>
     </div>
   );
