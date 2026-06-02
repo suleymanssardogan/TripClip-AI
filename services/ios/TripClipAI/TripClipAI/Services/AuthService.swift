@@ -10,7 +10,7 @@ class AuthService: ObservableObject {
     @Published var isAuthenticated = false
     @Published var currentUserId: Int?
 
-    private let baseURL = "http://127.0.0.1:8001/api/mobile"
+    private let baseURL = "http://172.20.10.6:8001/api/mobile"
     private let tokenKey = "tripclip_access_token"
     private let userIdKey = "tripclip_user_id"
 
@@ -75,9 +75,13 @@ class AuthService: ObservableObject {
 
     func logout() {
         accessToken = nil
-        UserDefaults.standard.removeObject(forKey: userIdKey)
+        // userIdKey'i SİLMİYORUZ — aynı kullanıcı tekrar giriş yaparsa
+        // CoreData cache'i bozulmasın (saveSession'daki user-change kontrolü için
+        // önceki user_id bilgisi gerekli).
         isAuthenticated = false
         currentUserId = nil
+        // NOT: clearAll() kaldırıldı — aynı kullanıcı tekrar girince geçmişi
+        // kaybolmasın. Farklı kullanıcı girerse saveSession() temizliyor zaten.
     }
 
     // MARK: - Helpers
@@ -85,10 +89,23 @@ class AuthService: ObservableObject {
     private func saveSession(_ data: [String: Any]) {
         guard let token = data["access_token"] as? String,
               let userId = data["user_id"] as? Int else { return }
+
+        // Farklı bir kullanıcı giriş yapıyorsa yerel cache'i temizle
+        // (örn. cihazda A çıkış yapmadı, B kayıt oldu — A'nın videoları B'ye gözükmesin)
+        let previousUserId = UserDefaults.standard.integer(forKey: userIdKey)
+        if previousUserId != 0 && previousUserId != userId {
+            PersistenceService.shared.clearAll()
+        }
+
         accessToken = token
         currentUserId = userId
         UserDefaults.standard.set(userId, forKey: userIdKey)
         isAuthenticated = true
+
+        // Backend'den kullanıcının geçmiş videolarını çek — cache'te eksik olanları doldur
+        // Bu sayede aynı kullanıcı farklı cihazdan veya yeniden install sonrası
+        // tüm analizlerini görür.
+        Task { await PersistenceService.shared.syncFromBackend() }
     }
 
     private func post(_ path: String, body: [String: Any]) async throws -> [String: Any] {

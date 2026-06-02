@@ -244,8 +244,10 @@
 		1C9A91AC2F7A749000D35DCB /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				"CODE_SIGN_ENTITLEMENTS[sdk=*]" = TripClipShare/TripClipShare.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GTL4QNSHX6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TripClipShare/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripClip AI";
@@ -275,8 +277,10 @@
 		1C9A91AD2F7A749000D35DCB /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				"CODE_SIGN_ENTITLEMENTS[sdk=*]" = TripClipShare/TripClipShare.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GTL4QNSHX6;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TripClipShare/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "TripClip AI";
@@ -430,6 +434,7 @@
 				CODE_SIGN_ENTITLEMENTS = TripClipAI/TripClipAI.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GTL4QNSHX6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TripClipAI/Info.plist;
@@ -463,6 +468,7 @@
 				CODE_SIGN_ENTITLEMENTS = TripClipAI/TripClipAI.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = GTL4QNSHX6;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TripClipAI/Info.plist;

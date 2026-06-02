@@ -35,8 +35,8 @@ class PersistenceService {
         saved.status = video.status
         saved.duration = Int32(video.duration ?? 0)
 
-        if let results = video.aiResults,
-           let data = try? JSONEncoder().encode(results) {
+        // Tam VideoResponse'u kaydet (enrichedLocations dahil)
+        if let data = try? JSONEncoder().encode(video) {
             saved.aiResultsData = data
         }
 
@@ -63,11 +63,61 @@ class PersistenceService {
         context.delete(video)
         try? context.save()
     }
+
+    /// Backend'den kullanıcının video listesini alıp eksik olanları CoreData'ya çek.
+    /// Login sonrası HistoryView senkronizasyonu için.
+    @MainActor
+    func syncFromBackend() async {
+        do {
+            let summaries = try await APIService.shared.getMyVideos()
+            for summary in summaries where summary.status.lowercased() == "completed" {
+                // Zaten cache'te varsa atla
+                if fetchVideo(id: summary.id) != nil { continue }
+                // Yoksa detayını çek ve kaydet
+                if let detail = try? await APIService.shared.getVideoStatus(id: summary.id) {
+                    saveVideoResult(detail)
+                }
+            }
+        } catch {
+            // Sessizce yut — offline ise mevcut cache'i göster
+            print("⚠️ syncFromBackend hata: \(error.localizedDescription)")
+        }
+    }
+
+    /// Tüm yerel kayıtları siler — yalnızca kullanıcı DEĞİŞTİĞİNDE çağrılır.
+    /// Logout'ta çağrılmaz; aynı kullanıcı tekrar girince geçmişi görür.
+    func clearAll() {
+        let fetch: NSFetchRequest<NSFetchRequestResult> = NSFetchRequest(entityName: "SavedVideo")
+        let batch = NSBatchDeleteRequest(fetchRequest: fetch)
+        do {
+            try context.execute(batch)
+            try context.save()
+        } catch {
+            // Batch delete'in alt sürüm desteği yoksa fallback: tek tek sil
+            let videos = (try? context.fetch(NSFetchRequest<SavedVideo>(entityName: "SavedVideo"))) ?? []
+            videos.forEach { context.delete($0) }
+            try? context.save()
+        }
+
+        // Kayıtlı plan başlıkları (UserDefaults'ta) — onları da sil
+        let prefix = "tripplan_"
+        for key in UserDefaults.standard.dictionaryRepresentation().keys
+                where key.hasPrefix(prefix) {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
 }
 
-// MARK: - AIResults Codable helper on SavedVideo
+// MARK: - Codable helpers on SavedVideo
 
 extension SavedVideo {
+    /// Tam VideoResponse (yeni format — enrichedLocations dahil)
+    var decodedVideoResponse: VideoResponse? {
+        guard let data = aiResultsData else { return nil }
+        return try? JSONDecoder().decode(VideoResponse.self, from: data)
+    }
+
+    /// Geriye dönük uyumluluk — eski kayıtlar için
     var decodedAIResults: AIResults? {
         guard let data = aiResultsData else { return nil }
         return try? JSONDecoder().decode(AIResults.self, from: data)

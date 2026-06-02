@@ -7,8 +7,7 @@ import UniformTypeIdentifiers
 
 class ShareViewController: UIViewController {
 
-    private let baseURL      = "http://127.0.0.1:8001"
-    private let appScheme    = "tripclip"
+    private let baseURL = "http://127.0.0.1:8001"
 
     // MARK: - Lifecycle
 
@@ -104,12 +103,16 @@ class ShareViewController: UIViewController {
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {
+                guard let self else { return }
                 if let data,
-                   let json     = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                   let videoId  = json["id"] as? Int {
-                    self?.showSuccess(videoId: videoId, message: "Video analiz için gönderildi!")
+                   let json    = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let videoId = json["id"] as? Int {
+                    // Video yüklendi → ProcessingView'a yönlendir
+                    let deepLink = URL(string: "tripclip://processing/\(videoId)")!
+                    self.openDeepLink(deepLink)
+                    self.finish()
                 } else {
-                    self?.showError("Yükleme başarısız. Uygulamayı açarak tekrar deneyin.")
+                    self.showError("Yükleme başarısız. Uygulamayı açarak tekrar deneyin.")
                 }
             }
         }.resume()
@@ -118,24 +121,83 @@ class ShareViewController: UIViewController {
     // MARK: - URL İşleme (Instagram Reels vb.)
 
     func handleURL(_ url: URL) {
+        guard let token = keychainToken() else {
+            // Giriş yapılmamış — uygulamayı açmaya yönlendir
+            showLoginRequired()
+            return
+        }
+
         let isInstagram = url.host?.contains("instagram.com") == true
         let isReels     = url.pathComponents.contains("reel") || url.pathComponents.contains("reels")
+        let icon        = isInstagram ? "camera.filters" : "link.circle.fill"
+        let title       = isInstagram && isReels ? "Reels Kuyruğa Alınıyor" : "Bağlantı İşleniyor"
 
-        if isInstagram {
-            showURLReceived(
-                icon:    "camera.filters",
-                title:   isReels ? "Reels Alındı" : "Instagram Bağlantısı",
-                message: "TripClip AI bu bağlantıyı kaydetti.\nUygulama açılıyor...",
-                url:     url
-            )
-        } else {
-            showURLReceived(
-                icon:    "link.circle.fill",
-                title:   "Bağlantı Alındı",
-                message: "TripClip AI bu bağlantıyı kaydetti.\nUygulama açılıyor...",
-                url:     url
-            )
+        showLoading(message: "\(title)...")
+
+        // queue-url endpoint'ine POST at → video_id al → deep link ile ProcessingView'ı aç
+        var request = URLRequest(url: URL(string: "\(baseURL)/api/mobile/videos/queue-url")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 20
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["source_url": url.absoluteString])
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+
+                if let data,
+                   let json    = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let videoId = json["id"] as? Int {
+                    // Başarılı → ProcessingView deep link
+                    let deepLink = URL(string: "tripclip://processing/\(videoId)")!
+                    self.openDeepLink(deepLink)
+                    self.finish()
+                } else {
+                    let errMsg = self.parseErrorMessage(data) ?? "Bağlantı işlenemedi."
+                    self.showError("\(errMsg)\nUygulamadan tekrar deneyin.")
+                }
+            }
+        }.resume()
+
+        _ = icon // suppress unused warning
+    }
+
+    private func parseErrorMessage(_ data: Data?) -> String? {
+        guard let data,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return (json["error"] as? [String: Any])?["message"] as? String
+    }
+
+    private func showLoginRequired() {
+        view.subviews.forEach { $0.removeFromSuperview() }
+        let stack = UIStackView()
+        stack.axis = .vertical; stack.spacing = 16; stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+
+        let icon = UIImageView(image: UIImage(systemName: "person.crop.circle.badge.exclamationmark"))
+        icon.tintColor = UIColor.systemYellow
+        icon.contentMode = .scaleAspectFit
+        icon.widthAnchor.constraint(equalToConstant: 52).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 52).isActive = true
+
+        let label = makeLabel("TripClip AI uygulamasına önce giriş yapın.", size: 15, weight: .medium)
+        label.numberOfLines = 0; label.textAlignment = .center
+
+        let openBtn = makeButton("Uygulamayı Aç") { [weak self] in
+            self?.openDeepLink(URL(string: "tripclip://")!)
+            self?.finish()
         }
+        let cancelBtn = makeButton("Kapat", primary: false) { [weak self] in self?.finish() }
+
+        [icon, label, openBtn, cancelBtn].forEach { stack.addArrangedSubview($0) }
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+        ])
     }
 
     // MARK: - UI
@@ -197,7 +259,8 @@ class ShareViewController: UIViewController {
         messageLabel.textAlignment = .center
 
         let openBtn = makeButton("Uygulamayı Aç") { [weak self] in
-            self?.openApp(with: url)
+            self?.openDeepLink(url)
+            self?.finish()
         }
         let cancelBtn = makeButton("Kapat", primary: false) { [weak self] in
             self?.finish()
@@ -213,7 +276,8 @@ class ShareViewController: UIViewController {
 
         // Kısa bir süre sonra otomatik aç
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            self?.openApp(with: url)
+            self?.openDeepLink(url)
+            self?.finish()
         }
     }
 
@@ -229,7 +293,9 @@ class ShareViewController: UIViewController {
         let label = makeLabel(message, size: 16, weight: .medium)
 
         let openBtn = makeButton("Sonuçları Gör") { [weak self] in
-            self?.openApp(videoId: videoId)
+            let url = URL(string: "tripclip://processing/\(videoId)")!
+            self?.openDeepLink(url)
+            self?.finish()
         }
         let doneBtn = makeButton("Tamam", primary: false) { [weak self] in
             self?.finish()
@@ -252,24 +318,15 @@ class ShareViewController: UIViewController {
 
     // MARK: - Deep Link
 
-    private func openApp(videoId: Int) {
-        openApp(with: URL(string: "\(appScheme)://\(videoId)")!)
-    }
-
-    private func openApp(with url: URL) {
-        // Encoded URL ile uygulamayı aç
-        let encoded = url.absoluteString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let deepLink = URL(string: "\(appScheme)://share?url=\(encoded)") ?? URL(string: "\(appScheme)://")!
-
+    private func openDeepLink(_ url: URL) {
         var responder: UIResponder? = self
         while let r = responder {
             if let app = r as? UIApplication {
-                app.open(deepLink)
+                app.open(url)
                 break
             }
             responder = r.next
         }
-        finish()
     }
 
     private func finish() {

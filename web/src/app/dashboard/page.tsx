@@ -14,6 +14,34 @@ import { getUserPlans, getStats, type Plan, type PlatformStats } from "@/lib/api
 
 /* ─── Yardımcı ─────────────────────────────────────────────────────────── */
 
+const UUID_RE = /^[0-9a-f-]{8,}$/i;
+const TRAVEL_NAMES = [
+  "Yaz Gezisi", "Keşif Turu", "Gezi Kaydı", "Seyahat Anısı",
+  "Şehir Turu", "Macera Kaydı", "Tatil Anısı", "Rota Kaydı",
+];
+
+function planTitle(plan: Plan, index: number): string {
+  // top_location varsa "İstanbul Gezisi"
+  if (plan.top_location) {
+    const loc = plan.top_location;
+    return `${loc.charAt(0).toUpperCase()}${loc.slice(1)} Gezisi`;
+  }
+
+  // Dosya adı UUID ya da çok kısa/anlamsızsa tarih + sıra ile isimlendir
+  const raw = plan.filename.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ").trim();
+  const looksLikeUUID = UUID_RE.test(raw.replace(/\s/g, "")) || raw.length < 4;
+
+  if (looksLikeUUID) {
+    const date = plan.created_at
+      ? new Date(plan.created_at).toLocaleDateString("tr-TR", { day: "numeric", month: "long" })
+      : "";
+    const name = TRAVEL_NAMES[index % TRAVEL_NAMES.length];
+    return date ? `${name} · ${date}` : `${name} #${plan.id}`;
+  }
+
+  return raw.replace(/\b\w/g, c => c.toUpperCase());
+}
+
 const LOCATION_EMOJIS: Record<string, string> = {
   istanbul: "🕌", ankara: "🏛️", izmir: "🏖️", antalya: "🏝️",
   kapadokya: "🎈", trabzon: "⛰️", bodrum: "⛵", mardin: "🌙",
@@ -68,9 +96,7 @@ function MiniSparkline({ value, max }: { value: number; max: number }) {
 function TripRow({ plan, index }: { plan: Plan; index: number }) {
   const router = useRouter();
   const isCompleted = plan.status === "completed" || plan.status === "COMPLETED";
-  const title = plan.top_location
-    ? `${plan.top_location.charAt(0).toUpperCase()}${plan.top_location.slice(1)} Gezisi`
-    : plan.filename.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ");
+  const title = planTitle(plan, index);
 
   return (
     <motion.div

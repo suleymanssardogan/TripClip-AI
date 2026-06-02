@@ -108,8 +108,14 @@ struct ResultsView: View {
         }
         .task {
             if let preloaded = preloadedData {
-                videoData = VideoResponse(id: videoId, filename: "", status: "completed",
-                                          duration: nil, aiResults: preloaded)
+                videoData = VideoResponse(
+                    id: videoId, filename: "", status: "completed",
+                    duration: nil, createdAt: nil,
+                    locations: nil, route: nil, travelTips: nil,
+                    transcription: nil, ocrPois: nil,
+                    detectionsCount: nil, processingTime: nil,
+                    aiResults: preloaded
+                )
                 isLoading = false
             } else {
                 startElapsedTimer()
@@ -296,13 +302,15 @@ struct ResultsView: View {
     @ViewBuilder
     func resultsContent(video: VideoResponse) -> some View {
         let ai = video.aiResults
-        let locations   = ai?.nominatim?.deduplicatedLocations ?? []
+        // ÖNEMLİ: enrichedLocations önce mobile-bff'in flat `locations` alanını kullanır,
+        // yoksa nested `ai_results.nominatim.deduplicated_locations`'a düşer.
+        let locations   = video.enrichedLocations
         let nerLocs     = ai?.ner?.extractedLocations ?? []
-        let ocrPois     = ai?.ocrPois ?? []
+        let ocrPois     = video.displayOcrPois
         let ocrTexts    = ai?.ocr?.extractedTexts ?? []
-        let tips        = ai?.rag?.travelTips?.tips ?? []
+        let tips        = video.displayTips
         let summary     = ai?.rag?.travelTips?.summary
-        let transcript  = ai?.audio?.transcription?.transcript
+        let transcript  = video.displayTranscript
         let hasData     = !locations.isEmpty || !nerLocs.isEmpty || !ocrPois.isEmpty
 
         ScrollView {

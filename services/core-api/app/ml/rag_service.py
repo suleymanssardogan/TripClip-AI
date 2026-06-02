@@ -1,8 +1,12 @@
 import requests
-from typing import List, Dict
+import time
+from typing import List, Dict, Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Başarısız olduktan kaç saniye sonra tekrar denensin?
+_OLLAMA_RETRY_AFTER = 120  # saniye
 
 
 class RAGService:
@@ -11,28 +15,40 @@ class RAGService:
     def __init__(self):
         self.ollama_url = "http://host.docker.internal:11434"
         self.model = "mistral"
-        self._ollama_available: bool = True   # ilk hata sonrası False yapılır
+        # Sticky bool → timestamp: None = hiç denenmedí / hata yok
+        self._ollama_failed_at: Optional[float] = None
         logger.info("RAGService initialized")
 
+    def _ollama_available(self) -> bool:
+        """Ollama'ya istek atılabilir mi? Son hatadan _OLLAMA_RETRY_AFTER sn geçtiyse tekrar dene."""
+        if self._ollama_failed_at is None:
+            return True
+        if time.monotonic() - self._ollama_failed_at >= _OLLAMA_RETRY_AFTER:
+            logger.info("Ollama yeniden deneniyor (cooldown doldu)…")
+            self._ollama_failed_at = None   # sıfırla, bir şans daha
+            return True
+        return False
+
     def _generate(self, prompt: str) -> str:
-        """Mistral ile metin üret. Ollama yoksa hızlıca skip et."""
-        if not self._ollama_available:
+        """Mistral ile metin üret. Cooldown süresi dolmadan skip et."""
+        if not self._ollama_available():
             return ""
         try:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={"model": self.model, "prompt": prompt, "stream": False},
-                timeout=10   # 60s → 10s (Ollama yoksa uzun bekleme anlamsız)
+                timeout=90,
             )
             if response.status_code == 200:
+                self._ollama_failed_at = None   # başarılı → sıfırla
                 return response.json().get("response", "")
-            else:
-                logger.warning(f"Ollama error: {response.status_code}")
-                return ""
+            logger.warning("Ollama HTTP %s", response.status_code)
+            self._ollama_failed_at = time.monotonic()
+            return ""
         except Exception as e:
-            # Bağlantı hatası → bu session'da Ollama yok, tekrar deneme
-            logger.warning(f"Ollama unavailable, RAG devre dışı: {type(e).__name__}")
-            self._ollama_available = False
+            logger.warning("Ollama ulaşılamıyor — %ds sonra tekrar denenecek: %s",
+                           _OLLAMA_RETRY_AFTER, type(e).__name__)
+            self._ollama_failed_at = time.monotonic()
             return ""
 
     def generate_travel_tips(self, locations: List[Dict]) -> Dict:
@@ -56,10 +72,7 @@ class RAGService:
         # Her lokasyon için tip üret
         tips = []
         for name in location_names[:5]:  # Max 5 lokasyon
-            prompt = f"""Sen bir Türkiye seyahat uzmanısın. 
-"{name}" hakkında kısa ve pratik 2 seyahat ipucu ver.
-Sadece ipuçlarını yaz, başka açıklama yapma.
-Türkçe yaz."""
+            prompt = f'"{name}" için 1 kısa seyahat ipucu ver. Türkçe, max 2 cümle.'
 
             tip = self._generate(prompt)
             if tip:
@@ -70,9 +83,7 @@ Türkçe yaz."""
                 logger.info(f"✅ Generated tip for: {name}")
 
         # Genel özet
-        summary_prompt = f"""Sen bir Türkiye seyahat uzmanısın.
-Şu yerleri kapsayan kısa bir gezi özeti yaz (3-4 cümle): {locations_text}
-Türkçe yaz."""
+        summary_prompt = f'Şu Türkiye mekanlarını ziyaret eden biri için 2 cümlelik gezi özeti: {locations_text}. Türkçe.'
 
         summary = self._generate(summary_prompt)
         logger.info(f"✅ Generated summary for {len(tips)} locations")

@@ -24,6 +24,13 @@ const config: Config = {
         "bento-navy":   "#080B2A",
         "bento-green":  "#091A12",
         "bento-purple": "#130A28",
+        // Light / Luxury palette
+        cream:           "#FAF7F2",
+        charcoal:        "#1C1C1E",
+        "charcoal-mid":  "#5C5C5E",
+        "charcoal-lt":   "#9A9A9C",
+        "warm-gold":     "#C8A96E",
+        "warm-border":   "#E8E0D0",
       },
       fontFamily: {
         display:  ["var(--font-jakarta)", "sans-serif"],

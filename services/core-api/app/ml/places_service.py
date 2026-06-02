@@ -24,17 +24,29 @@ class PlacesService:
     def tr_lower(s: str) -> str:
         return s.replace("İ", "i").replace("I", "ı").lower()
 
+    # Overpass fallback zinciri — ilk cevap veren kullanılır
+    # kumi.systems öne alındı: overpass-api.de genellikle yavaş/meşgul
+    _OVERPASS_ENDPOINTS = [
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass-api.de/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+    ]
+
     def __init__(self):
         self.nominatim_url = "https://nominatim.openstreetmap.org"
-        self.overpass_url  = "https://overpass-api.de/api/interpreter"
+        # Aktif Overpass endpoint — başarısız olunca bir sonrakine geçer
+        self._overpass_endpoint_idx = 0
         self.headers = {
             "User-Agent": "TripClip-AI/1.0 (educational project)"
         }
         # Overpass rate limiter — community service, max 1 req/3s
         self._last_overpass_ts: float = 0.0
         self._overpass_min_interval: float = 3.0
-        # DNS/ağ hatası olursa geri kalan Overpass çağrılarını atla
-        self._overpass_unavailable: bool = False
+        # Sticky bool → timestamp tabanlı retry (60 sn sonra tekrar dene)
+        self._overpass_failed_at: Optional[float] = None
+        # İlk timeout'dan sonra tek pipeline süresince skip et (600s = 10dk)
+        # Bir sonraki video'da tekrar denenecek (PlacesService yeniden init edilir)
+        self._overpass_retry_after: float = 600.0
         try:
             self.cache = redis.Redis(host='redis', port=6379, db=0, decode_responses=True)
             self.cache.ping()
@@ -84,6 +96,11 @@ class PlacesService:
         Nominatim ile yer ara.
         city_bbox verilirse Nominatim'in viewbox/bounded özelliği devreye girer:
         sadece o bbox içindeki sonuçlar döner — manuel mesafe hesabına gerek kalmaz.
+
+        Nominatim kalite iyileştirmeleri:
+          - countrycodes=tr → sadece Türkiye sonuçları
+          - bounded=1 + viewbox → bbox varsa bölgeye kilitlenir
+          - limit=3 + en iyi eşleşme seçimi → "Kaleköy Amasya" değil "Kaleköy Antalya"
         """
         # Cache key: bbox bağlamını da dahil et (farklı şehir = farklı sonuç)
         bbox_suffix = f"|{city_bbox}" if city_bbox else ""
@@ -96,9 +113,10 @@ class PlacesService:
         try:
             time.sleep(1)  # rate limit
             params: dict = {
-                "q": f"{location_name},{country}",
-                "format": "json",
-                "limit": 1,
+                "q":            location_name,   # country ayrı parametre olarak
+                "countrycodes": "tr",            # sadece Türkiye — yanlış ülke eşleşmesini engeller
+                "format":       "json",
+                "limit":        3,               # en iyi 3 → bbox'a göre filtrele
                 "addressdetails": 1,
             }
             # Bbox varsa Nominatim'e ver — yabancı şehirleri kendisi atar
@@ -115,7 +133,11 @@ class PlacesService:
             if resp.status_code != 200 or not resp.json():
                 return None
 
-            place = resp.json()[0]
+            results = resp.json()
+            # Bbox varsa ilk sonuç yeterli (bounded=1 zaten filtreler)
+            # Bbox yoksa: city_bbox olmadan arama yapıldı, tüm Türkiye'den geldi.
+            # Birden fazla sonuç arasından en yüksek importance'lı olanı seç.
+            place = max(results, key=lambda p: float(p.get("importance", 0)))
             data = {
                 "name":            place.get("display_name"),
                 "place_id":        place.get("place_id"),
@@ -204,33 +226,49 @@ class PlacesService:
 out center 3;
 """
         try:
-            # Bu session'da DNS/network hatası olduysa Overpass'ı tamamen atla
-            if self._overpass_unavailable:
-                logger.debug(f"Overpass unavailable (önceki hata), atlanıyor: '{name}'")
-                return None
+            # Cooldown kontrolü — son hatadan _overpass_retry_after sn geçmediyse atla
+            if self._overpass_failed_at is not None:
+                elapsed = time.time() - self._overpass_failed_at
+                if elapsed < self._overpass_retry_after:
+                    logger.debug("Overpass cooldown (%.0fs kaldı), atlanıyor: '%s'",
+                                 self._overpass_retry_after - elapsed, name)
+                    return None
+                # Cooldown doldu → bir şans daha
+                logger.info("Overpass yeniden deneniyor (cooldown doldu)…")
+                self._overpass_failed_at = None
 
             # Rate limiter: Overpass community API — min 3s arayla çağır
-            elapsed = time.time() - self._last_overpass_ts
-            if elapsed < self._overpass_min_interval:
-                time.sleep(self._overpass_min_interval - elapsed)
+            elapsed_rate = time.time() - self._last_overpass_ts
+            if elapsed_rate < self._overpass_min_interval:
+                time.sleep(self._overpass_min_interval - elapsed_rate)
             self._last_overpass_ts = time.time()
 
-            # timeout=5s (eskiden 15s — timeout başına 10s kazanıyoruz)
-            resp = requests.post(
-                self.overpass_url, data={"data": query},
-                headers=self.headers, timeout=5
-            )
-            if resp.status_code == 429:
-                logger.warning("Overpass 429 → 5s bekleniyor...")
-                time.sleep(5)
-                self._last_overpass_ts = time.time()
-                resp = requests.post(
-                    self.overpass_url, data={"data": query},
-                    headers=self.headers, timeout=5
-                )
+            # Fallback endpoint zinciri — ilk cevap veren kazanır
+            resp = None
+            tried = 0
+            for attempt in range(len(self._OVERPASS_ENDPOINTS)):
+                idx = (self._overpass_endpoint_idx + attempt) % len(self._OVERPASS_ENDPOINTS)
+                url = self._OVERPASS_ENDPOINTS[idx]
+                try:
+                    resp = requests.post(url, data={"data": query},
+                                         headers=self.headers, timeout=8)
+                    if resp.status_code == 200:
+                        self._overpass_endpoint_idx = idx  # başarılı endpoint'i hatırla
+                        break
+                    if resp.status_code == 429:
+                        time.sleep(3)
+                except requests.exceptions.Timeout:
+                    logger.warning("Overpass timeout: %s — sonraki endpoint deneniyor", url)
+                    tried += 1
+                    continue
+                except Exception:
+                    tried += 1
+                    continue
 
-            if resp.status_code != 200:
-                logger.warning(f"Overpass HTTP {resp.status_code} for: {name}")
+            if resp is None or resp.status_code != 200:
+                # Tüm endpointler başarısız → cooldown başlat (60s)
+                logger.warning("Overpass: tüm endpointler başarısız '%s' — 60s cooldown", name)
+                self._overpass_failed_at = time.time()
                 return None
 
             elements = resp.json().get("elements", [])
@@ -290,13 +328,13 @@ out center 3;
 
         except Exception as e:
             err_str = str(e)
-            # DNS / bağlantı hatası → Overpass bu session'da çalışmıyor, sonraki çağrıları atla
-            if "NameResolutionError" in err_str or "Failed to resolve" in err_str or \
-               "ConnectionError" in err_str or "NewConnectionError" in err_str:
-                logger.warning(f"Overpass DNS/network hatası — session boyunca devre dışı: {e}")
-                self._overpass_unavailable = True
+            if any(k in err_str for k in ("NameResolutionError", "Failed to resolve",
+                                           "ConnectionError", "NewConnectionError")):
+                logger.warning("Overpass DNS/network hatası — %ds sonra tekrar denenecek: %s",
+                               int(self._overpass_retry_after), e)
+                self._overpass_failed_at = time.time()
             else:
-                logger.error(f"Overpass error for '{name}': {e}")
+                logger.error("Overpass hatası '%s': %s", name, e)
             return None
 
     def _overpass_class(self, tags: Dict) -> str:
@@ -383,7 +421,8 @@ out center 3;
 
     def enrich_locations(self, locations: List[str],
                          use_overpass: bool = False,
-                         city_bbox: tuple = None) -> List[Dict]:
+                         city_bbox: tuple = None,
+                         city_hint: Optional[str] = None) -> List[Dict]:
         """
         Lokasyon listesini zenginleştir.
         use_overpass=True → Nominatim bulamazsa Overpass'ı dene.
@@ -530,6 +569,19 @@ out center 3;
                         vdata["original_ocr"] = location
                         enriched.append({"original_name": variant, "place_data": vdata})
                         break
+
+            # ── 4. Şehir adıyla nitelendirilerek Nominatim tekrar ara ─────────
+            # "Nohut Durumu" bulunamadı → "Nohut Durumu Gaziantep" dene
+            # city_hint: NER ile bulunan dominant şehir adı (örn. "Gaziantep")
+            if city_hint and len(location.split()) >= 2:
+                city_qualified = f"{location} {city_hint}"
+                cq_data = self.search_place(city_qualified, city_bbox=None)
+                if cq_data and self._within_city_area(cq_data, city_center):
+                    logger.info(f"🏙️ Şehir qualifier ile bulundu: '{city_qualified}'")
+                    cq_data["category"] = self._categorize(
+                        cq_data.get("class", ""), cq_data.get("type", "")
+                    )
+                    enriched.append({"original_name": location, "place_data": cq_data})
 
         logger.info(f"Enriched {len(enriched)}/{len(locations)} locations")
         return enriched

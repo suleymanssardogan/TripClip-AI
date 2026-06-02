@@ -25,6 +25,11 @@ class RegisterRequest(BaseModel):
     username: str | None = None
 
 
+class AppleSignInRequest(BaseModel):
+    identity_token: str
+    full_name: str | None = None
+
+
 async def _forward(path: str, body: dict, rid: str) -> dict:
     async with web_error_wrapper(request_id=rid):
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -44,3 +49,9 @@ async def login(body: LoginRequest):
 async def register(body: RegisterRequest):
     rid = str(uuid.uuid4())[:8]
     return await _forward("/internal/auth/register", body.model_dump(), rid)
+
+
+@router.post("/apple")
+async def apple_sign_in(body: AppleSignInRequest):
+    rid = str(uuid.uuid4())[:8]
+    return await _forward("/internal/auth/apple", body.model_dump(), rid)

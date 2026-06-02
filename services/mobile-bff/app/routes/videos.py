@@ -4,6 +4,7 @@ Transformer katmanı iOS'a özgü veri şekillendirmeyi üstlenir.
 Tüm Core API hataları mobile_error_wrapper ile iOS dostu mesajlara çevrilir.
 """
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
+from pydantic import BaseModel
 import httpx
 import os
 import uuid
@@ -82,7 +83,43 @@ async def get_video_detail(
             resp = await client.get(f"{CORE_API_URL}/internal/videos/{video_id}")
         if resp.status_code >= 400:
             raise_from_response(resp, request_id=rid)
-    return to_mobile_detail(resp.json())
+        return to_mobile_detail(resp.json())
+
+
+class URLQueueRequest(BaseModel):
+    url: str
+    source: str = "instagram_share_extension"
+
+
+@router.post("/queue-url", status_code=202)
+@limiter.limit("20/minute")
+async def queue_url(
+    request: Request,
+    body: URLQueueRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """
+    Share Extension → Core API proxy.
+
+    202 Accepted döner — kullanıcı beklememeli.
+    iOS tarafı URLSession.background ile bu endpoint'i çağırır.
+    """
+    rid = str(uuid.uuid4())[:8]
+    async with mobile_error_wrapper(request_id=rid):
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{CORE_API_URL}/internal/videos/queue-url",
+                json={"url": body.url, "source": body.source},
+                headers={"x-user-id": str(user_id)},
+            )
+        if resp.status_code >= 400:
+            raise_from_response(resp, request_id=rid)
+        data = resp.json()
+        return {
+            "id":      data["id"],
+            "status":  "queued",
+            "message": "Video kuyruğa alındı, konum bulununca bildireceğiz.",
+        }
 
 
 @router.get("")

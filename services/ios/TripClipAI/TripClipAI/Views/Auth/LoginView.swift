@@ -5,6 +5,7 @@ struct LoginView: View {
     @EnvironmentObject var auth: AuthService
     @State private var email = ""
     @State private var password = ""
+    @State private var isPasswordVisible = false
     @State private var isRegisterMode = false
     @State private var errorMessage: String?
     @State private var successMessage: String?
@@ -60,12 +61,35 @@ struct LoginView: View {
                                 .foregroundColor(.white)
                                 .tint(.white)
 
-                            SecureField("Şifre", text: $password)
+                            ZStack(alignment: .trailing) {
+                                Group {
+                                    if isPasswordVisible {
+                                        TextField("Şifre", text: $password)
+                                            .textContentType(.password)
+                                            .autocapitalization(.none)
+                                            .autocorrectionDisabled()
+                                    } else {
+                                        SecureField("Şifre", text: $password)
+                                            .textContentType(.password)
+                                    }
+                                }
                                 .padding(14)
+                                .padding(.trailing, 40)
                                 .background(Color.white.opacity(0.1))
                                 .cornerRadius(12)
                                 .foregroundColor(.white)
                                 .tint(.white)
+
+                                Button {
+                                    isPasswordVisible.toggle()
+                                } label: {
+                                    Image(systemName: isPasswordVisible ? "eye.slash.fill" : "eye.fill")
+                                        .foregroundColor(.white.opacity(0.5))
+                                        .font(.system(size: 16))
+                                        .padding(.trailing, 14)
+                                }
+                                .accessibilityLabel(isPasswordVisible ? "Şifreyi gizle" : "Şifreyi göster")
+                            }
 
                             Button {
                                 Task { await handleEmailAuth() }

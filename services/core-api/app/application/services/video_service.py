@@ -59,30 +59,75 @@ class VideoService:
 
     # ── Progress ──────────────────────────────────────────────────────────────
 
+    # Kaç saniye geçtikten sonra "takılı kaldı" sayılır
+    _STALE_THRESHOLD_SECONDS = 600  # 10 dakika
+
     def get_progress(self, video_id: int, redis_client=None) -> ProgressResponse:
-        """Redis varsa oradan, yoksa DB status'ten tahmin ederek döner."""
+        """
+        İlerleme durumunu döner.
+
+        - Redis varsa oradan okur (gerçek zamanlı %)
+        - elapsed_seconds: sunucu tarafından hesaplanır → iOS'ta
+          client-side timestamp hatası (7d bug) olmaz
+        - stale=True: video 10 dk+ takılıysa → iOS hata ekranı gösterir
+        """
+        from datetime import datetime, timezone
+
+        video = self._repo.get_by_id(video_id)
+        if not video:
+            raise HTTPException(404, detail="Video not found")
+
+        # Geçen süre — created_at'tan değil, processing_started_at'a yakın
+        # bir referans noktasından hesapla. DB'de işlem başlangıcı yok,
+        # bu yüzden şimdi ile created_at arası değil; client'a "gerçek" süreyi
+        # veriyoruz ama iOS kendi startDate'ini kullanmalı (aşağıdaki notta açıklandı).
+        now_utc = datetime.now(timezone.utc)
+        created = video.created_at
+        if created and created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        elapsed = int((now_utc - created).total_seconds()) if created else 0
+
+        # Redis'ten gerçek zamanlı veri dene
         if redis_client:
             try:
                 import json
                 raw = redis_client.get(f"progress:{video_id}")
                 if raw:
                     data = json.loads(raw)
-                    return ProgressResponse(stage=data["stage"], percent=data["percent"])
+                    return ProgressResponse(
+                        stage=data["stage"],
+                        percent=data["percent"],
+                        elapsed_seconds=elapsed,
+                        stale=False,
+                    )
             except Exception:
                 pass
 
-        video = self._repo.get_by_id(video_id)
-        if not video:
-            raise HTTPException(404, detail="Video not found")
-
         stage_map = {
-            VideoStatus.UPLOADED:   ("uploaded",   5),
+            VideoStatus.UPLOADED:   ("uploaded",    5),
             VideoStatus.PROCESSING: ("processing", 30),
             VideoStatus.COMPLETED:  ("done",       100),
-            VideoStatus.FAILED:     ("failed",     0),
+            VideoStatus.FAILED:     ("failed",      0),
         }
         stage, percent = stage_map.get(video.status, ("unknown", 0))
-        return ProgressResponse(stage=stage, percent=percent)
+
+        # Takılı video tespiti — uploaded/processing + eşik aşıldı
+        stuck_stages = {VideoStatus.UPLOADED, VideoStatus.PROCESSING}
+        is_stale = (
+            video.status in stuck_stages
+            and elapsed > self._STALE_THRESHOLD_SECONDS
+        )
+        if is_stale:
+            stage   = "stale"
+            percent = 0
+            logger.warning("⚠️ Takılı video | video_id=%s | elapsed=%ds", video_id, elapsed)
+
+        return ProgressResponse(
+            stage=stage,
+            percent=percent,
+            elapsed_seconds=elapsed,
+            stale=is_stale,
+        )
 
     # ── Queries ───────────────────────────────────────────────────────────────
 

@@ -2,9 +2,10 @@
 
 import React, { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
-import { MapPin, ArrowLeft, Clock, Mic, FileText, Globe2, Navigation, PenLine, Share2 } from "lucide-react";
+import { MapPin, ArrowLeft, Clock, Mic, FileText, Globe2, Navigation, PenLine, Share2, Download } from "lucide-react";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
+import AIStatsCard from "@/components/AIStatsCard";
 import { useRouter, useParams } from "next/navigation";
 import { getPlan, getVideoProgress, type VideoDetail } from "@/lib/api";
 import dynamic from "next/dynamic";
@@ -203,7 +204,14 @@ export default function AnalysisResultPage() {
           >
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Geri
           </button>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 no-print">
+            <button
+              onClick={() => window.print()}
+              className="flex items-center gap-2 px-5 py-2.5 bg-white/5 border border-white/15 text-ice rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all"
+              title="Tarayıcı yazdırma diyalogundan PDF olarak kaydet"
+            >
+              <Download className="w-3.5 h-3.5" /> PDF İndir
+            </button>
             <Link
               href={`/editor/${params.id}`}
               className="flex items-center gap-2 px-5 py-2.5 bg-neon/10 border border-neon/30 text-neon rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-neon/20 transition-all"
@@ -233,6 +241,20 @@ export default function AnalysisResultPage() {
             {ai?.detections?.count && <span className="flex items-center gap-1"><Globe2 className="w-4 h-4" /> {ai.detections.count} nesne</span>}
           </div>
         </div>
+
+        {/* AI Pipeline İstatistikleri */}
+        {ai && (
+          <AIStatsCard
+            processingTime={ai.processing_time ?? null}
+            locationsCount={locations.length}
+            detectionsCount={ai.detections?.count ?? 0}
+            ocrCount={(ocrPois.length || ocrTexts.length) ?? 0}
+            transcriptLength={transcript?.length ?? 0}
+            tipsCount={tips.length}
+            totalDistanceKm={totalDistance ?? null}
+            videoDuration={video.duration}
+          />
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
 

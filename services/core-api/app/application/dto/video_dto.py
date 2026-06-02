@@ -17,6 +17,11 @@ class VideoUploadResponse(BaseModel):
 class ProgressResponse(BaseModel):
     stage: str
     percent: int
+    # iOS timer için: elapsed_seconds sunucu tarafından hesaplanır,
+    # client-side timestamp hatasını önler.
+    elapsed_seconds: Optional[int] = None
+    # True → video takılı kalmış, kullanıcıya hata göster
+    stale: bool = False
 
 
 class PlanSummary(BaseModel):

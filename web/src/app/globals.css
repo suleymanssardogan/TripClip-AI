@@ -195,3 +195,159 @@
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ── Theme Toggle: html.light overrides ───────────────────────────────────
+   "html.light" set olduğunda Tailwind ile yazılmış koyu tema öğelerini
+   yumuşak krem/charcoal varyantlarına çeviriyoruz. Hiçbir component'i
+   refactor etmeden, sadece CSS ile ışık modunu geçici aç/kapa.
+─────────────────────────────────────────────────────────────────────────── */
+
+html.light body {
+  background-color: #FAF7F2 !important;
+  color: #1C1C1E !important;
+  background-image:
+    linear-gradient(rgba(28,28,30,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(28,28,30,0.025) 1px, transparent 1px) !important;
+}
+
+/* Tailwind utility renk override'ları — yalnızca light mode'da geçerli */
+html.light .bg-surface,
+html.light .bg-bg,
+html.light .bg-card     { background-color: #FFFFFF !important; }
+html.light .bg-dim      { background-color: #F4EFE6 !important; }
+html.light .bg-white\/5,
+html.light .bg-white\/10 { background-color: rgba(28,28,30,0.04) !important; }
+
+html.light .text-ice    { color: #1C1C1E !important; }
+html.light .text-muted  { color: #5C5C5E !important; }
+html.light .text-neon   { color: #0A8F6B !important; }   /* daha okunaklı yeşil */
+html.light .text-violet { color: #6D28D9 !important; }
+
+html.light .border-white\/5,
+html.light .border-white\/10,
+html.light .border-white\/20 { border-color: rgba(28,28,30,0.10) !important; }
+
+html.light .neon-card {
+  background: #FFFFFF !important;
+  border: 1px solid #E8E0D0 !important;
+  box-shadow: 0 4px 18px rgba(28,28,30,0.06), 0 1px 0 rgba(28,28,30,0.02) !important;
+}
+html.light .neon-card:hover {
+  border-color: #C8A96E !important;
+  box-shadow: 0 8px 24px rgba(28,28,30,0.10) !important;
+}
+
+html.light .glass {
+  background: rgba(255,255,255,0.85) !important;
+  border: 1px solid rgba(28,28,30,0.08) !important;
+}
+
+html.light .btn-primary {
+  background: linear-gradient(135deg, #1C1C1E, #2C2C2E) !important;
+  color: #FFFFFF !important;
+}
+html.light .btn-primary:hover {
+  box-shadow: 0 6px 18px rgba(28,28,30,0.18) !important;
+}
+
+html.light .gradient-text {
+  background: linear-gradient(135deg, #0A8F6B 0%, #6D28D9 50%, #DC4C3F 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+html.light ::-webkit-scrollbar-track { background: #FAF7F2 !important; }
+html.light ::-webkit-scrollbar-thumb { background: #C8A96E !important; }
+
+html.light .tag {
+  background: rgba(10,143,107,0.10) !important;
+  border: 1px solid rgba(10,143,107,0.25) !important;
+  color: #0A8F6B !important;
+}
+
+/* Print için PDF için daha okunaklı */
+@media print {
+  body { background: white !important; color: black !important; background-image: none !important; }
+  nav, .no-print { display: none !important; }
+  .neon-card { border: 1px solid #E5E5E5 !important; box-shadow: none !important; background: white !important; break-inside: avoid; }
+  .text-ice, .text-neon, .text-muted, .text-violet, .text-coral { color: #1C1C1E !important; }
+  a { color: black !important; text-decoration: none !important; }
+}
+
+/* ── Light / Luxury Theme ─────────────────────────────────────────────── */
+
+.light-page {
+  background-color: #FAF7F2;
+  color: #1C1C1E;
+  background-image: none;
+}
+
+.bg-cream {
+  background-color: #FAF7F2;
+}
+
+.text-charcoal    { color: #1C1C1E; }
+.text-charcoal-mid { color: #5C5C5E; }
+.text-charcoal-lt  { color: #9A9A9C; }
+.text-gold         { color: #C8A96E; }
+.border-warm-border { border-color: #E8E0D0; }
+
+.luxury-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #C8A96E;
+}
+
+.luxury-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #1C1C1E;
+  color: #FAF7F2;
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.875rem 1.75rem;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.luxury-btn:hover {
+  background: #2C2C2E;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+}
+
+.luxury-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1C1C1E;
+  border-bottom: 1px solid #1C1C1E;
+  padding-bottom: 1px;
+  transition: color 0.2s, border-color 0.2s;
+}
+.luxury-link:hover {
+  color: #C8A96E;
+  border-color: #C8A96E;
+}
+
+.luxury-divider {
+  border: none;
+  border-top: 1px solid #E8E0D0;
+}
+
+.gold-line {
+  display: block;
+  width: 2.5rem;
+  height: 2px;
+  background: linear-gradient(90deg, #C8A96E, #E8C98E);
+}
+
+@keyframes luxury-fade-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

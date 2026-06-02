@@ -31,10 +31,10 @@ def to_mobile_detail(raw: Dict[str, Any]) -> Dict[str, Any]:
     Core API'nin video detayını iOS ResultsView modeline dönüştürür.
     Koordinatları MapKit'in CLLocationCoordinate2D formatına getirir.
     """
-    ai = raw.get("ai_results", {})
-    nominatim = ai.get("nominatim", {})
-    route_data = ai.get("route", {}).get("optimized_route", {})
-    rag_data   = ai.get("rag", {}).get("travel_tips", {})
+    ai         = raw.get("ai_results") or {}       # null JSON → empty dict
+    nominatim  = ai.get("nominatim") or {}
+    route_data = (ai.get("route") or {}).get("optimized_route") or {}
+    rag_data   = (ai.get("rag") or {}).get("travel_tips") or {}
 
     locations = _shape_locations(nominatim.get("deduplicated_locations") or [])
     route      = _shape_route(route_data)
@@ -50,12 +50,14 @@ def to_mobile_detail(raw: Dict[str, Any]) -> Dict[str, Any]:
         "locations":    locations,
         "route":        route,
         # AI özet
-        "transcription": (ai.get("audio") or {}).get("transcription", {}).get("transcript"),
+        "transcription": ((ai.get("audio") or {}).get("transcription") or {}).get("transcript"),
         "travelTips":   tips,
         "ocrPois":      ai.get("ocr_pois") or [],
         # İstatistik
-        "detectionsCount":  (ai.get("detections") or {}).get("count", 0),
+        "detectionsCount":  (ai.get("detections") or {}).get("count") or 0,
         "processingTime":   ai.get("processing_time"),
+        # Geriye dönük uyumluluk: eski iOS ResultsView ai_results.nominatim.deduplicated_locations'a bakıyor
+        "ai_results":   ai if ai else None,
     }
 
 
@@ -81,19 +83,31 @@ def _shape_locations(locs: List[Dict]) -> List[Dict]:
 
 
 def _shape_route(route_data: Dict) -> Optional[List[Dict]]:
-    """TSP rota sırasını koordinat listesine çevirir."""
+    """TSP rota sırasını koordinat listesine çevirir.
+
+    DB'deki route yapısı:
+      optimized_route.route[].original_name
+      optimized_route.route[].place_data.location.lat / .lng
+    """
     if not route_data:
         return None
-    ordered = route_data.get("ordered_locations") or []
-    return [
-        {
-            "latitude":  loc.get("lat"),
-            "longitude": loc.get("lng"),
-            "name":      loc.get("name", ""),
-        }
-        for loc in ordered
-        if loc.get("lat") and loc.get("lng")
-    ]
+
+    # video_processor.py TSP çıktısı "route" key'i kullanıyor
+    ordered = route_data.get("route") or []
+    result  = []
+    for loc in ordered:
+        place = loc.get("place_data") or {}
+        coord = place.get("location") or {}
+        lat   = coord.get("lat")
+        lng   = coord.get("lng")
+        if lat is None or lng is None:
+            continue
+        result.append({
+            "latitude":  lat,
+            "longitude": lng,
+            "name":      loc.get("original_name") or place.get("name", ""),
+        })
+    return result or None
 
 
 def _shape_tips(rag_data: Any) -> List[Dict]:

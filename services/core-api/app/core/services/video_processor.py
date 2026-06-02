@@ -1,49 +1,152 @@
-from pathlib import Path
-import uuid
-import re as _re
-from difflib import SequenceMatcher
-from typing import List, Dict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+"""
+TripClip AI — Video Processing Pipeline (Graceful Degradation).
+
+Her AI servisi bağımsız çalışır. Biri başarısız olursa:
+  - Hata loglanır
+  - Fallback değer kullanılır
+  - Diğer servisler etkilenmez
+  - Pipeline tamamlanır
+
+Degradasyon raporu her işlem sonunda loglanır:
+  ✅ OCR        — 14 metin bulundu
+  ⚠️  Vision    — FALLBACK (quota aşıldı: 429)
+  ✅ Whisper    — 312 karakter transkript
+  ✅ YOLO       — 47 nesne
+"""
+
+from __future__ import annotations
+
 import logging
+import os
 import time
 import json as _json
+import re as _re
+from concurrent.futures import ThreadPoolExecutor, Future
+from dataclasses import dataclass, field
+from difflib import SequenceMatcher
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
-# Redis progress store (opsiyonel — bağlantı yoksa atla)
-try:
-    import redis as _redis
-    _progress_redis = _redis.Redis(host="redis", port=6379, db=1, decode_responses=True)
-    _progress_redis.ping()
-except Exception:
-    _progress_redis = None
-
-
-def _set_progress(video_id: int, stage: str, percent: int):
-    """İşlem aşamasını Redis'e yaz (API üzerinden polling yapılabilir)"""
-    if _progress_redis:
-        try:
-            _progress_redis.setex(
-                f"progress:{video_id}",
-                600,   # 10 dk TTL
-                _json.dumps({"stage": stage, "percent": percent})
-            )
-        except Exception:
-            pass
-
+from app.core.redis import set_progress
 
 logger = logging.getLogger(__name__)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ServiceResult — Her AI servisinin çıktısını taşır
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class ServiceResult:
+    """Bir AI servisinin sonucunu ve durumunu tutar."""
+    name:          str
+    data:          Any
+    success:       bool
+    fallback_used: bool = False
+    error:         Optional[str] = None
+    duration_s:    float = 0.0
+
+    @property
+    def status_icon(self) -> str:
+        if self.success and not self.fallback_used:
+            return "✅"
+        if self.fallback_used:
+            return "⚠️ "
+        return "❌"
+
+    def __str__(self) -> str:
+        dur = f"{self.duration_s:.1f}s"
+        if self.fallback_used:
+            return f"{self.status_icon} {self.name:<12} — FALLBACK ({self.error}) [{dur}]"
+        if self.success:
+            return f"{self.status_icon} {self.name:<12} — OK [{dur}]"
+        return f"{self.status_icon} {self.name:<12} — HATA: {self.error} [{dur}]"
+
+
+def _safe_run(
+    name: str,
+    fn: Callable,
+    fallback: Any,
+    *,
+    timeout: Optional[float] = None,
+    future: Optional[Future] = None,
+) -> ServiceResult:
+    """
+    Bir fonksiyonu veya Future'ı güvenli şekilde çalıştırır.
+
+    Hata durumunda:
+      - Exception loglanır
+      - fallback değer döner
+      - Pipeline durmaz
+
+    Args:
+        name:    Servis adı (log ve rapor için)
+        fn:      Çağrılacak fonksiyon (future=None ise)
+        fallback: Hata durumunda kullanılacak değer
+        timeout: future.result() için timeout (saniye)
+        future:  Zaten submit edilmiş ThreadPoolExecutor future'ı
+    """
+    t0 = time.perf_counter()
+    try:
+        if future is not None:
+            data = future.result(timeout=timeout)
+        else:
+            data = fn()
+
+        dur = time.perf_counter() - t0
+        return ServiceResult(name=name, data=data, success=True, duration_s=dur)
+
+    except TimeoutError:
+        dur = time.perf_counter() - t0
+        error = f"timeout ({timeout}s)"
+        logger.warning("⏰ %s zaman aşımı — fallback kullanılıyor", name)
+        return ServiceResult(name=name, data=fallback, success=False,
+                             fallback_used=True, error=error, duration_s=dur)
+
+    except Exception as exc:
+        dur = time.perf_counter() - t0
+        error = type(exc).__name__ + ": " + str(exc)[:120]
+        logger.warning("⚠️  %s başarısız — fallback kullanılıyor | %s", name, error)
+        return ServiceResult(name=name, data=fallback, success=False,
+                             fallback_used=True, error=error, duration_s=dur)
+
+
+def _log_degradation_report(results: List[ServiceResult], video_id: int) -> None:
+    """İşlem sonunda hangi servislerin çalıştığını/düştüğünü loglar."""
+    lines = [f"\n{'─'*55}", f"  Degradasyon Raporu — video_id={video_id}", f"{'─'*55}"]
+    for r in results:
+        lines.append(f"  {r}")
+
+    failed = [r for r in results if not r.success]
+    if failed:
+        lines.append(f"\n  ⚠️  {len(failed)} servis fallback kullandı — plan eksik veriyle tamamlandı.")
+    else:
+        lines.append(f"\n  🎉 Tüm servisler başarıyla tamamlandı.")
+    lines.append(f"{'─'*55}")
+    logger.info("\n".join(lines))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VideoProcessingService
+# ─────────────────────────────────────────────────────────────────────────────
+
 class VideoProcessingService:
-    """Video processing: metadata,frames,thumbnails"""
+    """
+    Video işleme pipeline'ı.
+
+    Her AI aşaması bağımsız hata toleransına sahiptir.
+    Bir servis çökerse sadece o servisin verisi eksik olur;
+    pipeline tamamlanmaya devam eder.
+    """
 
     def __init__(self):
         self.frames_dir = Path("/app/uploads/frames")
         self.frames_dir.mkdir(parents=True, exist_ok=True)
-        # Hız: video uzunluğuna göre adaptif FPS seçimi
-        self.base_fps = 0.25   # her 4 saniyede 1 frame (0.5'ten düşürüldü)
+        self.base_fps = 0.25
 
         # ML servisleri — lazy import (test ortamında kurulu olmayabilir)
         try:
-            import ffmpeg as _ffmpeg_module  # noqa: F401 — varlık kontrolü
+            import ffmpeg as _ffmpeg_module  # noqa: F401
             from app.ml.computer_vision import ObjectDetectionService, LandmarkDetectionService
             from app.ml.ocr_service import OCRService
             from app.ml.speech_to_text import AudioProcessingService
@@ -53,527 +156,1003 @@ class VideoProcessingService:
             from app.ml.qdrant_service import QdrantService
             from app.ml.route_optimizer import RouteOptimizer
             from app.ml.rag_service import RAGService
-            self.detector = ObjectDetectionService()
+
+            self.detector        = ObjectDetectionService()
             self.vision_detector = LandmarkDetectionService()
-            self.ocr = OCRService()
+            self.ocr             = OCRService()
             self.audio_processor = AudioProcessingService()
-            self.ner = NERService()
-            self.places = PlacesService()
-            self.deduplicator = LocationDeduplicator(distance_threshold_km=2.0)
-            self.qdrant = QdrantService()
+            self.ner             = NERService()
+            self.places          = PlacesService()
+            self.deduplicator    = LocationDeduplicator(distance_threshold_km=2.0)
+            self.qdrant          = QdrantService()
             self.route_optimizer = RouteOptimizer()
-            self.rag = RAGService()
-            self._ml_available = True
+            self.rag             = RAGService()
+            self._ml_available   = True
+
+            # ── Gemini / Hibrit modu (opsiyonel) ──────────────────────────────
+            # USE_GEMINI=true  → Sadece Gemini (NER + Vision + RAG yerine tek API)
+            # USE_HYBRID=true  → Gemini + klasik BERT NER paralel, sonuçlar birleştirilir
+            # Her ikisi false → Tamamen klasik ML pipeline (BERT, YOLO, Whisper, RAG)
+            # Nominatim geocoding + outlier filter + TSP her durumda çalışır
+            self._use_hybrid = os.getenv("USE_HYBRID", "false").lower() == "true"
+            self._use_gemini = self._use_hybrid or os.getenv("USE_GEMINI", "false").lower() == "true"
+
+            if self._use_gemini:
+                from app.ml.gemini_service import GeminiService
+                self.gemini = GeminiService()
+                mode = "🔀 HİBRİT" if self._use_hybrid else "🤖 GEMINI"
+                logger.info("%s modu AKTİF (model=%s)",
+                            mode, os.getenv("GEMINI_MODEL", "gemini-2.0-flash"))
+            else:
+                self.gemini = None
+                logger.info("🔧 Klasik pipeline modu (Gemini devre dışı)")
+
         except ImportError as e:
-            logger.warning(f"ML servisleri yüklenemedi (test modu?): {e}")
+            logger.warning("ML servisleri yüklenemedi (test modu?): %s", e)
             self._ml_available = False
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # Ana pipeline
+    # ─────────────────────────────────────────────────────────────────────────
 
-    
     def process_video(self, video_path: str, video_id: int) -> Dict:
         """
-        Videoyu İşle
-        1. Metadata çıkar
-        2. Frame'leri extract et
-        3. Thumbnail oluştur
-        4. Google Vision: Landmark Detection
-        5. Text Exraction (OCR)
+        Video → AI pipeline → sonuç dict.
+
+        Graceful degradation garantisi:
+          Her AI aşaması try/except ile sarılmıştır.
+          Herhangi bir hata → fallback değer, işlem devam eder.
         """
         if not self._ml_available:
             raise RuntimeError("ML servisleri mevcut değil — Docker ortamında çalıştırın")
 
-        import ffmpeg  # Docker'da her zaman mevcut
+        import ffmpeg  # noqa: F401 — Docker'da her zaman mevcut
+        start_time = time.perf_counter()
+        degradation_log: List[ServiceResult] = []
 
-        start_time = time.time()
-        try:
-            logger.info(f"Processing video {video_id}")
-            _set_progress(video_id, "metadata", 5)
+        logger.info("🎬 Video işleme başlıyor | video_id=%s | path=%s", video_id, video_path)
 
-            # 1. Video Metadata
-            metadata = self._get_metadata(video_path)
-            logger.info(f"Metadata: {metadata}")
+        # ── 1. Metadata ───────────────────────────────────────────────────────
+        set_progress(video_id, "metadata", 5)
+        metadata = self._get_metadata(video_path)     # kritik — hata fırlatır
+        logger.info("Metadata: %s", metadata)
 
-            # 2. Frame Extraction
-            frame_dir = self.frames_dir / str(video_id)
-            duration = metadata["duration"]
-            # Kısa liste videoları hızla değişen metin overlay'leri içerir → yoğun örnekleme
-            adaptive_fps = 2.0 if duration < 20 else (1.0 if duration < 60 else (0.5 if duration < 120 else 0.25))
-            _set_progress(video_id, "frames", 10)
-            frames = self._extract_frames(video_path, frame_dir, fps=adaptive_fps)
-            logger.info(f"Extracted {len(frames)} frames at {adaptive_fps}fps")
+        # ── 2. Frame extraction ──────────────────────────────────────────────
+        frame_dir = self.frames_dir / str(video_id)
+        duration  = metadata["duration"]
+        adaptive_fps = (
+            2.0 if duration < 20  else
+            1.0 if duration < 60  else
+            0.5 if duration < 120 else
+            0.25
+        )
+        set_progress(video_id, "frames", 10)
+        frames    = self._extract_frames(video_path, frame_dir, fps=adaptive_fps)
+        thumbnail = self._create_thumbnail(frames[0] if frames else None)
+        t_frames  = time.perf_counter()
+        logger.info("🖼  %d frame @ %.2f fps | %.1fs",
+                    len(frames), adaptive_fps, t_frames - start_time)
 
-            # 3. Thumbnail
-            thumbnail = self._create_thumbnail(frames[0] if frames else None)
+        # ─────────────────────────────────────────────────────────────────────
+        # ── 3. PARALEL AI AŞAMASI ────────────────────────────────────────────
+        #
+        #   YOLO      → GPU/CPU  (nesne tespiti)
+        #   Vision    → Google API (landmark tespiti)
+        #   OCR       → CPU     (metin çıkarma)
+        #   Whisper   → CPU     (ses → metin)
+        #
+        #   Her servis bağımsız try/except içinde — biri düşse diğerleri devam eder.
+        # ─────────────────────────────────────────────────────────────────────
+        set_progress(video_id, "ai_parallel", 20)
+        # Hibrit modda Whisper çalışır (BERT NER için transkript şart)
+        # Saf Gemini modunda Whisper atlanır (Gemini frame'lerden direkt okur)
+        run_whisper = (not self._use_gemini) or self._use_hybrid
 
-            t_frames = time.time()
-            logger.info(f"⏱ Frame extraction: {t_frames - start_time:.1f}s")
+        if self._use_hybrid:
+            logger.info("🚀 Paralel AI başlıyor (YOLO + Vision + OCR + Whisper) — HİBRİT modu")
+        elif self._use_gemini:
+            logger.info("🚀 Paralel AI başlıyor (YOLO + Vision + OCR) — Whisper atlanıyor [Gemini modu]")
+        else:
+            logger.info("🚀 Paralel AI başlıyor (YOLO + Vision + OCR + Whisper) — Klasik mod")
 
-            # ── PARALEL AŞAMA: Vision + OCR + Audio aynı anda ─────────────────
-            # Her biri farklı kaynak kullandığından paralel çalıştırmak güvenli:
-            #   Vision  → YOLOv8 (CPU) + Google API (IO)
-            #   OCR     → EasyOCR (CPU)
-            #   Audio   → Whisper (CPU) + FFmpeg (IO)
-            _set_progress(video_id, "ai_parallel", 20)
-            logger.info("🚀 Paralel AI aşaması başlıyor (Vision + OCR + Audio)...")
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            f_yolo    = pool.submit(self.detector.detect_objects_in_frames,          frames)
+            f_vision  = pool.submit(self.vision_detector.detect_landmarks_in_frames, frames[:5])
+            f_ocr     = pool.submit(self.ocr.extract_text_from_frames,               frames)
+            if run_whisper:
+                f_whisper = pool.submit(self.audio_processor.process_video_audio,    video_path, video_id)
 
-            with ThreadPoolExecutor(max_workers=3) as pool:
-                f_detect  = pool.submit(self.detector.detect_objects_in_frames, frames)
-                f_vision  = pool.submit(self.vision_detector.detect_landmarks_in_frames, frames[:5])
-                f_ocr     = pool.submit(self.ocr.extract_text_from_frames, frames)
-                f_audio   = pool.submit(self.audio_processor.process_video_audio, video_path, video_id)
+            # Her future bağımsız — biri exception fırlatsa diğerleri toplanır
+            r_yolo    = _safe_run("YOLO",    None, fallback=[],   future=f_yolo,    timeout=180)
+            r_vision  = _safe_run("Vision",  None, fallback=[],   future=f_vision,  timeout=120)
+            r_ocr     = _safe_run("OCR",     None, fallback=[],   future=f_ocr,     timeout=180)
+            if run_whisper:
+                r_whisper = _safe_run("Whisper", None, fallback=None, future=f_whisper, timeout=300)
+            else:
+                r_whisper = ServiceResult("Whisper(skipped/gemini)", None, True)
 
-                detections       = f_detect.result()
-                vision_landmarks = f_vision.result()
-                extracted_texts  = f_ocr.result()
-                transcription    = f_audio.result()
+        degradation_log.extend([r_yolo, r_vision, r_ocr, r_whisper])
 
-            detections = self.detector.remove_duplicate_detections(detections)
-            landmarks  = self.detector.get_landmark_candidates(detections)
-            summary    = self.detector.get_detection_summary(detections)
-            t_parallel = time.time()
-            logger.info(f"⏱ Paralel AI (Vision+OCR+Whisper): {t_parallel - t_frames:.1f}s")
-            logger.info(f"✅ Paralel AI tamamlandı — OCR: {len(extracted_texts)} metin, "
-                        f"Vision: {len(vision_landmarks)} landmark")
+        # Sonuçları aç
+        detections: List       = r_yolo.data
+        vision_landmarks: List = r_vision.data
+        extracted_texts: List  = r_ocr.data
+        transcription: Optional[Dict] = r_whisper.data
 
-            # 7. NER: sadece audio transcript üzerinden lokasyon çıkar
-            # OCR metinleri zaten display_pois pipeline'ından geçiyor — NER'e de
-            # verilirse 7+ tekrar lokasyon çıkıyor ve geocoding 2x yavaşlıyor.
-            _set_progress(video_id, "ner", 55)
+        # YOLO post-processing (verisi varsa)
+        if detections:
+            try:
+                detections = self.detector.remove_duplicate_detections(detections)
+                landmarks  = self.detector.get_landmark_candidates(detections)
+                summary    = self.detector.get_detection_summary(detections)
+            except Exception as e:
+                logger.warning("YOLO post-process başarısız: %s", e)
+                landmarks = []
+                summary   = {"top_5_classes": []}
+        else:
+            landmarks = []
+            summary   = {"top_5_classes": []}
+
+        t_parallel = time.perf_counter()
+        logger.info("⏱ Paralel AI: %.1fs | OCR=%d metin, Vision=%d landmark, "
+                    "Whisper=%s, YOLO=%d nesne",
+                    t_parallel - t_frames,
+                    len(extracted_texts), len(vision_landmarks),
+                    "✓" if transcription else "✗",
+                    len(detections))
+
+        # ─────────────────────────────────────────────────────────────────────
+        # ── 4 & 5. Lokasyon çıkarma: Gemini VEYA klasik NER+OCR ─────────────
+        # ─────────────────────────────────────────────────────────────────────
+        transcript_text = (
+            (transcription.get("transcript", "") if transcription else "").strip()
+        )
+
+        if self._use_gemini and self.gemini:
+            # ── Gemini modu: frame + transcript → tek API çağrısı ────────────
+            set_progress(video_id, "ner", 55)
+            logger.info("🤖 Gemini lokasyon çıkarma başlıyor…")
+            r_gemini = _safe_run(
+                "Gemini(locations)",
+                lambda: self.gemini.extract_locations(frames, transcript_text),
+                fallback=[],
+            )
+            # Gemini artık List[Dict] döndürüyor: [{"name":..,"lat":..,"lng":..,"type":..}]
+            gemini_raw: List[Dict] = r_gemini.data or []
+            # Geriye dönük uyumluluk: eski string listesi gelirse dönüştür
+            if gemini_raw and isinstance(gemini_raw[0], str):
+                gemini_raw = [{"name": s, "lat": None, "lng": None, "type": "place"}
+                              for s in gemini_raw]
+            degradation_log.append(r_gemini)
+            logger.info("🤖 Gemini: %d lokasyon", len(gemini_raw))
+
+            # ── HİBRİT: BERT NER ile transkripti de tara, sonuçları birleştir ──
+            if self._use_hybrid and transcript_text:
+                r_bert = _safe_run(
+                    "BERT-NER(hybrid)",
+                    lambda: self.ner.extract_locations_from_transcript(transcript_text),
+                    fallback=[],
+                )
+                bert_locations: List[str] = r_bert.data or []
+                degradation_log.append(r_bert)
+                logger.info("🧠 BERT NER (hibrit): %d lokasyon → %s",
+                            len(bert_locations), bert_locations)
+
+                # Gemini'de olmayanları gemini_raw'a ekle (case-insensitive merge)
+                gemini_names_lc = {d["name"].lower().strip() for d in gemini_raw}
+                added_count = 0
+                for loc in bert_locations:
+                    if loc.lower().strip() not in gemini_names_lc:
+                        gemini_raw.append({
+                            "name": loc, "lat": None, "lng": None,
+                            "type": "place", "source": "bert_ner",
+                        })
+                        added_count += 1
+                if added_count:
+                    logger.info("🔀 Hibrit birleştirme: BERT'ten +%d yeni lokasyon eklendi", added_count)
+
+            extracted_locations: List[str] = [d["name"] for d in gemini_raw]
+            logger.info("✅ Toplam lokasyon adayı: %d → %s",
+                        len(extracted_locations), extracted_locations)
+            set_progress(video_id, "ner_ocr", 58)
+            # Gemini/Hibrit modunda da OCR metin filtresi çalıştır (işletme isimleri için)
+            ocr_pois: List = self._filter_ocr_pois(extracted_texts, video_id)
+
+        else:
+            # ── Klasik pipeline: NER (audio) + OCR NER ───────────────────────
+            set_progress(video_id, "ner", 55)
             extracted_locations = []
-            transcript_text = (transcription.get("transcript", "") if transcription else "").strip()
+
             if transcript_text:
-                extracted_locations = self.ner.extract_locations_from_transcript(transcript_text)
-                logger.info(f"NER ({len(transcript_text)} char transcript) → {len(extracted_locations)} lokasyon")
+                r_ner = _safe_run(
+                    "NER(audio)",
+                    lambda: self.ner.extract_locations_from_transcript(transcript_text),
+                    fallback=[],
+                )
+                extracted_locations = r_ner.data
+                degradation_log.append(r_ner)
+                logger.info("NER: %d karakter → %d lokasyon",
+                            len(transcript_text), len(extracted_locations))
+            else:
+                logger.info("NER atlandı — transkript yok (Whisper fallback veya sessiz video)")
 
-            # ── OCR POI filtreleme ──────────────────────────────────────────────
+            set_progress(video_id, "ner_ocr", 58)
+            ocr_pois = self._filter_ocr_pois(extracted_texts, video_id)
 
-            def tr_lower(s: str) -> str:
-                """Python .lower() İ→i\u0307 yapar (yanlış). Türkçe-doğru lowercase."""
-                return s.replace("İ", "i").replace("I", "ı").lower()
+        # ─────────────────────────────────────────────────────────────────────
+        # ── 6. Geocoding — Nominatim + Overpass ──────────────────────────────
+        # ─────────────────────────────────────────────────────────────────────
+        set_progress(video_id, "geocoding", 65)
 
-            # Gürültü desenleri (URL, sosyal medya vs.)
-            noise_patterns = {
-                "www.", "http", "@", "#", ".com", ".tr", "₺", "$", "€",
-                "follow", "like", "share", "subscribe", "abone", "takip",
+        # NER lokasyonlarını zenginleştir
+        gemini_city_hint = (
+            self._detect_city_from_list(extracted_locations)
+            if self._use_gemini else None
+        )
+        if gemini_city_hint:
+            logger.info("🏙️ Gemini pre-geocoding city hint: '%s'", gemini_city_hint)
+
+        # ── Gemini modunda: koordinat gelen mekanları direkt ekle ─────────────
+        # Koordinat gelmeyen mekanlar için Nominatim / city_fallback devreye girer.
+        if self._use_gemini and gemini_raw:
+            ner_enriched: List = []
+            nominatim_needed: List[str] = []
+
+            for item in gemini_raw:
+                name = item["name"]
+                lat, lng = item.get("lat"), item.get("lng")
+                if lat is not None and lng is not None:
+                    # Gemini koordinat verdi → direkt kullan
+                    ner_enriched.append({
+                        "original_name": name,
+                        "place_data": {
+                            "name":       name,
+                            "address":    name,
+                            "location":   {"lat": lat, "lng": lng},
+                            "type":       item.get("type", "place"),
+                            "class":      "place",
+                            "importance": 0.15,
+                            "source":     "gemini_coords",
+                        },
+                    })
+                    logger.info("📍 Gemini koordinat: '%s' → (%.4f, %.4f)", name, lat, lng)
+                else:
+                    nominatim_needed.append(name)
+
+            # Koordinatsızlar için Nominatim dene
+            if nominatim_needed:
+                r_ner_geo = _safe_run(
+                    "Geocoding(NER)",
+                    lambda: self.places.enrich_locations(
+                        nominatim_needed,
+                        use_overpass=True,
+                        city_hint=gemini_city_hint,
+                    ),
+                    fallback=[],
+                )
+                ner_enriched.extend(r_ner_geo.data)
+                degradation_log.append(r_ner_geo)
+        else:
+            r_ner_geo = _safe_run(
+                "Geocoding(NER)",
+                lambda: self.places.enrich_locations(
+                    extracted_locations,
+                    use_overpass=False,
+                    city_hint=gemini_city_hint,
+                ) if extracted_locations else [],
+                fallback=[],
+            )
+            ner_enriched: List = r_ner_geo.data
+            degradation_log.append(r_ner_geo)
+
+        # City bounding box (Overpass isabetini artırır)
+        city_bbox = self._extract_city_bbox(ner_enriched)
+        # City hint: "Nohut Durumu Gaziantep" gibi qualifier aramaları için
+        city_hint = self._extract_city_hint(ner_enriched)
+        if city_hint:
+            logger.info("🏙️ City hint: '%s'", city_hint)
+
+        # OCR POI'larını zenginleştir
+        set_progress(video_id, "overpass", 75)
+        ocr_enriched = self._enrich_ocr_pois(ocr_pois, city_bbox, degradation_log, city_hint=city_hint)
+
+        # Vision landmarks → zenginleştirilmiş formata çevir
+        vision_enriched = self._convert_vision_landmarks(vision_landmarks)
+
+        # ── Gemini modu: geocode edilemeyen lokasyonları şehir koordinatıyla ekle ──
+        # Nominatim'de olmayan restoranlar/mekanlar için şehir merkezini kullan.
+        # Böylece "7 Mekan" görünür, haritada şehir konumuna pin düşer.
+        if self._use_gemini and extracted_locations:
+            enriched_names = {
+                e["original_name"].lower().strip() for e in ner_enriched
             }
+            city_entry = next(
+                (e for e in ner_enriched
+                 if (e.get("place_data") or {}).get("type") in ("city", "town", "administrative")),
+                ner_enriched[0] if ner_enriched else None,
+            )
+            city_coords = (city_entry or {}).get("place_data", {}).get("location") if city_entry else None
+            fallback_city = gemini_city_hint or city_hint or ""
 
-            # Türkçe sıradan / eksik kelimeler — filtrelenecek
-            tr_stopwords = {
-                # Eylem/sıfat kelimeleri
-                "içecek", "yiyecek", "giriş", "çıkış", "bilgi", "lütfen", "teşekkür",
-                "devam", "dikkat", "uyarı", "yasak", "serbest", "açık", "kapalı",
-                "indirim", "fiyat", "menü", "sipariş", "ödeme", "nakit", "kart",
-                "telefon", "adres", "saat", "tarih", "numara", "adet", "toplam",
-                "olan", "olur", "oldu", "için", "ile", "veya", "hem", "ama",
-                "büyük", "küçük", "yeni", "eski", "güzel", "iyi", "kötü",
-                "başka", "diğer", "tüm", "her", "bazı", "çok", "az", "daha",
-                # 2-3 harflik OCR çöpleri
-                "dis", "bis", "ecs", "aci", "bey", "ecek", "acak", "mis",
-                "yo", "ve", "da", "de", "ki", "mi", "mu", "mü",
-                # Eksik isimler (Türkçe iyelik ekleri — tek başına anlamsız)
-                "kahvesi", "çayı", "kebabı", "mantısı", "baklavası", "köftesi",
-                "pidesi", "böreği", "tatlısı", "döneri", "lahmacunu", "çorbası",
-                "büfesi", "fırını", "pastanesi", "lokantası", "restoranı",
-                # Büyük şehirler NER'den gelsin, OCR'dan değil
-                "istanbul", "ankara", "izmir",
-                # Menü / tabela / sosyal medya kelimeleri
-                "market", "deneme", "gerekenler", "durumu", "masaya", "masasi",
-                "lutfen", "yiyecek", "icecek", "siparis", "ucretsiz", "ucret",
-                "ntep", "disin", "disi", "bufe", "bufesi",
-            }
+            for loc in extracted_locations:
+                if loc.lower().strip() in enriched_names:
+                    continue  # zaten geocode edildi
+                if loc.lower().strip() == fallback_city.lower().strip():
+                    continue  # şehrin kendisi, tekrar ekleme
+                if city_coords:
+                    ner_enriched.append({
+                        "original_name": loc,
+                        "place_data": {
+                            "name":       loc,
+                            "address":    f"{loc}, {fallback_city}",
+                            "location":   city_coords,   # şehir merkezi koordinatı
+                            "type":       "point_of_interest",
+                            "class":      "amenity",
+                            "importance": 0.08,
+                            "source":     "gemini_city_fallback",
+                        },
+                    })
+                    logger.info("📍 Şehir fallback ile eklendi: '%s' → %s", loc, fallback_city)
 
-            # Mekan türü sinyal kelimeleri (tarihi/turistik/doğa)
-            geo_signals = {
-                "han", "kafe", "cafe", "restoran", "müze", "cami", "kilise",
-                "köprü", "kale", "kalesi", "kaleici", "sarayı", "parkı", "gölü",
-                "plajı", "plaji",         # ASCII-OCR varyantı (ı→i)
-                "şelalesi", "selalesi",   # ASCII-OCR varyantı
-                "mağarası", "magarasi", "tepesi", "dağı", "dagi", "vadisi",
-                "konak", "çarşı", "carsi", "pazar", "hamam", "türbe", "turbe",
-                "anıt", "anit", "kervansaray", "ören",
-                "sokağı", "sokagi", "mahallesi", "kapısı", "kapisi",
-                "kulesi", "camii", "hamamı", "hamami",
-                "bahçesi", "bahcesi", "ormanı", "ormani", "göleti", "barajı",
-                "köprüsü", "koprüsü",
-                # Doğal coğrafya
-                "koyu", "körfez", "korfez", "limanı", "limani",
-                "kayalığı", "kayaligi", "adası", "adasi", "yarımadası",
-                "kanyonu", "platosu", "göleti", "çayı", "cayi", "irmağı",
-                "yaylası", "yaylasi", "milliparkı",
-                # Ören / tarihi
-                "harabeleri", "höyüğü", "hoyugu", "mezarlığı", "mezarligi",
-                "kilisesi", "manastırı", "manastiri", "kalıntıları",
-            }
+        enriched_locations = ner_enriched + ocr_enriched + vision_enriched
+        logger.info("Enriched toplam: %d NER + %d OCR + %d Vision = %d",
+                    len(ner_enriched), len(ocr_enriched),
+                    len(vision_enriched), len(enriched_locations))
 
-            def _ascii_fold(s: str) -> str:
-                """OCR hatalarını tolere etmek için Türkçe → ASCII dönüşümü."""
-                return (s.replace("ğ", "g").replace("ü", "u").replace("ş", "s")
-                         .replace("ı", "i").replace("ö", "o").replace("ç", "c")
-                         .replace("â", "a").replace("î", "i").replace("û", "u"))
+        # ─────────────────────────────────────────────────────────────────────
+        # ── 6b. Coğrafi Tutarlılık Filtresi ──────────────────────────────────
+        # Dominant il tespit edilir, uzak outlier'lar aynı il bbox'ıyla
+        # yeniden sorgulanır.
+        # Örnek: 7× Antalya, 1× Amasya (Kaleköy) → Kaleköy'ü Antalya'da yeniden ara
+        # ─────────────────────────────────────────────────────────────────────
+        enriched_locations = self._fix_geographic_outliers(
+            enriched_locations, degradation_log
+        )
 
-            def _has_geo_signal(text: str) -> bool:
-                """Geo sinyal içeriyor mu? ASCII-fold ile OCR ı→i hatalarını tolere eder."""
-                t_l = tr_lower(text)
-                if any(s in t_l for s in geo_signals):
-                    return True
-                # Geo sinyal ASCII-folded olarak da dene
-                t_f = _ascii_fold(t_l)
-                if any(_ascii_fold(s) in t_f for s in geo_signals):
-                    return True
-                return False
+        # ─────────────────────────────────────────────────────────────────────
+        # ── 7. Deduplication ─────────────────────────────────────────────────
+        # Gemini city_fallback lokasyonları aynı koordinata sahip olduğundan
+        # dedup'dan ayrı tutuyoruz — yoksa 7→1 olur.
+        # ─────────────────────────────────────────────────────────────────────
+        set_progress(video_id, "dedup", 85)
 
-            # İşletme türü sinyal kelimeleri (Nominatim'e gönderilmez, sadece gösterimde)
-            biz_signals = {
-                "dürümcü", "kebapçı", "pideci", "börekçi", "çorbacı", "tatlıcı",
-                "fırın", "pastane", "büfe", "lokanta", "ocakbaşı", "mangal",
-                "kahveci", "kahvesi", "çaycı", "çayevi", "nargile",
-                "berber", "kuaför", "eczane", "market", "bakkal",
-                "otel", "pansiyon", "apart",
-            }
+        # Gemini modunda: koordinatlar birbirine çok yakın (aynı çarşı/semt içinde)
+        # 2km threshold hepsini tek mekan sayar → Gemini modunda 0.05km (50m) kullan.
+        # Sadece tam aynı adreste olanları birleştirsin.
+        # Klasik pipeline: 2km threshold korunur (NER+OCR+Vision tekrarlarını temizler).
+        if self._use_gemini:
+            dedup_threshold = 0.001  # 1 metre — sadece birebir aynı koordinat (Gemini farklı isim = farklı mekan)
+        else:
+            dedup_threshold = 2.0    # 2 km   — klasik pipeline için
 
-            all_poi_signals = geo_signals | biz_signals
+        # Fallback lokasyonları (aynı koordinat) dedup'a sokma, sonradan ekle
+        geocoded_locs = [l for l in enriched_locations
+                         if (l.get("place_data") or {}).get("source") != "gemini_city_fallback"]
+        fallback_locs = [l for l in enriched_locations
+                         if (l.get("place_data") or {}).get("source") == "gemini_city_fallback"]
 
-            # Video overlay / açıklama kalıpları — mekan ismi değil
-            # NOT: Şehir adı hardcode edilmez; kalıp herhangi bir kelimeyle çalışır.
-            # Türkçe büyük→küçük dönüşümü regex'ten önce yapılır (t_l üzerinde çalışır).
-            description_patterns = [
+        from app.ml.location_deduplicator import LocationDeduplicator
+        deduplicator = LocationDeduplicator(distance_threshold_km=dedup_threshold)
+
+        r_dedup = _safe_run(
+            "Dedup",
+            lambda: deduplicator.deduplicate_locations(geocoded_locs),
+            fallback=geocoded_locs,
+        )
+        deduplicated_locations: List = r_dedup.data + fallback_locs
+
+        r_loc_summary = _safe_run(
+            "LocSummary",
+            lambda: deduplicator.get_location_summary(geocoded_locs),
+            fallback={},
+        )
+        location_summary: Dict = r_loc_summary.data
+        degradation_log.extend([r_dedup, r_loc_summary])
+
+        # ─────────────────────────────────────────────────────────────────────
+        # ── 8. Route Optimization ────────────────────────────────────────────
+        # ─────────────────────────────────────────────────────────────────────
+        set_progress(video_id, "route", 90)
+        r_route = _safe_run(
+            "Route",
+            lambda: (
+                self.route_optimizer.optimize_route(deduplicated_locations)
+                if deduplicated_locations else {}
+            ),
+            fallback={},
+        )
+        optimized_route: Dict = r_route.data
+        degradation_log.append(r_route)
+
+        # ─────────────────────────────────────────────────────────────────────
+        # ── 9. Travel Tips: Gemini VEYA Ollama/RAG ───────────────────────────
+        # ─────────────────────────────────────────────────────────────────────
+        set_progress(video_id, "rag", 95)
+        if self._use_gemini and self.gemini:
+            tip_names = [loc.get("original_name", "") for loc in deduplicated_locations]
+            r_rag = _safe_run(
+                "Gemini(tips)",
+                lambda: self.gemini.generate_travel_tips(tip_names) if tip_names else {},
+                fallback={},
+            )
+        else:
+            r_rag = _safe_run(
+                "RAG",
+                lambda: (
+                    self.rag.generate_travel_tips(deduplicated_locations)
+                    if deduplicated_locations else {}
+                ),
+                fallback={},
+            )
+        travel_tips: Dict = r_rag.data
+        degradation_log.append(r_rag)
+
+        # ─────────────────────────────────────────────────────────────────────
+        # ── 10. Qdrant — Vektör Embedding ────────────────────────────────────
+        # ─────────────────────────────────────────────────────────────────────
+        r_qdrant = _safe_run(
+            "Qdrant",
+            lambda: self.qdrant.add_locations(enriched_locations) if enriched_locations else None,
+            fallback=None,
+        )
+        degradation_log.append(r_qdrant)
+
+        # ─────────────────────────────────────────────────────────────────────
+        # ── Degradasyon Raporu ────────────────────────────────────────────────
+        # ─────────────────────────────────────────────────────────────────────
+        total_time = time.perf_counter() - start_time
+        _log_degradation_report(degradation_log, video_id)
+        logger.info("⏱ Toplam işlem süresi: %.2fs | Frame/sn: %.2f",
+                    total_time, len(frames) / total_time if frames else 0)
+
+        # Kaç servis fallback kullandı?
+        fallback_count = sum(1 for r in degradation_log if r.fallback_used)
+        degradation_summary = {
+            "total_services": len(degradation_log),
+            "successful":     len(degradation_log) - fallback_count,
+            "fallback_used":  fallback_count,
+            "failed_services": [r.name for r in degradation_log if r.fallback_used],
+        }
+
+        return {
+            # ── Video meta ────────────────────────────────────────────────────
+            "duration":         metadata["duration"],
+            "resolution":       f"{metadata['width']}x{metadata['height']}",
+            "fps":              metadata["fps"],
+            "frame_count":      len(frames),
+            "frames_dir":       str(frame_dir),
+            "thumbnail":        thumbnail,
+            "processing_time":  round(total_time, 2),
+            "fps_processed":    round(len(frames) / total_time, 2) if frames else 0,
+            # ── AI çıktıları ──────────────────────────────────────────────────
+            "detections_count":      len(detections),
+            "landmarks_count":       len(landmarks),
+            "vision_landmarks":      vision_landmarks,
+            "extracted_texts":       extracted_texts,
+            "transcription":         transcription,
+            "extracted_locations":   extracted_locations,
+            "enriched_locations":    enriched_locations,
+            "location_summary":      location_summary,
+            "deduplicated_locations":deduplicated_locations,
+            "optimized_route":       optimized_route,
+            "travel_tips":           travel_tips,
+            "ocr_pois":              ocr_pois,
+            "top_objects":           summary["top_5_classes"],
+            # ── Degradasyon bilgisi ───────────────────────────────────────────
+            "degradation":           degradation_summary,
+        }
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Yardımcı metodlar
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _filter_ocr_pois(self, extracted_texts: List[str], video_id: int) -> List[str]:
+        """OCR metinlerinden POI'ları filtrele. OCR başarısızsa boş liste döner."""
+        if not extracted_texts:
+            return []
+
+        try:
+            return self._run_ocr_filter_pipeline(extracted_texts, video_id)
+        except Exception as e:
+            logger.warning("OCR POI filtresi başarısız — boş liste fallback | %s", e)
+            return []
+
+    def _enrich_ocr_pois(
+        self,
+        ocr_pois: List[str],
+        city_bbox: Optional[tuple],
+        degradation_log: List[ServiceResult],
+        city_hint: Optional[str] = None,
+    ) -> List[Dict]:
+        """OCR POI'larını geocoding ile zenginleştir."""
+        if not ocr_pois:
+            return []
+
+        geo_signals = self._geo_signal_set()
+
+        def _has_geo_signal(text: str) -> bool:
+            t_l = self._tr_lower(text)
+            t_f = self._ascii_fold(t_l)
+            return any(s in t_l or self._ascii_fold(s) in t_f for s in geo_signals)
+
+        overpass_pois  = [p for p in ocr_pois if _has_geo_signal(p)]
+        nominatim_pois = [p for p in ocr_pois if not _has_geo_signal(p)]
+
+        enriched: List[Dict] = []
+
+        if overpass_pois:
+            r = _safe_run(
+                "Geocoding(Overpass)",
+                lambda: self.places.enrich_locations(
+                    overpass_pois, use_overpass=True, city_bbox=city_bbox,
+                    city_hint=city_hint,
+                ),
+                fallback=[],
+            )
+            # Overpass fail/boş döndüyse → aynı lokasyonları Nominatim'e yönlendir
+            if r.data:
+                enriched.extend(r.data)
+                degradation_log.append(r)
+            else:
+                logger.info("🔄 Overpass başarısız → %d POI Nominatim'e yönlendiriliyor",
+                            len(overpass_pois))
+                nominatim_pois = overpass_pois + nominatim_pois  # hepsini birleştir
+                degradation_log.append(r)
+
+        if nominatim_pois:
+            r = _safe_run(
+                "Geocoding(Nominatim)",
+                lambda: self.places.enrich_locations(
+                    nominatim_pois, use_overpass=False, city_bbox=city_bbox,
+                    city_hint=city_hint,
+                ),
+                fallback=[],
+            )
+            enriched.extend(r.data)
+            degradation_log.append(r)
+
+        return enriched
+
+    @staticmethod
+    def _convert_vision_landmarks(vision_landmarks: List[Dict]) -> List[Dict]:
+        """Google Vision landmark'larını enriched formatına çevir."""
+        result = []
+        for lm in vision_landmarks:
+            if lm.get("latitude") and lm.get("longitude") and lm.get("confidence", 0) > 0.5:
+                result.append({
+                    "original_name": lm["name"],
+                    "place_data": {
+                        "name":       lm["name"],
+                        "location":   {"lat": lm["latitude"], "lng": lm["longitude"]},
+                        "type":       "landmark",
+                        "importance": lm["confidence"],
+                    },
+                })
+        return result
+
+    def _fix_geographic_outliers(
+        self,
+        locations: List[Dict],
+        degradation_log: List,
+    ) -> List[Dict]:
+        """
+        Dominant ili bul, çok uzaktaki lokasyonları aynı il bbox'ıyla yeniden sorgula.
+
+        Algoritma:
+          1. Her lokasyonun il bilgisini çek (address_details.province)
+          2. En sık geçen il → dominant_province
+          3. Dominant ile ait lokasyonların merkez koordinatını hesapla (centroid)
+          4. Centroid'e MAX_OUTLIER_KM'den uzak olanları yeniden sorgula
+          5. Yeni sonuç bulunursa değiştir, bulunamazsa orijinali koru
+
+        Örnek:
+          7× Antalya + 1× Amasya (Kaleköy) + 1× İstanbul (Kaleiçi)
+          → dominant = Antalya, centroid ≈ (36.5, 30.5)
+          → Kaleköy Amasya 490km uzak → Antalya'da yeniden ara → Kaleköy/Kaş ✅
+          → Kaleiçi İstanbul 590km uzak → Antalya'da yeniden ara → Kaleiçi/Antalya ✅
+        """
+        from collections import Counter
+        from math import radians, sin, cos, sqrt, atan2
+
+        MAX_OUTLIER_KM = 300   # bu kadar uzaksa outlier say
+        DOMINANT_MIN   = 2     # dominant il için minimum lokasyon sayısı
+
+        if len(locations) < 3:
+            return locations   # çok az veri → filtre anlamsız
+
+        def _haversine(lat1, lon1, lat2, lon2):
+            R = 6371.0
+            dlat = radians(lat2 - lat1)
+            dlon = radians(lon2 - lon1)
+            a = sin(dlat/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(dlon/2)**2
+            return R * 2 * atan2(sqrt(a), sqrt(1-a))
+
+        def _get_coords(loc):
+            pd = loc.get("place_data") or {}
+            c  = pd.get("location") or {}
+            return c.get("lat"), c.get("lng")
+
+        def _get_province(loc):
+            pd   = loc.get("place_data") or {}
+            addr = pd.get("address_details") or {}
+            return addr.get("province") or addr.get("state")
+
+        # Adım 1: İl sayımı
+        province_counter: Counter = Counter()
+        for loc in locations:
+            p = _get_province(loc)
+            if p:
+                province_counter[p] += 1
+
+        if not province_counter:
+            return locations
+
+        dominant_province, dominant_count = province_counter.most_common(1)[0]
+        if dominant_count < DOMINANT_MIN:
+            return locations   # dominant yok → filtre gerekli değil
+
+        # Adım 2: Dominant ilin centroid'i
+        dominant_locs = [
+            loc for loc in locations
+            if _get_province(loc) == dominant_province
+        ]
+        valid_coords = [
+            _get_coords(loc) for loc in dominant_locs
+            if all(_get_coords(loc))
+        ]
+        if not valid_coords:
+            return locations
+
+        centroid_lat = sum(c[0] for c in valid_coords) / len(valid_coords)
+        centroid_lng = sum(c[1] for c in valid_coords) / len(valid_coords)
+
+        # Bbox: centroid ± 2°  (~220km)
+        dominant_bbox = (
+            centroid_lat - 2.0, centroid_lng - 2.0,
+            centroid_lat + 2.0, centroid_lng + 2.0,
+        )
+
+        logger.info(
+            "🌍 Coğrafi tutarlılık: dominant=%s (%d/%d lokasyon), centroid=(%.2f, %.2f)",
+            dominant_province, dominant_count, len(locations),
+            centroid_lat, centroid_lng,
+        )
+
+        # Adım 3: Outlier'ları tespit et ve yeniden sorgula
+        result = []
+        for loc in locations:
+            lat, lng = _get_coords(loc)
+            if lat is None or lng is None:
+                result.append(loc)
+                continue
+
+            km = _haversine(centroid_lat, centroid_lng, lat, lng)
+            if km <= MAX_OUTLIER_KM:
+                result.append(loc)
+                continue
+
+            # Outlier — yeniden sorgula
+            name = loc.get("original_name", "")
+            logger.info(
+                "🔄 Outlier yeniden sorgulanıyor: '%s' (%.0fkm uzak, il=%s)",
+                name, km, _get_province(loc),
+            )
+            new_place = self.places.search_place(
+                name, city_bbox=dominant_bbox
+            )
+            if new_place:
+                new_lat = (new_place.get("location") or {}).get("lat")
+                new_lng = (new_place.get("location") or {}).get("lng")
+                if new_lat and new_lng:
+                    new_km = _haversine(centroid_lat, centroid_lng, new_lat, new_lng)
+                    if new_km <= MAX_OUTLIER_KM:
+                        logger.info(
+                            "  ✅ '%s' düzeltildi: %s → %s (%.0fkm)",
+                            name, _get_province(loc),
+                            (new_place.get("address_details") or {}).get("province", "?"),
+                            new_km,
+                        )
+                        loc = {**loc, "place_data": new_place}
+                    else:
+                        logger.info("  ⚠️ '%s' yeni sonuç da uzak (%.0fkm) — orijinal korundu", name, new_km)
+            else:
+                logger.info("  ⚠️ '%s' yeniden sorgu sonuç vermedi — orijinal korundu", name)
+
+            result.append(loc)
+
+        return result
+
+    @staticmethod
+    def _extract_city_bbox(ner_enriched: List[Dict]) -> Optional[tuple]:
+        """İlk NER lokasyonundan şehir bounding box'ı çıkar (Overpass için)."""
+        if not ner_enriched:
+            return None
+        loc = ner_enriched[0].get("place_data", {}).get("location")
+        if not loc:
+            return None
+        lat, lng = loc["lat"], loc["lng"]
+        return (lat - 2.0, lng - 2.0, lat + 2.0, lng + 2.0)
+
+    @staticmethod
+    def _extract_city_hint(ner_enriched: List[Dict]) -> Optional[str]:
+        """
+        Dominant şehir adını çıkar — OCR geocoding için qualifier.
+        "Nohut Durumu" → "Nohut Durumu Gaziantep" şeklinde Nominatim'de aranır.
+        """
+        if not ner_enriched:
+            return None
+        for loc in ner_enriched:
+            addr = (loc.get("place_data") or {}).get("address_details") or {}
+            # Nominatim address hierarchy: city > town > province > state
+            for key in ("city", "town", "province", "state"):
+                if name := addr.get(key):
+                    return name
+            # Fallback: original_name eğer şehir seviyesindeyse
+            place = loc.get("place_data") or {}
+            if place.get("type") in ("city", "town"):
+                return loc.get("original_name")
+        return None
+
+    @staticmethod
+    def _detect_city_from_list(locations: List[str]) -> Optional[str]:
+        """
+        Gemini lokasyon listesinden şehir adını önceden tespit et.
+        Geocoding'den ÖNCE çağrılır → city_hint olarak kullanılır.
+        Örn: ['Gaziantep', 'Bişirici Kebap', ...] → 'Gaziantep'
+        """
+        _tr_cities = {
+            "gaziantep", "antalya", "istanbul", "ankara", "izmir", "bursa",
+            "adana", "konya", "mersin", "kayseri", "eskişehir", "eskisehir",
+            "trabzon", "diyarbakır", "diyarbakir", "samsun", "malatya",
+            "kahramanmaraş", "kahramanmaras", "erzurum", "kocaeli", "gebze",
+            "denizli", "pamukkale", "bodrum", "muğla", "mugla", "fethiye",
+            "alanya", "kapadokya", "cappadocia", "nevşehir", "nevsehir",
+            "mardin", "şanlıurfa", "sanliurfa", "urfa", "hatay", "antakya",
+        }
+        for loc in locations:
+            if loc.lower().strip() in _tr_cities:
+                return loc
+        return None
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # OCR filtre pipeline (ayrı metod — test edilebilir)
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _run_ocr_filter_pipeline(self, extracted_texts: List[str], video_id: int) -> List[str]:
+        """OCR POI filtresi — gürültü eleme + NER batch + heuristic fallback."""
+
+        tr_lower    = self._tr_lower
+        ascii_fold  = self._ascii_fold
+        geo_signals = self._geo_signal_set()
+        noise_set   = self._noise_pattern_set()
+        stopwords   = self._tr_stopword_set()
+        generic_set = self._generic_type_set()
+
+        desc_regexes = [
+            _re.compile(p, _re.IGNORECASE) for p in [
                 r"\d+\s*(yer|tane|adet|durak|mekan|kafe|sahil|plaj)",
-                # "[ŞEHİR]'DA/DE/TA/TE GEZİLECEK" — apostrof/tırnak olsun olmasın
-                # "antalya'da gezilecek", "istanbul da gezilecek", "da gezilecek"
                 r"\w+['\u2018\u2019]?\s*(?:da|de|ta|te)\s+gezilecek",
-                r"(?:da|de|ta|te)\s+gezilecek",   # bare "da gezilecek"
+                r"(?:da|de|ta|te)\s+gezilecek",
                 r"(en iyi|mutlaka|kesinlikle|illa)",
                 r"(gidilecek|gorilecek|gorulebilecek)",
                 r"(yenilecek|icilecek|icekilecek)",
                 r"(nasil|nerede|nereden|hangi)",
                 r"(bolum|part|episode|vlog|video)",
                 r"\d+\.\s*(bolum|part|video)",
-                # Genel başlık/liste kalıpları
-                r"gezilecek",          # "gezilecek" geçen her şey → başlık
+                r"gezilecek",
                 r"(listesi|rehberi|onerileri|tavsiyeleri)",
                 r"(top\s*\d+|en\s+iyi\s+\d+)",
             ]
-            desc_regexes = [_re.compile(p, _re.IGNORECASE) for p in description_patterns]
+        ]
 
-            def is_noise(t: str) -> bool:
-                t_l = tr_lower(t).strip()
-                t_orig = t.strip()
-                if len(t_l) < 4: return True
-                if t_l.replace(" ", "").isnumeric(): return True
-                if t_l.endswith(("?", "-", ":", ".", ",")): return True
-                if t_l.startswith(("-", ".", ":")): return True
-                if any(p in t_l for p in noise_patterns): return True
-                if t_l in tr_stopwords: return True
-                # Sosyal medya kullanıcı adı: alt çizgi içeriyorsa (bayramyildiz_)
-                if "_" in t_orig: return True
-                # Sayı + birim kalıbı: "16 YER", "3 TANE"
-                tokens = t_l.split()
-                if tokens and tokens[0].isnumeric(): return True
-                # Video başlığı / açıklama kalıbı
-                if any(r.search(t_l) for r in desc_regexes): return True
-                # Çok kısa tokenlar: "EMİZ YO", "VE i"
-                short_tokens = [tok for tok in tokens if len(tok) <= 2 and tok not in {"ve", "da", "de", "ya"}]
-                if len(tokens) > 0 and len(short_tokens) / len(tokens) > 0.5: return True
-                # Tek kelime ALL-CAPS kısa
-                if t_orig.isupper() and len(t_l) < 6 and len(tokens) == 1: return True
+        def _has_geo_signal(text: str) -> bool:
+            t_l = tr_lower(text)
+            t_f = ascii_fold(t_l)
+            return any(s in t_l or ascii_fold(s) in t_f for s in geo_signals)
+
+        def _split_camelcase(t: str) -> str:
+            t = _re.sub(r'([a-zğüşıöç])([A-ZĞÜŞİÖÇ])', r'\1 \2', t)
+            t = _re.sub(r'([A-ZĞÜŞİÖÇ]{2,})([A-ZĞÜŞİÖÇ][a-zğüşıöç])', r'\1 \2', t)
+            return t.strip()
+
+        def _norm(t: str) -> str:
+            return _re.sub(r'[^a-z0-9ğüşıöç]', '', tr_lower(t))
+
+        def _is_fuzzy_dup(t: str, seen: list) -> bool:
+            norm = _norm(t)
+            if len(norm) < 4:
                 return False
+            return any(
+                SequenceMatcher(None, norm, s).ratio() >= 0.82
+                for s in seen
+            )
 
-            # ── Liste 1: Gösterim POI'ları ────────────────────────────────────
-            # Karar hiyerarşisi (sırayla):
-            #   1. NER modeli LOC/GPE dedi → kesinlikle yer ismi
-            #   2. Geo/biz sinyal kelimesi var → muhtemelen yer ismi
-            #   3. 2+ kelime + gürültü değil → muhtemelen yer ismi (fallback)
+        def is_noise(t: str) -> bool:
+            t_l  = tr_lower(t).strip()
+            t_orig = t.strip()
+            if len(t_l) < 4: return True
+            if t_l.replace(" ", "").isnumeric(): return True
+            if t_l.endswith(("?", "-", ":", ".", ",")): return True
+            if t_l.startswith(("-", ".", ":")): return True
+            if any(p in t_l for p in noise_set): return True
+            if t_l in stopwords: return True
+            if "_" in t_orig: return True
+            tokens = t_l.split()
+            if tokens and tokens[0].isnumeric(): return True
+            if any(r.search(t_l) for r in desc_regexes): return True
+            short_tokens = [tok for tok in tokens if len(tok) <= 2]
+            if tokens and len(short_tokens) / len(tokens) > 0.5: return True
+            if t_orig.isupper() and len(t_l) < 6 and len(tokens) == 1: return True
+            return False
 
-            # Tek başına anlamsız olan generic tip kelimeleri ("Koyu", "Plaj" gibi)
-            # yer ismi değil, sınıflandırıcı kelimedir — geocoding'e gönderilmez.
-            generic_type_words = {
-                "koyu", "koy", "plaj", "plaji", "sahil", "dağ", "dag", "gol", "göl",
-                "şelale", "selale", "orman", "vadi", "kanyon", "tepe", "kale",
-                "cami", "camii", "köy", "koy", "mahalle", "sokak", "cadde",
-                "park", "bahçe", "bahce", "ada", "kıyı", "kiyi", "liman",
-            }
+        # ── Aşama 1: Noise filtresi + fuzzy dedup ────────────────────────────
+        candidates, seen_display, seen_norms = [], set(), []
+        for t in extracted_texts:
+            t_clean = _split_camelcase(t.strip())
+            t_lower = tr_lower(t_clean)
+            if is_noise(t_clean): continue
+            if t_lower in seen_display: continue
+            if _is_fuzzy_dup(t_clean, seen_norms): continue
+            words = t_clean.split()
+            if len(words) == 1 and t_lower in generic_set: continue
+            seen_display.add(t_lower)
+            seen_norms.append(_norm(t_clean))
+            candidates.append(t_clean)
 
-            def _split_camelcase(t: str) -> str:
-                """ManavgatSelalesi → Manavgat Selalesi (OCR boşluk atlama düzeltmesi)"""
-                # küçük→BÜYÜK sınırı: "gatSe" → "gat Se"
-                t = _re.sub(r'([a-zğüşıöç])([A-ZĞÜŞİÖÇ])', r'\1 \2', t)
-                # BÜYÜK→BÜYÜK+küçük: "SELAlesi" gibi durumlar
-                t = _re.sub(r'([A-ZĞÜŞİÖÇ]{2,})([A-ZĞÜŞİÖÇ][a-zğüşıöç])', r'\1 \2', t)
-                return t.strip()
+        if not candidates:
+            return []
 
-            def _norm_for_dedup(t: str) -> str:
-                """Fuzzy dedup için: boşluk + noktalama kaldır, tr_lower uygula."""
-                return _re.sub(r'[^a-z0-9ğüşıöç]', '', tr_lower(t))
-
-            def _is_fuzzy_dup(t: str, seen_norms: list) -> bool:
-                """Benzer metinleri fuzzy eşleştir (OCR hatalarına karşı)."""
-                norm = _norm_for_dedup(t)
-                if len(norm) < 4:
-                    return False
-                for s in seen_norms:
-                    ratio = SequenceMatcher(None, norm, s).ratio()
-                    if ratio >= 0.82:
-                        return True
-                return False
-
-            # ── Aşama 1: Noise filtresi + dedup (hızlı) ─────────────────────────
-            candidate_pois = []
-            seen_display = set()
-            seen_norms: list = []
-
-            if extracted_texts:
-                for t in extracted_texts:
-                    t_clean = _split_camelcase(t.strip())
-                    t_lower = tr_lower(t_clean)
-                    if is_noise(t_clean): continue
-                    if t_lower in seen_display: continue
-                    if _is_fuzzy_dup(t_clean, seen_norms): continue
-                    words = t_clean.split()
-                    if len(words) == 1 and t_lower in generic_type_words:
-                        continue
-                    seen_display.add(t_lower)
-                    seen_norms.append(_norm_for_dedup(t_clean))
-                    candidate_pois.append(t_clean)
-
-            # ── Aşama 2: Batch NER filtresi (1 inference — hardcode yok) ─────────
-            # Tüm adaylar tek seferde NER'den geçer. Model LOC/GPE olmayanları atar.
-            # "LUTFEN BU MASAYA" → LOC değil → atılır (video bağımsız, genellenebilir)
-            # "Duden Selalesi"   → LOC       → geçer
-            #
-            # Fallback: NER modeli ASCII Türkçe ("Goynuk" yerine "Göynük") isimlerini
-            # düşük skorda ret edebilir. Sıfır sonuçta geo_signal heuristic devreye girer.
-            MAX_DISPLAY_POIS = 18
-            if candidate_pois:
-                _set_progress(video_id, "ner_ocr", 58)
-                ner_filtered = self.ner.filter_locations_from_ocr(candidate_pois)
-                if ner_filtered:
-                    display_pois = ner_filtered[:MAX_DISPLAY_POIS]
-                    logger.info(f"NER batch filter: {len(candidate_pois)} → {len(display_pois)} POI")
-                else:
-                    # NER hiçbir şey döndürmedi (ASCII OCR veya model belirsizliği).
-                    # Heuristic fallback: geo sinyal içeren VEYA 2+ kelimeli adlar.
-                    display_pois = [
-                        t for t in candidate_pois
-                        if _has_geo_signal(t) or len(t.split()) >= 2
-                    ][:MAX_DISPLAY_POIS]
-                    logger.info(
-                        f"NER batch: 0 sonuç → heuristic fallback: "
-                        f"{len(candidate_pois)} aday → {len(display_pois)} POI"
-                    )
-            else:
-                display_pois = []
-
-            # Geriye dönük uyumluluk: ocr_pois = gösterim listesi
-            ocr_pois = display_pois
-            logger.info(f"OCR display POIs ({len(display_pois)}): {display_pois}")
-
-            t_ner = time.time()
-            logger.info(f"⏱ NER extraction: {t_ner - t_parallel:.1f}s")
-
-            # 8. Nominatim: NER lokasyonlarını zenginleştir
-            _set_progress(video_id, "geocoding", 65)
-            ner_enriched = []
-            if extracted_locations:
-                logger.info(f"Enriching {len(extracted_locations)} NER locations...")
-                ner_enriched = self.places.enrich_locations(extracted_locations)
-
-            # City bounding box → Overpass araması daha isabetli olur
-            city_bbox = None
-            if ner_enriched:
-                first_city = ner_enriched[0].get("place_data", {})
-                if first_city.get("location"):
-                    lat = first_city["location"]["lat"]
-                    lng = first_city["location"]["lng"]
-                    # Şehir etrafında ~220km box — Kaş (~190km) ve Alanya'yı kapsar
-                    city_bbox = (lat - 2.0, lng - 2.0, lat + 2.0, lng + 2.0)
-                    logger.info(f"City bbox for Overpass: {city_bbox}")
-
-            # OCR POI'ları zenginleştir
-            # Overpass community API rate limit var → sadece geo-sinyalli adları gönder.
-            # Geo sinyal = fiziksel yer (plaj, koyu, şelale, cami...) belirten kelimeler.
-            # Geo sinyali olmayan adlar (kafeler, çarşılar vb.) → sadece Nominatim.
-            _set_progress(video_id, "overpass", 75)
-            # ASCII-fold farkına karşı _has_geo_signal kullan
-            overpass_pois  = [p for p in display_pois if _has_geo_signal(p)]
-            nominatim_pois = [p for p in display_pois if not _has_geo_signal(p)]
-
-            logger.info(f"OCR POI split → Overpass: {len(overpass_pois)}, "
-                        f"Nominatim-only: {len(nominatim_pois)}")
-
-            ocr_enriched = []
-            if overpass_pois:
-                ocr_enriched += self.places.enrich_locations(
-                    overpass_pois, use_overpass=True, city_bbox=city_bbox
-                )
-            if nominatim_pois:
-                ocr_enriched += self.places.enrich_locations(
-                    nominatim_pois, use_overpass=False, city_bbox=city_bbox
-                )
-
-            # Vision landmarks'ı enriched formatına çevir
-            vision_enriched = []
-            for lm in vision_landmarks:
-                if lm.get("latitude") and lm.get("longitude") and lm.get("confidence", 0) > 0.5:
-                    vision_enriched.append({
-                        "original_name": lm["name"],
-                        "place_data": {
-                            "name": lm["name"],
-                            "location": {"lat": lm["latitude"], "lng": lm["longitude"]},
-                            "type": "landmark",
-                            "importance": lm["confidence"]
-                        }
-                    })
-
-            # Tüm kaynakları birleştir (NER + OCR + Vision)
-            enriched_locations = ner_enriched + ocr_enriched + vision_enriched
-            logger.info(f"Total enriched: {len(ner_enriched)} NER + {len(ocr_enriched)} OCR + {len(vision_enriched)} Vision = {len(enriched_locations)}")
-
-            t_geocode = time.time()
-            logger.info(f"⏱ Geocoding (Nominatim+Overpass): {t_geocode - t_ner:.1f}s")
-
-            # 9. Deduplication
-            _set_progress(video_id, "dedup", 85)
-            deduplicated_locations = []
-            location_summary = {}
-            if enriched_locations:
-                deduplicated_locations = self.deduplicator.deduplicate_locations(enriched_locations)
-                location_summary = self.deduplicator.get_location_summary(enriched_locations)
-
-            # 10. Route Optimization
-            _set_progress(video_id, "route", 90)
-            optimized_route = {}
-            if deduplicated_locations:
-                optimized_route = self.route_optimizer.optimize_route(deduplicated_locations)
-
-            # 11. RAG: Travel Tips
-            _set_progress(video_id, "rag", 95)
-            travel_tips = {}
-            if deduplicated_locations:
-                travel_tips = self.rag.generate_travel_tips(deduplicated_locations)
-            
-            # 12. Qdrant: Location embeddings
-            if enriched_locations:
-                try:
-                    self.qdrant.add_locations(enriched_locations)
-                    logger.info(f"✅ Added {len(enriched_locations)} locations to Qdrant")
-                except Exception as e:
-                    logger.warning(f"Qdrant error (non-critical): {e}")
-            t_end = time.time()
-            logger.info(f"⏱ Dedup+Route+RAG+Qdrant: {t_end - t_geocode:.1f}s")
-            total_time = t_end - start_time
-            logger.info(f"Performance: ")
-            logger.info(f"Total Time: {total_time:.2f}s")
-            logger.info(f" Frames/sec: {len(frames)/total_time:.2f}")
-            logger.info(f" Time per frame: {total_time/len(frames):.2f}s")
-
-
-            return{
-                "duration": metadata["duration"],
-                "resolution": f"{metadata['width']}x{metadata['height']}",
-                "fps": metadata["fps"],
-                "frame_count":len(frames),
-                "frames_dir": str(frame_dir),
-                "thumbnail": thumbnail,
-                "detections_count": len(detections),
-                "landmarks_count":len(landmarks),
-                "processing_time": round(total_time,2),
-                "fps_processed": round(len(frames)/total_time, 2),
-                "vision_landmarks": vision_landmarks,
-                "extracted_texts": extracted_texts,
-                "transcription": transcription,
-                "extracted_locations": extracted_locations,
-                "enriched_locations": enriched_locations,
-                "location_summary":location_summary,
-                "deduplicated_locations": deduplicated_locations,
-                "optimized_route": optimized_route,
-                "travel_tips": travel_tips,
-                "ocr_pois": ocr_pois,
-                "top_objects": summary["top_5_classes"]
-                
-
-            }
-        
+        # ── Aşama 2: Batch NER filtresi ──────────────────────────────────────
+        MAX_POIS = 18
+        try:
+            ner_filtered = self.ner.filter_locations_from_ocr(candidates)
+            if ner_filtered:
+                logger.info("NER batch: %d → %d POI", len(candidates), len(ner_filtered))
+                return ner_filtered[:MAX_POIS]
+            # NER 0 sonuç → heuristic fallback
+            fallback_pois = [
+                t for t in candidates
+                if _has_geo_signal(t) or len(t.split()) >= 2
+            ][:MAX_POIS]
+            logger.info("NER batch 0 sonuç → heuristic fallback: %d POI", len(fallback_pois))
+            return fallback_pois
         except Exception as e:
-            logger.error(f"Video processing failed: {e}")
-            raise
-    
+            logger.warning("NER batch OCR filtresi başarısız — heuristic fallback | %s", e)
+            return [
+                t for t in candidates
+                if _has_geo_signal(t) or len(t.split()) >= 2
+            ][:MAX_POIS]
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Statik yardımcılar
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _tr_lower(s: str) -> str:
+        return s.replace("İ", "i").replace("I", "ı").lower()
+
+    @staticmethod
+    def _ascii_fold(s: str) -> str:
+        return (s.replace("ğ", "g").replace("ü", "u").replace("ş", "s")
+                 .replace("ı", "i").replace("ö", "o").replace("ç", "c")
+                 .replace("â", "a").replace("î", "i").replace("û", "u"))
+
+    @staticmethod
+    def _geo_signal_set() -> set:
+        return {
+            "han", "kafe", "cafe", "restoran", "müze", "cami", "kilise",
+            "köprü", "kale", "kalesi", "kaleici", "sarayı", "parkı", "gölü",
+            "plajı", "plaji", "şelalesi", "selalesi",
+            "mağarası", "magarasi", "tepesi", "dağı", "dagi", "vadisi",
+            "konak", "çarşı", "carsi", "pazar", "hamam", "türbe", "turbe",
+            "anıt", "anit", "kervansaray", "ören",
+            "sokağı", "sokagi", "mahallesi", "kapısı", "kapisi",
+            "kulesi", "camii", "hamamı", "hamami",
+            "bahçesi", "bahcesi", "ormanı", "ormani", "göleti", "barajı",
+            "köprüsü", "koprüsü",
+            "koyu", "körfez", "korfez", "limanı", "limani",
+            "kayalığı", "kayaligi", "adası", "adasi", "yarımadası",
+            "kanyonu", "platosu", "çayı", "cayi", "irmağı",
+            "yaylası", "yaylasi", "milliparkı",
+            "harabeleri", "höyüğü", "hoyugu", "mezarlığı", "mezarligi",
+            "kilisesi", "manastırı", "manastiri", "kalıntıları",
+            # Yemek & işletme sinyalleri — Gaziantep/şehir lokali içerik
+            "yeri", "durumu", "evi", "ocağı", "ocagi", "fırını", "firini",
+            "pastanesi", "lokantası", "lokantasi", "kebabçısı", "kebabcisi",
+            "büfesi", "bufesi", "dönercisi", "donercisi", "tatlıcısı",
+            "çiğköftecisi", "cigkoftecisi", "pidecisi", "lahmacuncusu",
+            "muhallebicisi", "baklavacısı", "baklavacisi",
+        }
+
+    @staticmethod
+    def _noise_pattern_set() -> set:
+        return {
+            "www.", "http", "@", "#", ".com", ".tr", "₺", "$", "€",
+            "follow", "like", "share", "subscribe", "abone", "takip",
+        }
+
+    @staticmethod
+    def _tr_stopword_set() -> set:
+        return {
+            "içecek", "yiyecek", "giriş", "çıkış", "bilgi", "lütfen", "teşekkür",
+            "devam", "dikkat", "uyarı", "yasak", "serbest", "açık", "kapalı",
+            "indirim", "fiyat", "menü", "sipariş", "ödeme", "nakit", "kart",
+            "telefon", "adres", "saat", "tarih", "numara", "adet", "toplam",
+            "olan", "olur", "oldu", "için", "ile", "veya", "hem", "ama",
+            "büyük", "küçük", "yeni", "eski", "güzel", "iyi", "kötü",
+            "başka", "diğer", "tüm", "her", "bazı", "çok", "az", "daha",
+            "dis", "bis", "ecs", "aci", "bey", "ecek", "acak", "mis",
+            "yo", "ve", "da", "de", "ki", "mi", "mu", "mü",
+            "kahvesi", "çayı", "kebabı", "mantısı", "baklavası", "köftesi",
+            "pidesi", "böreği", "tatlısı", "döneri", "lahmacunu", "çorbası",
+            "büfesi", "fırını", "pastanesi", "lokantası", "restoranı",
+            "istanbul", "ankara", "izmir",
+            "market", "deneme", "gerekenler", "durumu", "masaya", "masasi",
+            "lutfen", "yiyecek", "icecek", "siparis", "ucretsiz", "ucret",
+            "ntep", "disin", "disi", "bufe", "bufesi",
+        }
+
+    @staticmethod
+    def _generic_type_set() -> set:
+        return {
+            "koyu", "koy", "plaj", "plaji", "sahil", "dağ", "dag", "gol", "göl",
+            "şelale", "selale", "orman", "vadi", "kanyon", "tepe", "kale",
+            "cami", "camii", "köy", "koy", "mahalle", "sokak", "cadde",
+            "park", "bahçe", "bahce", "ada", "kıyı", "kiyi", "liman",
+        }
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Video işleme (metadata, frame, thumbnail)
+    # ─────────────────────────────────────────────────────────────────────────
+
     def _get_metadata(self, video_path: str) -> Dict:
-        """FFmpeg ile metadata çıkar"""
         import ffmpeg
         try:
-            probe = ffmpeg.probe(video_path)
-            video_stream = next(
-                s for s in probe['streams'] 
-                if s['codec_type'] == 'video'
-            )
-            
-            # FPS hesaplama (fraction olabilir)
-            fps_str = video_stream.get('r_frame_rate', '30/1')
-            fps_parts = fps_str.split('/')
-            fps = float(fps_parts[0]) / float(fps_parts[1])
-            
+            probe        = ffmpeg.probe(video_path)
+            video_stream = next(s for s in probe["streams"] if s["codec_type"] == "video")
+            fps_str      = video_stream.get("r_frame_rate", "30/1")
+            num, den     = fps_str.split("/")
             return {
-                "duration": float(probe['format']['duration']),
-                "width": int(video_stream['width']),
-                "height": int(video_stream['height']),
-                "fps": round(fps, 2)
+                "duration": float(probe["format"]["duration"]),
+                "width":    int(video_stream["width"]),
+                "height":   int(video_stream["height"]),
+                "fps":      round(float(num) / float(den), 2),
             }
         except Exception as e:
-            logger.error(f"Metadata extraction failed: {e}")
+            logger.error("Metadata çıkarma başarısız: %s", e)
             raise
-    
-    # Optimize edildi 1 fps 1 saniye idi şimdi her 2 saniyede 1 frame
-    def _extract_frames(self, video_path: str, output_dir: Path, fps: int = 0.5) -> List[str]:
-        """
-        Video'dan frame'ler çıkar
-        fps=1 → saniyede 1 frame
-        """
+
+    def _extract_frames(self, video_path: str, output_dir: Path, fps: float = 0.5) -> List[str]:
         import ffmpeg
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
-
-            # FFmpeg ile frame extraction
             (
-                ffmpeg
-                .input(video_path)
-                .filter('fps', fps=fps)
-                .output(
-                    str(output_dir / 'frame_%04d.jpg'),
-                    quality=2  # JPEG quality
-                )
+                ffmpeg.input(video_path)
+                .filter("fps", fps=fps)
+                .output(str(output_dir / "frame_%04d.jpg"), quality=2)
                 .overwrite_output()
                 .run(capture_stdout=True, capture_stderr=True)
             )
-            
-            # Extract edilen frame'lerin listesi
-            frames = sorted(output_dir.glob('*.jpg'))
-            return [str(f) for f in frames if f.name.startswith('frame_')]
-        
+            frames = sorted(output_dir.glob("*.jpg"))
+            return [str(f) for f in frames if f.name.startswith("frame_")]
         except ffmpeg.Error as e:
-            logger.error(f"FFmpeg error: {e.stderr.decode()}")
+            logger.error("FFmpeg hatası: %s", e.stderr.decode())
             raise
-    
-    def _create_thumbnail(self, first_frame: str) -> str:
-        """İlk frame'den thumbnail oluştur (320px width)"""
+
+    def _create_thumbnail(self, first_frame: Optional[str]) -> Optional[str]:
         if not first_frame:
             return None
-
         import ffmpeg
         try:
             thumb_path = Path(first_frame).parent / "thumbnail.jpg"
-
             (
-                ffmpeg
-                .input(first_frame)
-                .filter('scale', 320, -1)  # Width 320, height auto
+                ffmpeg.input(first_frame)
+                .filter("scale", 320, -1)
                 .output(str(thumb_path))
                 .overwrite_output()
                 .run(quiet=True)
             )
-            
             return str(thumb_path)
-        
         except Exception as e:
-            logger.error(f"Thumbnail creation failed: {e}")
+            logger.error("Thumbnail oluşturulamadı: %s", e)
             return None
-    

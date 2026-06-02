@@ -58,3 +58,7 @@ qdrant-client==1.7.3
 sentence-transformers==2.3.1
 sentry-sdk[fastapi]==2.22.0
 slowapi==0.1.9
+# Share Extension URL download
+yt-dlp>=2024.1.0
+
+# Gemini REST API — SDK gereksiz, sadece requests kullanılır (zaten yüklü)

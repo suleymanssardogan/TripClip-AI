@@ -50,8 +50,23 @@ class AuthService:
         return AuthResponse(access_token=token, user_id=user.id, email=user.email)
 
     def login(self, email: str, password: str) -> AuthResponse:
-        user = self._repo.get_by_email(email)
+        # Case-insensitive + trim — iOS otomatik düzeltme/büyük harf kaynaklı
+        # mismatch'leri önler. Production-grade auth pattern.
+        normalized = (email or "").strip().lower()
+        import logging
+        logging.getLogger("auth").info(
+            f"🔐 LOGIN attempt: raw='{email}' normalized='{normalized}' password_len={len(password or '')}"
+        )
+
+        user = self._repo.get_by_email(normalized)
+        if not user:
+            # Fallback — eski kayıtlar büyük harfle saklanmış olabilir
+            user = self._repo.get_by_email(email)
+
         if not user or not user.hashed_password or not verify_password(password, user.hashed_password):
+            logging.getLogger("auth").warning(
+                f"❌ LOGIN failed: email='{normalized}' user_found={user is not None}"
+            )
             raise AuthException("E-posta adresi veya şifre hatalı")
 
         token = create_access_token(user.id, user.email)

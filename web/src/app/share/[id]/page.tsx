@@ -16,6 +16,7 @@ import {
   Camera,
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
+import QRShareCard from "@/components/QRShareCard";
 import { useParams, useRouter } from "next/navigation";
 import { getPlan, type VideoDetail } from "@/lib/api";
 
@@ -220,6 +221,12 @@ export default function SharePage() {
 
           {/* AI Insights (right) */}
           <aside className="lg:col-span-4 space-y-8">
+
+            {/* QR kod paylaşım kartı */}
+            <QRShareCard
+              url={typeof window !== "undefined" ? window.location.href : ""}
+              title={`${tripTitle} • QR Paylaş`}
+            />
 
             {/* AI insights card */}
             <div className="bg-card border border-neon/15 p-10 rounded-[3rem] shadow-neon relative overflow-hidden">

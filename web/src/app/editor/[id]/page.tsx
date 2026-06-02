@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import React, { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronRight,
   Sparkles,
@@ -10,10 +10,21 @@ import {
   GripVertical,
   ArrowLeft,
   BrainCircuit,
+  Save,
+  RotateCcw,
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { useParams, useRouter } from "next/navigation";
 import { getPlan, type VideoDetail } from "@/lib/api";
+
+interface Event {
+  id: number;
+  time: string;
+  title: string;
+  type: string;
+  desc: string;
+  grad: [string, string];
+}
 
 /* ─── Helpers ─── */
 const SLOT_TIMES  = ["09:00", "10:30", "12:00", "13:30", "15:00", "16:30", "18:00", "19:30"];
@@ -30,8 +41,10 @@ function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildDays(locations: any[], tips: any[]) {
-  const events = locations.map((loc, i) => {
+  const events: Event[] = locations.map((loc, i) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tip = tips.find((t: any) =>
       t.location?.toLowerCase().includes(loc.original_name.toLowerCase()) ||
       loc.original_name.toLowerCase().includes(t.location?.toLowerCase() ?? "")
@@ -65,6 +78,13 @@ export default function EditorPage() {
   const [error,    setError]    = useState("");
   const [activeDay, setActiveDay] = useState(0);
 
+  // Reorder edilebilir gün-bazlı event listesi
+  const [dayEvents, setDayEvents]     = useState<Event[][]>([]);
+  const [dirty, setDirty]             = useState(false);
+  const [savedToast, setSavedToast]   = useState(false);
+  const dragIndex   = useRef<number | null>(null);
+  const [overIndex, setOverIndex]     = useState<number | null>(null);
+
   useEffect(() => {
     const id = Number(params.id);
     if (!id || isNaN(id)) { setError("Geçersiz ID"); setLoading(false); return; }
@@ -73,6 +93,85 @@ export default function EditorPage() {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [params.id]);
+
+  // Video geldiğinde, dayEvents'i baştan kur (veya localStorage'dan oku)
+  useEffect(() => {
+    if (!video) return;
+    const ai = video.ai_results;
+    const locations = ai?.nominatim?.deduplicated_locations ?? [];
+    const tips      = ai?.rag?.travel_tips?.tips ?? [];
+    const built     = buildDays(locations, tips).map(d => d.events);
+
+    // localStorage'da kullanıcının önceki sıralaması varsa onu yükle
+    const saved = typeof window !== "undefined"
+      ? localStorage.getItem(`editor-order-${video.id}`)
+      : null;
+    if (saved) {
+      try {
+        const parsed: number[][] = JSON.parse(saved);
+        // ID listelerine göre yeniden sırala
+        const flat = built.flat();
+        const reordered = parsed.map(ids =>
+          ids.map(id => flat.find(e => e.id === id)).filter(Boolean) as Event[]
+        );
+        if (reordered.flat().length === flat.length) {
+          setDayEvents(reordered);
+          return;
+        }
+      } catch { /* parse hatası — varsayılan kullan */ }
+    }
+    setDayEvents(built);
+  }, [video]);
+
+  // ── Drag handlers ──
+  function handleDragStart(idx: number) {
+    dragIndex.current = idx;
+  }
+  function handleDragOver(e: React.DragEvent, idx: number) {
+    e.preventDefault();
+    if (overIndex !== idx) setOverIndex(idx);
+  }
+  function handleDrop(targetIdx: number) {
+    const from = dragIndex.current;
+    setOverIndex(null);
+    dragIndex.current = null;
+    if (from === null || from === targetIdx) return;
+
+    setDayEvents(prev => {
+      const copy = prev.map(arr => [...arr]);
+      const list = copy[activeDay];
+      const [moved] = list.splice(from, 1);
+      list.splice(targetIdx, 0, moved);
+      // Slot zamanlarını yeni sıraya göre güncelle
+      copy[activeDay] = list.map((e, i) => ({ ...e, time: SLOT_TIMES[i % SLOT_TIMES.length] }));
+      return copy;
+    });
+    setDirty(true);
+  }
+  function handleDragEnd() {
+    setOverIndex(null);
+    dragIndex.current = null;
+  }
+
+  // Sıralamayı kaydet
+  function persistOrder() {
+    if (!video) return;
+    const ids = dayEvents.map(arr => arr.map(e => e.id));
+    localStorage.setItem(`editor-order-${video.id}`, JSON.stringify(ids));
+    setDirty(false);
+    setSavedToast(true);
+    setTimeout(() => setSavedToast(false), 2200);
+  }
+
+  function resetOrder() {
+    if (!video) return;
+    localStorage.removeItem(`editor-order-${video.id}`);
+    const ai = video.ai_results;
+    const locations = ai?.nominatim?.deduplicated_locations ?? [];
+    const tips      = ai?.rag?.travel_tips?.tips ?? [];
+    setDayEvents(buildDays(locations, tips).map(d => d.events));
+    setDirty(false);
+  }
 
   /* ─── States ─── */
   if (loading) {
@@ -96,7 +195,14 @@ export default function EditorPage() {
   const locations = ai?.nominatim?.deduplicated_locations ?? [];
   const tips      = ai?.rag?.travel_tips?.tips ?? [];
   const summary   = ai?.rag?.travel_tips?.summary;
-  const days      = buildDays(locations, tips);
+  // Günleri stateful events'ten türet (drag-drop'dan sonra güncel kalır)
+  const days = dayEvents.length
+    ? dayEvents.map((events, d) => ({
+        id:     String(d + 1).padStart(2, "0"),
+        label:  `Gün ${d + 1}`,
+        events,
+      }))
+    : buildDays(locations, tips);
   const title     = locations.length > 0
     ? `${capitalize(locations[0].original_name)} Gezi Planı`
     : video.filename.replace(/\.[^.]+$/, "");
@@ -186,15 +292,46 @@ export default function EditorPage() {
 
         {/* ── Timeline ── */}
         <section className="flex-grow">
-          <div className="flex items-center justify-between mb-12">
+          <div className="flex flex-wrap items-center justify-between mb-12 gap-3">
             <div className="flex items-center gap-6">
               <div className="px-6 py-2 bg-neon text-surface rounded-full text-[10px] font-black uppercase tracking-[0.2em]">Editing Mode</div>
-              <span className="text-xs text-muted font-bold italic opacity-40">{activeEvents.length} durak · {days[activeDay]?.label}</span>
+              <span className="text-xs text-muted font-bold italic opacity-60">
+                {activeEvents.length} durak · {days[activeDay]?.label} · sürükleyerek sırala
+              </span>
             </div>
-            <button className="bg-violet text-white px-8 py-4 rounded-full text-xs font-black uppercase tracking-[0.2em] flex items-center gap-2 hover:scale-[1.02] active:scale-95 transition-all shadow-violet">
-              <Plus className="w-4 h-4" />
-              Add Stop
-            </button>
+            <div className="flex items-center gap-2">
+              {dirty && (
+                <button
+                  onClick={resetOrder}
+                  className="flex items-center gap-2 px-4 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-muted rounded-full text-[10px] font-black uppercase tracking-[0.2em] transition-all"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" /> Sıfırla
+                </button>
+              )}
+              <button
+                onClick={persistOrder}
+                disabled={!dirty}
+                className={`flex items-center gap-2 px-6 py-3 rounded-full text-[10px] font-black uppercase tracking-[0.2em] transition-all ${
+                  dirty
+                    ? "bg-neon text-surface hover:scale-[1.02] shadow-neon"
+                    : "bg-white/5 text-muted/50 cursor-not-allowed"
+                }`}
+              >
+                <Save className="w-3.5 h-3.5" /> Kaydet
+              </button>
+            </div>
+            <AnimatePresence>
+              {savedToast && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  className="fixed top-20 right-6 z-50 bg-neon text-surface px-5 py-3 rounded-full text-[10px] font-black uppercase tracking-widest shadow-neon"
+                >
+                  ✓ Sıralama kaydedildi
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
           <div className="relative space-y-12">
@@ -203,14 +340,23 @@ export default function EditorPage() {
             {activeEvents.map((event, i) => (
               <motion.div
                 key={event.id}
+                layout
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.08 }}
-                className="relative flex flex-col lg:flex-row gap-8 items-start group"
+                transition={{ delay: i * 0.06, layout: { duration: 0.3 } }}
+                onDragOver={(e) => handleDragOver(e, i)}
+                onDrop={() => handleDrop(i)}
+                onDragEnd={handleDragEnd}
+                className={`relative flex flex-col lg:flex-row gap-8 items-start group ${
+                  overIndex === i ? "ring-2 ring-neon/40 ring-offset-4 ring-offset-surface rounded-[3rem]" : ""
+                }`}
               >
                 <div className={`absolute left-[14px] w-4 h-4 rounded-full border-4 border-surface z-10 hidden lg:block mt-8 transition-colors ${i === 0 ? "bg-neon" : "bg-violet"}`} />
 
-                <div className="neon-card rounded-[3rem] shadow-2xl overflow-hidden flex flex-col lg:flex-row w-full">
+                <div
+                  draggable
+                  onDragStart={() => handleDragStart(i)}
+                  className="neon-card rounded-[3rem] shadow-2xl overflow-hidden flex flex-col lg:flex-row w-full cursor-grab active:cursor-grabbing">
 
                   {/* Gradient placeholder (replaces photo) */}
                   <div

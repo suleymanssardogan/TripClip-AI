@@ -21,6 +21,13 @@ services:
   redis:
     image: redis:7-alpine
     container_name: tripclip-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
     ports:
       - "6379:6379"
     volumes:
@@ -41,7 +48,7 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:6333/healthz || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333 && echo -e \"GET /healthz HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n\" >&3 && grep -q \"healthz check passed\" <&3'"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -65,40 +72,69 @@ services:
   core-api:
     build: ./services/core-api
     container_name: tripclip-core-api
+    restart: unless-stopped
     ports:
       - "8000:8000"
     depends_on:
       postgres:
-        condition: service_healthy   # ← postgres tamamen hazır olana kadar bekle
+        condition: service_healthy
       redis:
         condition: service_healthy
       mongodb:
-        condition: service_started   # mongo healthcheck daha yavaş olabilir
+        condition: service_started
     environment:
       - DATABASE_URL=postgresql://tripclip:tripclip123@postgres:5432/tripclip
       - REDIS_URL=redis://redis:6379/0
       - MONGODB_URL=mongodb://mongodb:27017/tripclip
       - UPLOAD_DIR=/app/uploads/videos
-      # Production'da domain ekle: ALLOWED_ORIGINS=https://tripclip.app,https://www.tripclip.app
       - ALLOWED_ORIGINS=
     volumes:
       - uploads_data:/app/uploads
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
 
+  # ── Celery Worker ─────────────────────────────────────────────────────────
+  celery-worker:
+    build: ./services/core-api
+    container_name: tripclip-celery-worker
+    command: >
+      celery -A app.core.celery_app worker
+      --loglevel=info
+      -Q video_processing
+      --concurrency=2
+      -n worker@%h
+    depends_on:
+      core-api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://tripclip:tripclip123@postgres:5432/tripclip
+      - REDIS_URL=redis://redis:6379/0
+      - MONGODB_URL=mongodb://mongodb:27017/tripclip
+      - UPLOAD_DIR=/app/uploads/videos
+      - USE_GEMINI=true
+      - USE_HYBRID=true
+      - GEMINI_API_KEY=AIzaSyAlUBVHKTj4-40BUY94euFfXTZPnPJoKH8
+      - GEMINI_MODEL=gemini-2.5-flash
+    volumes:
+      - uploads_data:/app/uploads
+    restart: unless-stopped
+
   # ── Mobile BFF ────────────────────────────────────────────────────────────
   mobile-bff:
     build: ./services/mobile-bff
     container_name: tripclip-mobile-bff
+    restart: unless-stopped
     ports:
       - "8001:8001"
     depends_on:
       core-api:
-        condition: service_healthy   # ← core-api /health dönene kadar bekle
+        condition: service_healthy
     environment:
       - CORE_API_URL=http://core-api:8000
       - ALLOWED_ORIGINS=
@@ -107,6 +143,7 @@ services:
   web-bff:
     build: ./services/web-bff
     container_name: tripclip-web-bff
+    restart: unless-stopped
     ports:
       - "8002:8002"
     depends_on:
