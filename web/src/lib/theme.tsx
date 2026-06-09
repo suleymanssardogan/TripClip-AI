@@ -19,6 +19,13 @@ interface ThemeCtx {
 const Ctx = createContext<ThemeCtx | null>(null);
 const STORAGE_KEY = "tripclip-theme";
 
+function applyTheme(t: Theme) {
+  if (typeof window === "undefined") return;
+  const html = document.documentElement;
+  html.classList.toggle("light", t === "light");
+  html.classList.toggle("dark", t === "dark");
+}
+
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<Theme>("dark");
 
@@ -29,14 +36,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       saved ??
       (window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark");
     applyTheme(initial);
-    setThemeState(initial);
+    setTimeout(() => {
+      setThemeState(initial);
+    }, 0);
   }, []);
-
-  function applyTheme(t: Theme) {
-    const html = document.documentElement;
-    html.classList.toggle("light", t === "light");
-    html.classList.toggle("dark", t === "dark");
-  }
 
   function setTheme(t: Theme) {
     applyTheme(t);

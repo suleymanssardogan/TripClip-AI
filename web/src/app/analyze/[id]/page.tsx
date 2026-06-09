@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import React, { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
@@ -113,11 +114,26 @@ export default function AnalysisResultPage() {
   /* Initial fetch */
   useEffect(() => {
     const id = Number(params.id);
-    if (!id || isNaN(id)) { setError("Geçersiz ID"); setLoading(false); return; }
+    if (!id || isNaN(id)) {
+      setTimeout(() => {
+        setError("Geçersiz ID");
+        setLoading(false);
+      }, 0);
+      return;
+    }
     getPlan(id)
-      .then(setVideo)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
+      .then(res => {
+        setTimeout(() => {
+          setVideo(res);
+          setLoading(false);
+        }, 0);
+      })
+      .catch(e => {
+        setTimeout(() => {
+          setError(e.message);
+          setLoading(false);
+        }, 0);
+      });
   }, [params.id]);
 
   /* Polling — only when processing */

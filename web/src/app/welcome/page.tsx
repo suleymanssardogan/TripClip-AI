@@ -12,7 +12,9 @@ export default function WelcomePage() {
   useEffect(() => {
     const e = localStorage.getItem("email");
     if (!e) { router.push("/login"); return; }
-    setEmail(e);
+    setTimeout(() => {
+      setEmail(e);
+    }, 0);
   }, [router]);
 
   return (
@@ -86,7 +88,7 @@ export default function WelcomePage() {
             href="/dashboard"
             className="btn-primary py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
           >
-            Dashboard'a Git <ArrowRight className="w-4 h-4" />
+            Dashboard&apos;a Git <ArrowRight className="w-4 h-4" />
           </Link>
           <Link
             href="/explore"

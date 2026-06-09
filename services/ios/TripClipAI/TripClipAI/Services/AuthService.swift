@@ -10,7 +10,9 @@ class AuthService: ObservableObject {
     @Published var isAuthenticated = false
     @Published var currentUserId: Int?
 
-    private let baseURL = "http://172.20.10.6:8001/api/mobile"
+    // Simülatör (Localhost) bağlantı adresi.
+    // NOT: Sunumu fiziksel cihazdan yapacaksanız, Mac'inizin yerel IP adresiyle değiştirin (Örn: http://172.20.10.6:8001/api/mobile)
+    private let baseURL = "http://localhost:8001/api/mobile"
     private let tokenKey = "tripclip_access_token"
     private let userIdKey = "tripclip_user_id"
 

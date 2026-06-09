@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { QrCode, Copy, Check, Smartphone, Download } from "lucide-react";
 
@@ -18,10 +18,9 @@ export default function QRShareCard({ url, title = "Telefonla Paylaş" }: Props)
 
   // Hydration sırasında URL'i client'tan al — SSR'de window yok
   // Telefondan QR okutulunca "localhost" çalışmaz; LAN IP'sine çevir.
-  const [safeUrl, setSafeUrl] = useState(url);
-  useEffect(() => {
-    let final = url;
-    try {
+  let safeUrl = url;
+  try {
+    if (url) {
       const u = new URL(url);
       const isLocal = u.hostname === "localhost" || u.hostname === "127.0.0.1";
       if (isLocal) {
@@ -29,11 +28,10 @@ export default function QRShareCard({ url, title = "Telefonla Paylaş" }: Props)
           process.env.NEXT_PUBLIC_LAN_HOST ||  // .env.local'a ekleyebilirsin
           "10.192.88.86";                       // Mac'in mevcut LAN IP'si
         u.hostname = lanHost;
-        final = u.toString();
+        safeUrl = u.toString();
       }
-    } catch { /* parse hatası — orijinal URL'i kullan */ }
-    setSafeUrl(final);
-  }, [url]);
+    }
+  } catch { /* parse hatası — orijinal URL'i kullan */ }
 
   const qrSrc =
     `https://api.qrserver.com/v1/create-qr-code/` +

@@ -1,11 +1,10 @@
 "use client";
-
+ 
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronRight,
   Sparkles,
-  Plus,
   Trash2,
   GripVertical,
   ArrowLeft,
@@ -16,7 +15,7 @@ import {
 import Navbar from "@/components/Navbar";
 import { useParams, useRouter } from "next/navigation";
 import { getPlan, type VideoDetail } from "@/lib/api";
-
+ 
 interface Event {
   id: number;
   time: string;
@@ -25,7 +24,7 @@ interface Event {
   desc: string;
   grad: [string, string];
 }
-
+ 
 /* ─── Helpers ─── */
 const SLOT_TIMES  = ["09:00", "10:30", "12:00", "13:30", "15:00", "16:30", "18:00", "19:30"];
 const GRAD_PAIRS: [string, string][] = [
@@ -36,11 +35,11 @@ const GRAD_PAIRS: [string, string][] = [
   ["#F59E0B", "#EF4444"],
   ["#10B981", "#3B82F6"],
 ];
-
+ 
 function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
-
+ 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildDays(locations: any[], tips: any[]) {
   const events: Event[] = locations.map((loc, i) => {
@@ -58,17 +57,17 @@ function buildDays(locations: any[], tips: any[]) {
       grad: GRAD_PAIRS[i % GRAD_PAIRS.length],
     };
   });
-
+ 
   const daysCount = events.length <= 3 ? 1 : events.length <= 6 ? 2 : 3;
   const perDay    = Math.ceil(events.length / daysCount);
-
+ 
   return Array.from({ length: daysCount }, (_, d) => ({
     id:     String(d + 1).padStart(2, "0"),
     label:  `Gün ${d + 1}`,
     events: events.slice(d * perDay, (d + 1) * perDay),
   }));
 }
-
+ 
 /* ─── Main ─── */
 export default function EditorPage() {
   const params = useParams();
@@ -77,21 +76,36 @@ export default function EditorPage() {
   const [loading,  setLoading]  = useState(true);
   const [error,    setError]    = useState("");
   const [activeDay, setActiveDay] = useState(0);
-
+ 
   // Reorder edilebilir gün-bazlı event listesi
   const [dayEvents, setDayEvents]     = useState<Event[][]>([]);
   const [dirty, setDirty]             = useState(false);
   const [savedToast, setSavedToast]   = useState(false);
   const dragIndex   = useRef<number | null>(null);
   const [overIndex, setOverIndex]     = useState<number | null>(null);
-
+ 
   useEffect(() => {
     const id = Number(params.id);
-    if (!id || isNaN(id)) { setError("Geçersiz ID"); setLoading(false); return; }
+    if (!id || isNaN(id)) {
+      setTimeout(() => {
+        setError("Geçersiz ID");
+        setLoading(false);
+      }, 0);
+      return;
+    }
     getPlan(id)
-      .then(setVideo)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
+      .then(res => {
+        setTimeout(() => {
+          setVideo(res);
+          setLoading(false);
+        }, 0);
+      })
+      .catch(e => {
+        setTimeout(() => {
+          setError(e.message);
+          setLoading(false);
+        }, 0);
+      });
   }, [params.id]);
 
   // Video geldiğinde, dayEvents'i baştan kur (veya localStorage'dan oku)
@@ -115,12 +129,16 @@ export default function EditorPage() {
           ids.map(id => flat.find(e => e.id === id)).filter(Boolean) as Event[]
         );
         if (reordered.flat().length === flat.length) {
-          setDayEvents(reordered);
+          setTimeout(() => {
+            setDayEvents(reordered);
+          }, 0);
           return;
         }
       } catch { /* parse hatası — varsayılan kullan */ }
     }
-    setDayEvents(built);
+    setTimeout(() => {
+      setDayEvents(built);
+    }, 0);
   }, [video]);
 
   // ── Drag handlers ──

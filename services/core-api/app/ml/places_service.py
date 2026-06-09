@@ -24,6 +24,12 @@ class PlacesService:
     def tr_lower(s: str) -> str:
         return s.replace("İ", "i").replace("I", "ı").lower()
 
+    @staticmethod
+    def ascii_fold(s: str) -> str:
+        return (s.replace("ğ", "g").replace("ü", "u").replace("ş", "s")
+                 .replace("ı", "i").replace("ö", "o").replace("ç", "c")
+                 .replace("â", "a").replace("î", "i").replace("û", "u"))
+
     # Overpass fallback zinciri — ilk cevap veren kullanılır
     # kumi.systems öne alındı: overpass-api.de genellikle yavaş/meşgul
     _OVERPASS_ENDPOINTS = [
@@ -91,7 +97,8 @@ class PlacesService:
     # ─────────────────────────────────────────────────────────────
 
     def search_place(self, location_name: str, country: str = "Turkey",
-                     city_bbox: Optional[Tuple] = None) -> Optional[Dict]:
+                     city_bbox: Optional[Tuple] = None,
+                     city_hint: Optional[str] = None) -> Optional[Dict]:
         """
         Nominatim ile yer ara.
         city_bbox verilirse Nominatim'in viewbox/bounded özelliği devreye girer:
@@ -100,11 +107,12 @@ class PlacesService:
         Nominatim kalite iyileştirmeleri:
           - countrycodes=tr → sadece Türkiye sonuçları
           - bounded=1 + viewbox → bbox varsa bölgeye kilitlenir
-          - limit=3 + en iyi eşleşme seçimi → "Kaleköy Amasya" değil "Kaleköy Antalya"
+          - limit=10 + en iyi eşleşme seçimi → akıllı puanlama (city_hint & mesafe) ile
         """
-        # Cache key: bbox bağlamını da dahil et (farklı şehir = farklı sonuç)
+        # Cache key: bbox ve hint bağlamını da dahil et (farklı şehir/hint = farklı sonuç)
         bbox_suffix = f"|{city_bbox}" if city_bbox else ""
-        key = self._cache_key("nom", location_name + bbox_suffix)
+        hint_suffix = f"|{city_hint}" if city_hint else ""
+        key = self._cache_key("nom", location_name + bbox_suffix + hint_suffix)
         cached = self._cache_get(key)
         if cached:
             logger.info(f"⚡ Nominatim cache hit: {location_name}")
@@ -116,7 +124,7 @@ class PlacesService:
                 "q":            location_name,   # country ayrı parametre olarak
                 "countrycodes": "tr",            # sadece Türkiye — yanlış ülke eşleşmesini engeller
                 "format":       "json",
-                "limit":        3,               # en iyi 3 → bbox'a göre filtrele
+                "limit":        10,              # en iyi 10 → akıllı filtreleme için
                 "addressdetails": 1,
             }
             # Bbox varsa Nominatim'e ver — yabancı şehirleri kendisi atar
@@ -134,10 +142,56 @@ class PlacesService:
                 return None
 
             results = resp.json()
-            # Bbox varsa ilk sonuç yeterli (bounded=1 zaten filtreler)
-            # Bbox yoksa: city_bbox olmadan arama yapıldı, tüm Türkiye'den geldi.
-            # Birden fazla sonuç arasından en yüksek importance'lı olanı seç.
-            place = max(results, key=lambda p: float(p.get("importance", 0)))
+            
+            # En iyi adayı puanlayarak seç
+            best_place = None
+            best_score = (-1, -1, -1.0)  # (prov_match, geo_consistent, importance)
+
+            center_lat, center_lng = None, None
+            if city_bbox:
+                center_lat = (city_bbox[0] + city_bbox[2]) / 2
+                center_lng = (city_bbox[1] + city_bbox[3]) / 2
+
+            for p in results:
+                try:
+                    lat_val = float(p.get("lat", 0))
+                    lon_val = float(p.get("lon", 0))
+                except (ValueError, TypeError):
+                    continue
+
+                importance = float(p.get("importance", 0) or 0)
+                
+                # 1. İl/şehir eşleşmesi (city_hint ile)
+                prov_match = 0
+                if city_hint:
+                    hint_l = self.tr_lower(city_hint.strip())
+                    hint_fold = self.ascii_fold(hint_l)
+                    addr = p.get("address", {})
+                    for key_field in ("province", "state", "city", "town", "county"):
+                        val = addr.get(key_field)
+                        if val:
+                            val_l = self.tr_lower(val.strip())
+                            val_fold = self.ascii_fold(val_l)
+                            if hint_fold in val_fold or val_fold in hint_fold:
+                                prov_match = 1
+                                break
+
+                # 2. Coğrafi tutarlılık (180 km mesafe)
+                geo_consistent = 1
+                if center_lat is not None and center_lng is not None:
+                    dist = self._haversine_km(center_lat, center_lng, lat_val, lon_val)
+                    if dist > 180.0:
+                        geo_consistent = 0
+
+                score = (prov_match, geo_consistent, importance)
+                if score > best_score:
+                    best_score = score
+                    best_place = p
+
+            if not best_place:
+                return None
+
+            place = best_place
             data = {
                 "name":            place.get("display_name"),
                 "place_id":        place.get("place_id"),
@@ -175,7 +229,7 @@ class PlacesService:
 
     def _within_city_area(self, place_data: Dict,
                           city_center: Optional[Tuple[float, float]],
-                          max_km: float = 250) -> bool:
+                          max_km: float = 180) -> bool:
         """
         Bulunan yer şehir merkezine max_km içinde mi?
         city_center yoksa → her zaman True (filtreleme yok).
@@ -501,9 +555,9 @@ out center 3;
 
             # ── 1. Nominatim — önce bbox'lı ara (yanlış şehir engeli)
             # Bbox boş dönerse unbounded tekrar dene + _within_city_area ile validate et.
-            place_data = self.search_place(location, city_bbox=city_bbox)
+            place_data = self.search_place(location, city_bbox=city_bbox, city_hint=city_hint)
             if not place_data and city_bbox:
-                place_data = self.search_place(location, city_bbox=None)
+                place_data = self.search_place(location, city_bbox=None, city_hint=city_hint)
                 if place_data and not self._within_city_area(place_data, city_center):
                     logger.info(f"🚫 Unbounded fallback yanlış şehir, atlandı: '{location}'")
                     place_data = None
@@ -560,7 +614,7 @@ out center 3;
                         # Tek kelimeye düşen varyant → sadece Overpass bbox içinde
                         vdata = self.search_poi_overpass(variant, bbox=bbox)
                     else:
-                        vdata = self.search_place(variant, city_bbox=city_bbox if use_overpass else None)
+                        vdata = self.search_place(variant, city_bbox=city_bbox if use_overpass else None, city_hint=city_hint)
                         if not vdata:
                             vdata = self.search_poi_overpass(variant, bbox=bbox)
 
@@ -575,7 +629,7 @@ out center 3;
             # city_hint: NER ile bulunan dominant şehir adı (örn. "Gaziantep")
             if city_hint and len(location.split()) >= 2:
                 city_qualified = f"{location} {city_hint}"
-                cq_data = self.search_place(city_qualified, city_bbox=None)
+                cq_data = self.search_place(city_qualified, city_bbox=None, city_hint=city_hint)
                 if cq_data and self._within_city_area(cq_data, city_center):
                     logger.info(f"🏙️ Şehir qualifier ile bulundu: '{city_qualified}'")
                     cq_data["category"] = self._categorize(

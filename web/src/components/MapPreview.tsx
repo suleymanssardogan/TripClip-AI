@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { ExternalLink } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -30,22 +31,29 @@ export default function MapPreview({ locations }: Props) {
   const points = locations && locations.length > 0 ? locations : MOCK_POINTS;
 
   useEffect(() => {
-    const Leaflet = require("react-leaflet");
-    const LeafletLib = require("leaflet");
-    MapContainer = Leaflet.MapContainer;
-    TileLayer = Leaflet.TileLayer;
-    Marker = Leaflet.Marker;
-    Popup = Leaflet.Popup;
-    Polyline = Leaflet.Polyline;
-    L = LeafletLib;
+    const initLeaflet = async () => {
+      const Leaflet = await import("react-leaflet");
+      const LeafletLib = await import("leaflet");
+      MapContainer = Leaflet.MapContainer;
+      TileLayer = Leaflet.TileLayer;
+      Marker = Leaflet.Marker;
+      Popup = Leaflet.Popup;
+      Polyline = Leaflet.Polyline;
+      L = LeafletLib.default || LeafletLib;
 
-    delete L.Icon.Default.prototype._getIconUrl;
-    L.Icon.Default.mergeOptions({
-      iconRetinaUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png",
-      iconUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png",
-      shadowUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png",
-    });
-    setMounted(true);
+      if (L && L.Icon && L.Icon.Default) {
+        delete L.Icon.Default.prototype._getIconUrl;
+        L.Icon.Default.mergeOptions({
+          iconRetinaUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png",
+          iconUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png",
+          shadowUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png",
+        });
+      }
+      setTimeout(() => {
+        setMounted(true);
+      }, 50);
+    };
+    initLeaflet();
   }, []);
 
   if (!mounted || !MapContainer) {
@@ -99,7 +107,7 @@ export default function MapPreview({ locations }: Props) {
           rel="noopener noreferrer"
           className="bg-[#4285F4] text-white px-4 py-2 rounded-xl flex items-center gap-2 font-bold text-xs shadow-lg hover:scale-105 transition-all"
         >
-          Google Maps'te Aç <ExternalLink className="w-3 h-3" />
+          Google Maps&apos;te Aç <ExternalLink className="w-3 h-3" />
         </a>
       </div>
     </div>

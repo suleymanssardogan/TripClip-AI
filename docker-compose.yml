@@ -90,6 +90,7 @@ services:
       - ALLOWED_ORIGINS=
     volumes:
       - uploads_data:/app/uploads
+      - ./services/core-api/app:/app/app
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
       interval: 10s
@@ -105,7 +106,7 @@ services:
       celery -A app.core.celery_app worker
       --loglevel=info
       -Q video_processing
-      --concurrency=2
+      --pool=solo
       -n worker@%h
     depends_on:
       core-api:
@@ -119,10 +120,18 @@ services:
       - UPLOAD_DIR=/app/uploads/videos
       - USE_GEMINI=true
       - USE_HYBRID=true
-      - GEMINI_API_KEY=AIzaSyAlUBVHKTj4-40BUY94euFfXTZPnPJoKH8
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
       - GEMINI_MODEL=gemini-2.5-flash
+      - WHISPER_MODEL=base
+      - USE_GOOGLE_VISION=false
+      - OMP_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+      - OPENBLAS_NUM_THREADS=1
+      - VECLIB_MAXIMUM_THREADS=1
+      - NUMEXPR_NUM_THREADS=1
     volumes:
       - uploads_data:/app/uploads
+      - ./services/core-api/app:/app/app
     restart: unless-stopped
 
   # ── Mobile BFF ────────────────────────────────────────────────────────────
@@ -138,6 +147,8 @@ services:
     environment:
       - CORE_API_URL=http://core-api:8000
       - ALLOWED_ORIGINS=
+    volumes:
+      - ./services/mobile-bff/app:/app/app
 
   # ── Web BFF ───────────────────────────────────────────────────────────────
   web-bff:
@@ -152,6 +163,8 @@ services:
     environment:
       - CORE_API_URL=http://core-api:8000
       - ALLOWED_ORIGINS=
+    volumes:
+      - ./services/web-bff/app:/app/app
 
 volumes:
   postgres_data:

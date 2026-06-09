@@ -128,11 +128,25 @@ class LandmarkDetectionService:
     """Google Vision API ile landmark detection"""
     
     def __init__(self):
-        self.client = vision.ImageAnnotatorClient()
-        logger.info("✅ Google Vision API client initialized")
+        import os
+        self.enabled = os.getenv("USE_GOOGLE_VISION", "false").lower() == "true"
+        self.client = None
+        
+        if self.enabled:
+            try:
+                self.client = vision.ImageAnnotatorClient()
+                logger.info("✅ Google Vision API client initialized")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize Google Vision API client: {e}")
+                logger.info("⚠️ Google Vision API will be disabled due to initialization error.")
+                self.enabled = False
+        else:
+            logger.info("⚠️ Google Vision API is disabled by configuration (USE_GOOGLE_VISION=false)")
     
     def detect_landmarks(self, image_path: str) -> List[Dict]:
         """Frame'de landmark tespit et"""
+        if not self.enabled or self.client is None:
+            return []
         
         try:
             with open(image_path, 'rb') as f:
@@ -159,6 +173,8 @@ class LandmarkDetectionService:
     
     def detect_landmarks_in_frames(self, frame_paths: List[str]) -> List[Dict]:
         """Tüm frame'lerde landmark tespit et"""
+        if not self.enabled or self.client is None:
+            return []
         
         all_landmarks = []
         

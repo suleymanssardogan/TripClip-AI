@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TripClip AI — Proje Sunumu</title>
+  
+  <!-- Tailwind CSS Play CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: '#05060A', /* Pure, deep natural off-black */
+            surface: '#0E1017',
+            accent: '#10B981', /* Refined emerald green */
+            textGray: '#D1D5DB',
+            textMuted: '#9CA3AF',
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            serif: ['Playfair Display', 'serif'],
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      background-color: #05060A;
+      font-family: 'Inter', sans-serif;
+      overflow: hidden;
+      color: #F3F4F6;
+    }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar {
+      width: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: rgba(255, 255, 255, 0.02);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(16, 185, 129, 0.2);
+      border-radius: 2px;
+    }
+    
+    /* Slide transition animations */
+    .slide {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      transform: scale(0.995);
+      transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 6rem 10rem;
+    }
+
+    .slide.active {
+      opacity: 1;
+      transform: scale(1);
+      pointer-events: auto;
+      z-index: 10;
+    }
+
+    .divider {
+      width: 60px;
+      height: 2px;
+      background-color: #10B981;
+    }
+  </style>
+</head>
+<body class="bg-bg text-gray-200 select-none">
+
+  <!-- Minimal top progress line -->
+  <div class="fixed top-0 left-0 w-full h-[2px] bg-white/5 z-50">
+    <div id="progressBar" class="h-full bg-accent w-0 transition-all duration-300"></div>
+  </div>
+
+  <!-- MAIN SLIDES CONTAINER -->
+  <main class="relative w-screen h-screen overflow-hidden">
+
+    <!-- SLIDE 1: KAPAK (Giriş) -->
+    <div class="slide active" data-notes="Saygıdeğer hocalarım ve arkadaşlarım. Bugün sizlere seyahat planlamasını kolaylaştırmak amacıyla geliştirdiğim TripClip AI projesini sunacağım. Projemiz, sosyal medyadaki gezi Reels videolarını yapay zeka yöntemleriyle analiz ederek kullanıcılar için otomatik seyahat rotaları oluşturan uçtan uca bir sistemdir. Sunum boyunca projenin amacını, yazılım mimarisini ve 10 aşamalı veri işleme hattını detaylarıyla paylaşacağım.">
+      <div class="max-w-4xl mx-auto flex flex-col items-start text-left space-y-10">
+        <h1 class="text-9xl font-light font-serif tracking-tight text-white italic">
+          TripClip AI
+        </h1>
+        <p class="text-3xl text-textGray max-w-3xl font-light leading-relaxed font-sans">
+          Instagram Reels Seyahat Videolarından Yapay Zeka ile Otomatik Seyahat Planlama Sistemi
+        </p>
+        <div class="w-20 h-[2px] bg-accent"></div>
+        
+        <div class="grid grid-cols-2 gap-20 text-left max-w-lg w-full text-base text-textMuted pt-4 font-sans">
+          <div>
+            <span class="text-xs uppercase tracking-wider text-gray-500 block mb-1">Hazırlayan</span>
+            <strong class="text-white text-lg block font-medium">Süleyman Sardoğan</strong>
+            <span>Yazılım Mühendisliği Bölümü</span>
+          </div>
+          <div class="border-l border-white/10 pl-10">
+            <span class="text-xs uppercase tracking-wider text-gray-500 block mb-1">Kurum</span>
+            <strong class="text-white text-lg block font-medium">Fırat Üniversitesi</strong>
+            <span>Teknoloji Fakültesi</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 2: PROBLEM TANIMI -->
+    <div class="slide" data-notes="Seyahat planlaması günümüzde ciddi bir zaman yüküdür. Kullanıcılar sosyal medyada, örneğin Instagram Reels üzerinde harika seyahat videoları keşfetmekte fakat bu videolarda geçen konumlar genellikle açıklanmamaktadır. Bu durum kullanıcıları manuel araştırmalara, yorumları tek tek taramaya veya internet aramalarına saatler harcamaktadır. Ayrıca, saptanan seyahat noktalarını harita üzerinde sıralı ve anlaşılır bir rotaya dönüştürmek, manuel olarak yapıldığında yorucu ve karmaşıktır. Bu durum planlama aşamasını verimsiz hale getirmektedir.">
+      <div class="max-w-6xl mx-auto grid grid-cols-3 gap-20 items-center">
+        <!-- Left Title column -->
+        <div class="space-y-6">
+          <span class="text-xs tracking-[0.25em] text-accent uppercase font-bold block">PROBLEM TANIMI</span>
+          <h2 class="text-6xl font-serif text-white font-medium leading-tight">Planlamadaki Zorluklar</h2>
+          <div class="divider"></div>
+          <p class="text-base text-textMuted leading-relaxed font-sans">
+            Sosyal medyadaki gezi ilhamı ile gerçek bir plan oluşturma arasındaki operasyonel engeller.
+          </p>
+        </div>
+
+        <!-- Right Content column -->
+        <div class="col-span-2 space-y-10 font-sans">
+          <div class="space-y-2">
+            <h3 class="text-2xl font-semibold text-white">01 / Gizli ve Belirsiz Konumlar</h3>
+            <p class="text-lg text-textGray leading-relaxed">
+              Gezi Reels videolarında mekan adları genellikle altyazıda veya sesli anlatımda doğrudan koordinatlandırılamayacak kadar dagınık veya eksik sunulur.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <h3 class="text-2xl font-semibold text-white">02 / Manuel Arama ve Zaman Maliyeti</h3>
+            <p class="text-lg text-textGray leading-relaxed">
+              Kullanıcıların videodaki yerleri saptamak için ekran görüntüsü alarak görsel arama motorlarında tarama yapması ciddi bir operasyonel yük oluşturur.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <h3 class="text-2xl font-semibold text-white">03 / Karmaşık Rota Planlama</h3>
+            <p class="text-lg text-textGray leading-relaxed">
+              Birden fazla seyahat noktası belirlendiğinde, durakları harita üzerinde sıralı ve anlaşılır bir yol planına dönüştürmek manuel olarak zahmetlidir.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 3: ÇÖZÜMÜMÜZ -->
+    <div class="slide" data-notes="Geliştirdiğimiz TripClip AI bu problemleri tamamen ortadan kaldırıyor. Süreç son derece basittir: Kullanıcı Instagram uygulamasında bir gezi reels'i beğendiğinde, 'Paylaş' butonuna basar ve TripClip AI Share Extension'ı seçer. Alternatif olarak video dosyasını doğrudan uygulamaya yükleyebilir. Uygulama videoyu arka plandaki yapay zeka işlem hattımıza gönderir. Sistem saniyeler içerisinde videodaki mekanları otomatik çıkarır, haritada işaretler, en kısa gezi rotasını çizer ve bu mekanlarla ilgili AI seyahat ipuçlarını (bütçe, ulaşım, popüler yemekler vb.) barındıran PDF seyahat kartını hazırlar.">
+      <div class="max-w-6xl mx-auto grid grid-cols-3 gap-20 items-center font-sans">
+        <!-- Left Title column -->
+        <div class="space-y-6">
+          <span class="text-xs tracking-[0.25em] text-accent uppercase font-bold block">ÇÖZÜMÜMÜZ</span>
+          <h2 class="text-6xl font-serif text-white font-medium leading-tight">Otomatik Seyahat Planı</h2>
+          <div class="divider"></div>
+          <p class="text-base text-textMuted leading-relaxed">
+            Kullanıcı eylemlerini asgari seviyeye indirerek gezi videolarından saniyeler içinde organize seyahat rotaları oluşturan entegre platform.
+          </p>
+        </div>
+
+        <!-- Right Content column -->
+        <div class="col-span-2 space-y-8">
+          <div class="space-y-2">
+            <h3 class="text-2xl font-semibold text-white">Share Extension Entegrasyonu</h3>
+            <p class="text-lg text-textGray leading-relaxed">
+              Instagram Reels videoları paylaşım menüsünden doğrudan uygulamaya yönlendirilir. Deep link ile uygulama otomatik açılır ve analiz başlar.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <h3 class="text-2xl font-semibold text-white">Yapay Zeka ile Konum Çıkarımı</h3>
+            <p class="text-lg text-textGray leading-relaxed">
+              Videodaki görsel nesneler, sesli konuşmalar ve ekran metinleri yapay zeka modelleriyle taranarak mekan koordinatları otomatik olarak saptanır.
+            </p>
+          </div>
+
+          <div class="space-y-2">
+            <h3 class="text-2xl font-semibold text-white">Sıralı Harita Rotası & AI Seyahat Kartları</h3>
+            <p class="text-lg text-textGray leading-relaxed">
+              Konumlar harita üzerinde ardışık olarak dizilir. Qdrant ve Ollama RAG entegrasyonuyla konumlara özel AI seyahat önerileri sunulur.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 4: SİSTEM MİMARİSİ -->
+    <div class="slide" data-notes="Sistemimiz ölçeklenebilirliği sağlamak amacıyla BFF (Backend-for-Frontend) mimarisi üzerine kurulmuştur. Swift ile yazılmış iOS uygulamamız doğrudan Mobile-BFF servisimizle konuşur. Mobile-BFF ve Web-BFF, istemcilerin talep ettiği veri modellerini düzenler ve Core-API üzerindeki yükü azaltır. Tüm iş mantığı ve ML orkestrasyonu Core-API servisimiz tarafından koordine edilir. Asenkron süreçler Celery ve Redis queue aracılığıyla yönetilir. Veri tabanı katmanında ise PostgreSQL ilişkisel verileri, Redis cache yapısını ve Qdrant ise RAG entegrasyonu için seyahat rehberi vektörlerini barındırır.">
+      <div class="max-w-6xl mx-auto space-y-8">
+        <div class="space-y-2">
+          <span class="text-xs tracking-[0.25em] text-accent uppercase font-bold block">SİSTEM MİMARİSİ</span>
+          <h2 class="text-6xl font-serif text-white font-medium">BFF ve Çekirdek Servis Katmanları</h2>
+        </div>
+
+        <div class="grid grid-cols-4 gap-10 text-base font-sans mt-8">
+          <!-- Column 1 -->
+          <div class="space-y-4">
+            <div class="text-xs tracking-wider text-gray-500 uppercase font-bold border-b border-white/10 pb-2">İstemci Katmanı</div>
+            <div class="space-y-1">
+              <strong class="text-white block font-semibold text-lg">iOS Swift Uygulaması</strong>
+              <span class="text-textMuted text-sm">SwiftUI, MapKit, CoreData</span>
+            </div>
+            <div class="space-y-1">
+              <strong class="text-white block font-semibold text-lg">Share Extension</strong>
+              <span class="text-textMuted text-sm">iOS Share Controller</span>
+            </div>
+          </div>
+
+          <!-- Column 2 -->
+          <div class="space-y-4">
+            <div class="text-xs tracking-wider text-gray-500 uppercase font-bold border-b border-white/10 pb-2">Geçiş Katmanı (BFF)</div>
+            <div class="space-y-1">
+              <strong class="text-white block font-semibold text-lg">Mobile BFF</strong>
+              <span class="text-accent text-sm">FastAPI (Port 8001)</span>
+            </div>
+            <div class="space-y-1">
+              <strong class="text-white block font-semibold text-lg">Web BFF</strong>
+              <span class="text-accent text-sm">FastAPI (Port 8002)</span>
+            </div>
+          </div>
+
+          <!-- Column 3 -->
+          <div class="space-y-4">
+            <div class="text-xs tracking-wider text-gray-500 uppercase font-bold border-b border-white/10 pb-2">Çekirdek Servis</div>
+            <div class="space-y-2">
+              <strong class="text-white block font-semibold text-lg">Core-API</strong>
+              <span class="text-purple-400 text-sm block">FastAPI (Port 8000)</span>
+              <p class="text-xs text-textMuted leading-relaxed">
+                ML Pipeline orkestrasyonu, iş mantığı ve Celery asenkron kuyruk yönetimi.
+              </p>
+            </div>
+          </div>
+
+          <!-- Column 4 -->
+          <div class="space-y-4">
+            <div class="text-xs tracking-wider text-gray-500 uppercase font-bold border-b border-white/10 pb-2">Veri Katmanı</div>
+            <div class="space-y-2 text-xs">
+              <div class="flex justify-between border-b border-white/5 pb-1">
+                <span class="text-white font-semibold text-sm">PostgreSQL</span>
+                <span class="text-textMuted">Ana Veri</span>
+              </div>
+              <div class="flex justify-between border-b border-white/5 pb-1">
+                <span class="text-white font-semibold text-sm">Redis</span>
+                <span class="text-textMuted">Önbellek</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-white font-semibold text-sm">Qdrant</span>
+                <span class="text-textMuted">Vektör DB</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 5: 10 AŞAMALI ML PIPELINE -->
+    <div class="slide" data-notes="Yapay zeka işlem hattımız (ML Pipeline) ardışık 10 adımdan oluşur. Bu mimarinin en önemli tasarım kararı, her modülün bağımsız try-except yapılarıyla sarılmış olmasıdır (Graceful Degradation). Örneğin, Google Vision API faturalandırması kapalıysa sistem hata verip durmaz; bunun yerine o adımı atlayıp OCR ve transkripsiyondan elde edilen metinleri BERT modeline yönlendirerek seyahat rotasını kesintisiz üretmeye devam eder. Bu hata toleransı mimarisi, gerçek dünya kullanımında yüksek kararlılık sağlar.">
+      <div class="max-w-6xl mx-auto space-y-8">
+        <div class="space-y-2">
+          <span class="text-xs tracking-[0.25em] text-accent uppercase font-bold block">İŞLEM HATTI</span>
+          <h2 class="text-6xl font-serif text-white font-medium">10 Aşamalı Yapay Zeka İş Hattı</h2>
+        </div>
+
+        <div class="grid grid-cols-5 gap-6 text-sm font-sans mt-6">
+          
+          <div class="border-t border-white/10 pt-4 space-y-1">
+            <span class="text-accent font-mono text-xs font-bold">Aşama 01</span>
+            <h4 class="font-semibold text-white text-base">Video İşleme</h4>
+            <p class="text-xs text-textMuted leading-relaxed">FFmpeg ile kare & ses ayrıştırma</p>
+          </div>
+
+          <div class="border-t border-white/10 pt-4 space-y-1">
+            <span class="text-accent font-mono text-xs font-bold">Aşama 02</span>
+            <h4 class="font-semibold text-white text-base">Nesne Algılama</h4>
+            <p class="text-xs text-textMuted leading-relaxed">YOLOv8n nesne tespiti (>%40)</p>
+          </div>
+
+          <div class="border-t border-white/10 pt-4 space-y-1">
+            <span class="text-accent font-mono text-xs font-bold">Aşama 03</span>
+            <h4 class="font-semibold text-white text-base">Metin Okuma</h4>
+            <p class="text-xs text-textMuted leading-relaxed">RapidOCR ile tabelaları okuma</p>
+          </div>
+
+          <div class="border-t border-white/10 pt-4 space-y-1">
+            <span class="text-accent font-mono text-xs font-bold">Aşama 04</span>
+            <h4 class="font-semibold text-white text-base">Ses Transkripti</h4>
+            <p class="text-xs text-textMuted leading-relaxed">Whisper Türkçe konuşma analizi</p>
+          </div>
+
+          <div class="border-t border-white/10 pt-4 space-y-1">
+            <span class="text-accent font-mono text-xs font-bold">Aşama 05</span>
+            <h4 class="font-semibold text-white text-base">NER Konum</h4>
+            <p class="text-xs text-textMuted leading-relaxed">Turkish BERT yer ismi bulma</p>
+          </div>
+
+          <div class="border-t border-white/10 pt-4 space-y-1">
+            <span class="text-accent font-mono text-xs font-bold">Aşama 06</span>
+            <h4 class="font-semibold text-white text-base">Geocoding</h4>
+            <p class="text-xs text-textMuted leading-relaxed">Nominatim ile geocoding işlemi</p>
+          </div>
+
+          <div class="border-t border-white/10 pt-4 space-y-1">
+            <span class="text-accent font-mono text-xs font-bold">Aşama 07</span>
+            <h4 class="font-semibold text-white text-base">Coğrafi Filtre</h4>
+            <p class="text-xs text-textMuted leading-relaxed">Outlier konumları ayıklama</p>
+          </div>
+
+          <div class="border-t border-white/10 pt-4 space-y-1">
+            <span class="text-accent font-mono text-xs font-bold">Aşama 08</span>
+            <h4 class="font-semibold text-white text-base">Tekilleştirme</h4>
+            <p class="text-xs text-textMuted leading-relaxed">Haversine formülü ile 2km filtre</p>
+          </div>
+
+          <div class="border-t border-white/10 pt-4 space-y-1">
+            <span class="text-accent font-mono text-xs font-bold">Aşama 09</span>
+            <h4 class="font-semibold text-white text-base">Harita Rotalama</h4>
+            <p class="text-xs text-textMuted leading-relaxed">Lokasyonların haritada poliline ile çizimi</p>
+          </div>
+
+          <div class="border-t border-accent/40 pt-4 space-y-1">
+            <span class="text-accent font-mono text-xs font-bold">Aşama 10</span>
+            <h4 class="font-semibold text-white text-base">Seyahat RAG</h4>
+            <p class="text-xs text-textMuted leading-relaxed">Qdrant + Ollama AI rehberi</p>
+          </div>
+
+        </div>
+
+        <div class="p-6 border border-white/10 rounded-lg text-sm text-textGray leading-relaxed font-sans">
+          <strong>Hata Tolerans İlkesi (Graceful Degradation):</strong> Her modül bağımsız çalışır. Örneğin, Google Vision API fatura hatası verirse, OCR ve Whisper transkriptleri otomatik olarak Turkish BERT NER modeline yönlendirilir ve rota kesintisiz üretilir.
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 6: YAPAY ZEKA MODÜLLERİ -->
+    <div class="slide" data-notes="Yapay zeka katmanımız çoklu modlu (multimodal) veri işleme yeteneğine sahiptir. Bilgisayarlı görü tarafında YOLOv8n modeliyle video karelerindeki nesneleri saptarız. RapidOCR ONNX sürümüyle ekrandaki altyazı, tabela veya yazı editlerini Türkçe karakter desteğiyle okuruz. Ses tarafında OpenAI Whisper base modelini lokalimizde çalıştırarak konuşmaları metne dönüştürürüz. Son olarak Doğal Dil İşleme adımında, HuggingFace üzerinde eğitilmiş olan 'savasy/bert-base-turkish-ner-cased' modelini kullanarak metinlerde geçen konum varlıklarını (Entity) tespit ederiz.">
+      <div class="max-w-6xl mx-auto grid grid-cols-3 gap-20 items-center">
+        <!-- Left Title column -->
+        <div class="space-y-6">
+          <span class="text-xs tracking-[0.25em] text-accent uppercase font-bold block">AI MODÜLLERİ</span>
+          <h2 class="text-6xl font-serif text-white font-medium leading-tight">Çoklu Modlu Veri Analizleri</h2>
+          <div class="divider"></div>
+          <p class="text-base text-textMuted leading-relaxed font-sans">
+            Bilgisayarlı görü, ses transkripsiyonu ve doğal dil işleme (BERT NER) modellerinin koordineli çalışması.
+          </p>
+        </div>
+
+        <!-- Right Content column -->
+        <div class="col-span-2 grid grid-cols-2 gap-12 text-sm font-sans">
+          <div class="space-y-6">
+            <h3 class="text-lg font-semibold text-white border-b border-white/10 pb-2">A. GÖRSEL VE SES ANALİZLERİ</h3>
+            <div class="space-y-4">
+              <div>
+                <strong class="text-white block font-medium text-lg">YOLOv8 Nesne Algılama</strong>
+                <p class="text-gray-400 mt-1 leading-relaxed text-sm">
+                  Karelerdeki araba, insan, cami, doğa unsurlarını saptayarak video temasına (gastronomi, doğa, kültür) yönelik bağlam verisi üretir (Güven Sınırı: > 0.40).
+                </p>
+              </div>
+              <div>
+                <strong class="text-white block font-medium text-lg">RapidOCR & Whisper</strong>
+                <p class="text-gray-400 mt-1 leading-relaxed text-sm">
+                  Ekranda sonradan eklenen yazı editleri RapidOCR (ONNX) ile okunurken; video ses transkripti Whisper (base) ile Türkçe olarak çıkarılır.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-6">
+            <h3 class="text-lg font-semibold text-white border-b border-white/10 pb-2">B. DOĞAL DİL İŞLEME (NLP)</h3>
+            <div class="space-y-4">
+              <div>
+                <strong class="text-white block font-medium text-lg">Turkish BERT NER Model</strong>
+                <p class="text-gray-400 mt-1 leading-relaxed text-sm">
+                  Transkript ve OCR çıktılarından konum tespiti yapmak için <strong>savasy/bert-base-turkish-ner-cased</strong> modeli çalıştırılır (Güven Sınırı: > 0.60).
+                </p>
+              </div>
+              
+              <div class="bg-surface border border-white/5 p-4 rounded-lg font-mono text-xs text-gray-400 leading-normal">
+                Girdi: "Bugün Antalya Kaleiçi sokaklarındayız."<br>
+                NER: [Kaleiçi] -> LOCATION (Entity)<br>
+                Eşleme: Koordinat bulma işlemi tetiklenir.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 7: COĞRAFİ DOĞRULAMA VE TEKİLLEŞTİRME -->
+    <div class="slide" data-notes="Nominatim API sorguları bazen ülke çapındaki en popüler benzer isimli mekanları getirebilir. Örneğin, Antalya seyahati videosundaki 'Kaleiçi' araması, en popüler arama sonucu olan 'İstanbul Kaleiçi' koordinatlarıyla eşleşebilir. Bu sorunu çözmek için coğrafi outlier analiz algoritması geliştirdim. Algoritma, videodaki tüm konumların coğrafi kümelenmesini inceleyerek dominant şehri tespit eder. Ardından, bu dominant şehre aşırı uzak olan outlier konumları saptar ve bu konumları dominant şehrin sınırları (bbox) içerisinde yeniden sorgulayarak doğru nokta ile günceller. Sonrasında Haversine formülüyle 2km çapındaki mükerrer konumlar temizlenir.">
+      <div class="max-w-6xl mx-auto grid grid-cols-3 gap-20 items-center">
+        <!-- Left Title column -->
+        <div class="space-y-6">
+          <span class="text-xs tracking-[0.25em] text-accent uppercase font-bold block">COĞRAFİ ZEKA</span>
+          <h2 class="text-6xl font-serif text-white font-medium leading-tight">Konum Doğrulama ve Tekilleştirme</h2>
+          <div class="divider"></div>
+          <p class="text-base text-textMuted leading-relaxed font-sans">
+            Nominatim geocoding hatalarını otomatik düzelten coğrafi outlier analizi ve Haversine mesafe tabanlı konum arındırma süreci.
+          </p>
+        </div>
+
+        <!-- Right Content column -->
+        <div class="col-span-2 space-y-10 font-sans">
+          <div class="space-y-3">
+            <h3 class="text-2xl font-bold text-white">01 / Coğrafi Outlier Analizi</h3>
+            <p class="text-lg text-textGray leading-relaxed">
+              Nominatim API'nin döndürdüğü koordinatların coğrafi dağılımından dominant şehir belirlenir. Dominant il sınırından aşırı uzak olan konumlar (Örn: Antalya gezisinde araya giren Amasya veya İstanbul sonuçları) elenir ve dominant ilin sınır kutusu (bbox) içinde yeniden sorgulanarak düzeltilir.
+            </p>
+          </div>
+
+          <div class="space-y-3">
+            <h3 class="text-2xl font-bold text-white">02 / Haversine Konum Tekilleştirme</h3>
+            <p class="text-lg text-textGray leading-relaxed">
+              Aynı mekana ait çoklu altyazı veya ses ifadelerinden dolayı tekrarlanan noktalar, <strong>Haversine formülü</strong> ile koordinat mesafesi hesaplanarak 2km çapında tekilleştirilir. En yüksek güven skoru (confidence score) olan konum haritada tutulur.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 8: ROTA VE İÇERİK ÜRETİMİ -->
+    <div class="slide" data-notes="Temizlenen konum verileri üzerinde harita rotalama ve görselleştirme işlemleri gerçekleştiriyoruz. Durakları ardışık bir gezi rotasına dönüştürerek kullanıcının takip edebileceği şekilde sunuyoruz. Seyahat ipuçları katmanında ise RAG mimarisini kullanıyoruz. Konumları sentence-transformers ile vektör haline getirerek Qdrant vektör veri tabanında aratıyor ve yerel LLM Ollama yardımıyla kullanıcılara pratik seyahat ipuçları (gastronomi, ulaşım, bütçe tavsiyeleri) sunuyoruz.">
+      <div class="max-w-6xl mx-auto grid grid-cols-3 gap-20 items-center">
+        <!-- Left Title column -->
+        <div class="space-y-6">
+          <span class="text-xs tracking-[0.25em] text-accent uppercase font-bold block">ROTA VE REHBER</span>
+          <h2 class="text-6xl font-serif text-white font-medium leading-tight">Harita Rotalama & RAG</h2>
+          <div class="divider"></div>
+          <p class="text-base text-textMuted leading-relaxed font-sans">
+            Konumların harita üzerinde poliline çizgileri ile bağlanması ve Qdrant vektör tabanıyla yerel yapay zeka rehberliği (RAG).
+          </p>
+        </div>
+
+        <!-- Right Content column -->
+        <div class="col-span-2 space-y-10 font-sans">
+          <div class="border-b border-white/10 pb-6 space-y-3">
+            <h3 class="text-2xl font-semibold text-white">01 / Harita Rotalama ve Görselleştirme</h3>
+            <p class="text-lg text-textGray leading-relaxed">
+              Saptanan konumlar MapKit üzerinde poliline çizgileri ile birleştirilerek kullanıcının izleyebileceği ardışık bir gezi rotası olarak görselleştirilir.
+            </p>
+          </div>
+
+          <div class="space-y-3">
+            <h3 class="text-2xl font-semibold text-white">02 / Qdrant Vektör DB & Ollama RAG Entegrasyonu</h3>
+            <p class="text-lg text-textGray leading-relaxed">
+              Seyahat rehberi verileri Qdrant vektör veritabanında saklanır. `sentence-transformers` ile yapılan anlamsal aramalar sonucunda Ollama LLM'i yerel olarak veya API üzerinden pratik ipuçları (bütçe, ulaşım, popüler lezzetler, kıyafet önerileri) üretir.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 9: MOBİL UYGULAMA -->
+    <div class="slide" data-notes="Kullanıcı arayüzü katmanında, SwiftUI ile geliştirdiğim yerel iOS uygulaması ve Share Extension eklentisi yer almaktadır. Kullanıcı Instagram'da gezinirken Reels videosunu doğrudan paylaşım menüsünden uygulamamıza gönderir. Uygulamamız deep link (tripclip://processing/id) aracılığıyla otomatik tetiklenerek açılır ve canlı ilerleme ekranı (ProcessingView) devreye girer. İşlem tamamlandığında MapKit üzerinde numaralandırılmış duraklar ve rotalama çizgileri gösterilir. PDFExportService ile A4 formatında PDF kılavuz indirilebilir veya Stories paylaşım kartı (9:16 oranında) oluşturulabilir.">
+      <div class="max-w-6xl mx-auto grid grid-cols-3 gap-20 items-center">
+        <!-- Left Title column -->
+        <div class="space-y-6">
+          <span class="text-xs tracking-[0.25em] text-accent uppercase font-bold block">MOBİL UYGULAMA</span>
+          <h2 class="text-6xl font-serif text-white font-medium leading-tight">SwiftUI Kullanıcı Arayüzü</h2>
+          <div class="divider"></div>
+          <p class="text-base text-textMuted leading-relaxed font-sans">
+            iOS platformunda kullanıcı deneyimini zenginleştiren yerel entegrasyonlar, interaktif haritalandırma ve veri dışa aktarım servisleri.
+          </p>
+        </div>
+
+        <!-- Right Content column -->
+        <div class="col-span-2 grid grid-cols-3 gap-6 font-sans">
+          <div class="p-6 bg-surface border border-white/5 rounded-xl space-y-4 h-[260px] flex flex-col justify-between">
+            <div>
+              <h3 class="text-lg font-bold text-white mb-2">Share Extension</h3>
+              <p class="text-gray-400 leading-relaxed text-sm">
+                Instagram'dan çıkmadan Reels videoları doğrudan uygulamaya yönlendirilir. Deep link ile uygulama otomatik açılır.
+              </p>
+            </div>
+            <span class="text-xs text-accent font-mono">tripclip://processing/{id}</span>
+          </div>
+
+          <div class="p-6 bg-surface border border-white/5 rounded-xl space-y-4 h-[260px] flex flex-col justify-between">
+            <div>
+              <h3 class="text-lg font-bold text-white mb-2">MapKit Entegrasyonu</h3>
+              <p class="text-gray-400 leading-relaxed text-sm">
+                İşlem durumları canlı polling ile izlenir. Tamamlandığında numaralı pinler ve rota poliline çizgileri haritada gösterilir.
+              </p>
+            </div>
+            <span class="text-xs text-accent font-mono">Real-time Progress</span>
+          </div>
+
+          <div class="p-6 bg-surface border border-white/5 rounded-xl space-y-4 h-[260px] flex flex-col justify-between">
+            <div>
+              <h3 class="text-lg font-bold text-white mb-2">PDF & Stories Kartı</h3>
+              <p class="text-gray-400 leading-relaxed text-sm">
+                A4 PDF raporu indirilebilir. 9:16 oranında özelleştirilmiş seyahat görselleri ile Instagram Stories entegrasyonu mevcuttur.
+              </p>
+            </div>
+            <span class="text-xs text-accent font-mono">PDFExportService</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SLIDE 10: PERFORMANS VE GELECEK ÇALIŞMALAR -->
+    <div class="slide" data-notes="Geliştirdiğimiz mimariyi test etmek amacıyla 95 saniyelik bir Antalya videosunu sisteme yükledik ve tüm adımları ~105 saniyede başarıyla işledik. YOLOv8 nesne tespiti 10.9 saniye, Whisper ses analizi 11.4 saniye sürerken; NER adımındaki 45 saniyelik timeout koruması sayesinde pipeline tıkanmadan OCR fallback mekanizması devreye girdi. Nominatim 9 konumu başarıyla buldu. Outlier düzeltme algoritmamız Amasya'ya giden Kaleköy'ü ve İstanbul'a giden Kaleiçi'ni Antalya sınırlarına çekerek düzeltti. Gelecekte, Google Vision API faturalandırmasını tamamlayıp landmark tespitini daha da güçlendirmeyi ve Whisper modelini Whisper Medium model ağırlıklarıyla güncellemeyi hedefliyorum. Dinlediğiniz için teşekkür ederim, sorularınızı yanıtlayabilirim.">
+      <div class="max-w-6xl mx-auto space-y-8">
+        <div class="space-y-2">
+          <span class="text-xs tracking-[0.25em] text-accent uppercase font-bold block">PERFORMANS VE KAPANAN NOTLAR</span>
+          <h2 class="text-6xl font-serif text-white font-medium">Test Sonuçları ve Gelecek Hedefleri</h2>
+        </div>
+
+        <div class="grid grid-cols-3 gap-12 text-sm font-sans mt-4">
+          
+          <!-- Column 1: Test scenario -->
+          <div class="col-span-2 space-y-6 border-r border-white/10 pr-10">
+            <h3 class="text-lg font-semibold text-white">95 Saniyelik Antalya Videosu Test Metrikleri</h3>
+            <div class="space-y-3.5 text-sm leading-relaxed">
+              <div class="flex justify-between border-b border-white/5 pb-2">
+                <span class="text-gray-400">YOLOv8 Nesne Tespiti (Görsel Analiz)</span>
+                <span class="text-white font-mono font-medium">10.9 saniye</span>
+              </div>
+              <div class="flex justify-between border-b border-white/5 pb-2">
+                <span class="text-gray-400">Whisper Ses Transkripsiyonu (Ses Analizi)</span>
+                <span class="text-white font-mono font-medium">11.4 saniye</span>
+              </div>
+              <div class="flex justify-between border-b border-white/5 pb-2">
+                <span class="text-gray-400">NER (BERT) + OCR Fallback</span>
+                <span class="text-white font-mono font-medium">45.0 saniye (Timeout Korumalı)</span>
+              </div>
+              <div class="flex justify-between border-b border-white/5 pb-2">
+                <span class="text-gray-400">Nominatim Geocoding & Outlier Düzeltme & RAG</span>
+                <span class="text-white font-mono font-medium">37.7 saniye</span>
+              </div>
+              <div class="flex justify-between text-accent font-bold pt-2 text-base">
+                <span>Toplam Uçtan Uca İşlem Süresi</span>
+                <span class="font-mono">~105 saniye</span>
+              </div>
+            </div>
+            
+            <p class="text-xs text-gray-400 leading-normal italic">
+              * Test videosunda Amasya iliyle hatalı eşleşen Kaleköy ve İstanbul'la hatalı eşleşen Kaleiçi konumları, dominant il coğrafi bounding box sorgulamaları ile başarıyla Antalya ili koordinatlarına çekilmiştir. Rota: 8 Durak, 291km.
+            </p>
+          </div>
+
+          <!-- Column 2: Future & Thanks -->
+          <div class="space-y-10 flex flex-col justify-between h-[250px]">
+            <div class="space-y-4">
+              <h4 class="text-xs font-semibold text-white tracking-wider uppercase">Gelecek Hedefleri</h4>
+              <ul class="space-y-2.5 text-xs text-gray-400 leading-normal">
+                <li>• Google Vision API entegrasyonuyla Landmark tespiti.</li>
+                <li>• Whisper modelinin Whisper Medium sürümüne yükseltilmesi.</li>
+                <li>• Topluluk tabanlı sosyal seyahat paylaşımları.</li>
+              </ul>
+            </div>
+            
+            <div class="border-t border-white/10 pt-4">
+              <span class="block text-3xl font-serif italic text-white leading-none">Teşekkür Ederim</span>
+              <span class="text-[11px] text-gray-500 block mt-2">Soru ve Cevap Bölümü</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- CONTROLS & SPEAKER NOTES PANEL -->
+  <div class="fixed bottom-8 left-16 right-16 flex justify-between items-center z-40">
+    <!-- Left: Navigation controls -->
+    <div class="flex items-center space-x-3 bg-surface/85 border border-white/5 p-2 rounded-xl backdrop-blur-md">
+      <button onclick="prevSlide()" class="h-9 w-9 rounded-lg flex items-center justify-center border border-white/10 hover:border-accent text-white/60 hover:text-white transition-all">
+        ←
+      </button>
+      <button onclick="nextSlide()" class="h-9 w-9 rounded-lg flex items-center justify-center border border-white/10 hover:border-accent text-white/60 hover:text-white transition-all">
+        →
+      </button>
+      <span id="slideCounter" class="text-xs text-gray-400 px-3 font-mono border-l border-white/10 ml-2">01 / 10</span>
+    </div>
+
+    <!-- Right: Speaker Notes and Timer control -->
+    <div class="flex items-center space-x-3">
+      <button onclick="toggleTimer()" id="timerBtn" class="h-9 px-4 rounded-xl flex items-center space-x-2 border border-white/10 bg-surface/85 text-xs text-white/60 hover:text-white hover:border-accent/50 transition-all backdrop-blur-md">
+        <span>⏱️</span> <span id="timerStatus">Sayacı Başlat</span>
+      </button>
+      <button onclick="toggleSpeakerNotes()" class="h-9 px-4 rounded-xl flex items-center space-x-2 border border-accent/25 bg-accent/10 text-xs text-accent font-semibold hover:bg-accent/20 transition-all backdrop-blur-md shadow-[0_0_15px_rgba(16,185,129,0.08)]">
+        <span>🗣️</span> <span>Konuşmacı Notları (N)</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- SPEAKER NOTES PANEL (COLLAPSIBLE) -->
+  <div id="speakerNotesPanel" class="fixed bottom-[96px] left-16 right-16 h-[150px] bg-surface border border-accent/20 rounded-2xl p-6 hidden z-50 backdrop-blur-lg flex flex-col justify-between">
+    <div class="flex justify-between items-center border-b border-white/10 pb-2 mb-2">
+      <span class="text-[9px] font-bold text-accent uppercase tracking-widest">🗣️ Konuşmacı Notları (Sunum esnasında jüri önündeki açıklamalarınız)</span>
+      <button onclick="toggleSpeakerNotes()" class="text-gray-400 hover:text-white text-xs">Kapat [N]</button>
+    </div>
+    <div id="speakerNotesContent" class="text-xs text-gray-300 overflow-y-auto leading-relaxed flex-1 pr-2">
+      Notlar yükleniyor...
+    </div>
+  </div>
+
+  <!-- JUMP MENU (FLOATING SIDEBAR) -->
+  <div class="fixed left-6 top-1/2 -translate-y-1/2 flex flex-col space-y-1.5 z-40 bg-surface/40 p-2 rounded-2xl border border-white/5 backdrop-blur-sm">
+    <button onclick="goToSlide(0)" class="h-7 w-7 rounded-lg text-xs font-bold flex items-center justify-center transition-all cursor-pointer bg-white/5 border border-white/10 text-gray-500 hover:text-white" title="Giriş">1</button>
+    <button onclick="goToSlide(1)" class="h-7 w-7 rounded-lg text-xs font-bold flex items-center justify-center transition-all cursor-pointer bg-white/5 border border-white/10 text-gray-500 hover:text-white" title="Problem Tanımı">2</button>
+    <button onclick="goToSlide(2)" class="h-7 w-7 rounded-lg text-xs font-bold flex items-center justify-center transition-all cursor-pointer bg-white/5 border border-white/10 text-gray-500 hover:text-white" title="Çözümümüz">3</button>
+    <button onclick="goToSlide(3)" class="h-7 w-7 rounded-lg text-xs font-bold flex items-center justify-center transition-all cursor-pointer bg-white/5 border border-white/10 text-gray-500 hover:text-white" title="Sistem Mimarisi">4</button>
+    <button onclick="goToSlide(4)" class="h-7 w-7 rounded-lg text-xs font-bold flex items-center justify-center transition-all cursor-pointer bg-white/5 border border-white/10 text-gray-500 hover:text-white" title="ML Pipeline">5</button>
+    <button onclick="goToSlide(5)" class="h-7 w-7 rounded-lg text-xs font-bold flex items-center justify-center transition-all cursor-pointer bg-white/5 border border-white/10 text-gray-500 hover:text-white" title="AI Modülleri">6</button>
+    <button onclick="goToSlide(6)" class="h-7 w-7 rounded-lg text-xs font-bold flex items-center justify-center transition-all cursor-pointer bg-white/5 border border-white/10 text-gray-500 hover:text-white" title="Coğrafi Analiz">7</button>
+    <button onclick="goToSlide(7)" class="h-7 w-7 rounded-lg text-xs font-bold flex items-center justify-center transition-all cursor-pointer bg-white/5 border border-white/10 text-gray-500 hover:text-white" title="Rota & RAG">8</button>
+    <button onclick="goToSlide(8)" class="h-7 w-7 rounded-lg text-xs font-bold flex items-center justify-center transition-all cursor-pointer bg-white/5 border border-white/10 text-gray-500 hover:text-white" title="iOS Uygulaması">9</button>
+    <button onclick="goToSlide(9)" class="h-7 w-7 rounded-lg text-xs font-bold flex items-center justify-center transition-all cursor-pointer bg-white/5 border border-white/10 text-gray-500 hover:text-white" title="Test & Kapanış">10</button>
+  </div>
+
+  <script>
+    const slides = document.querySelectorAll('.slide');
+    let currentSlide = 0;
+    const totalSlides = slides.length;
+
+    // Timer variables
+    let timerInterval = null;
+    let secondsElapsed = 0;
+
+    function updateProgressBar() {
+      const percentage = ((currentSlide) / (totalSlides - 1)) * 100;
+      document.getElementById('progressBar').style.width = `${percentage}%`;
+    }
+
+    function updateCounter() {
+      const currentFormatted = String(currentSlide + 1).padStart(2, '0');
+      const totalFormatted = String(totalSlides).padStart(2, '0');
+      document.getElementById('slideCounter').innerText = `${currentFormatted} / ${totalFormatted}`;
+    }
+
+    function updateJumpMenu() {
+      const jumpButtons = document.querySelectorAll('.fixed.left-6 button');
+      jumpButtons.forEach((btn, idx) => {
+        if (idx === currentSlide) {
+          btn.classList.remove('bg-white/5', 'text-gray-500');
+          btn.classList.add('bg-accent', 'text-bg', 'border-accent', 'shadow-[0_0_8px_rgba(16,185,129,0.3)]');
+        } else {
+          btn.classList.remove('bg-accent', 'text-bg', 'border-accent', 'shadow-[0_0_8px_rgba(16,185,129,0.3)]');
+          btn.classList.add('bg-white/5', 'text-gray-500');
+        }
+      });
+    }
+
+    function updateSpeakerNotes() {
+      const notes = slides[currentSlide].getAttribute('data-notes');
+      document.getElementById('speakerNotesContent').innerText = notes || "Bu slayt için konuşmacı notu eklenmemiş.";
+    }
+
+    function goToSlide(index) {
+      if (index < 0 || index >= totalSlides) return;
+      
+      slides[currentSlide].classList.remove('active');
+      currentSlide = index;
+      slides[currentSlide].classList.add('active');
+      
+      updateProgressBar();
+      updateCounter();
+      updateJumpMenu();
+      updateSpeakerNotes();
+    }
+
+    function nextSlide() {
+      if (currentSlide < totalSlides - 1) {
+        goToSlide(currentSlide + 1);
+      }
+    }
+
+    function prevSlide() {
+      if (currentSlide > 0) {
+        goToSlide(currentSlide - 1);
+      }
+    }
+
+    // Keyboard controls
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ') {
+        e.preventDefault();
+        nextSlide();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        prevSlide();
+      } else if (e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        toggleSpeakerNotes();
+      }
+    });
+
+    // Toggle Speaker Notes Panel
+    function toggleSpeakerNotes() {
+      const panel = document.getElementById('speakerNotesPanel');
+      panel.classList.toggle('hidden');
+    }
+
+    // Presentation Timer functions
+    function toggleTimer() {
+      const timerBtn = document.getElementById('timerBtn');
+      const timerStatus = document.getElementById('timerStatus');
+      
+      if (timerInterval) {
+        // Stop timer
+        clearInterval(timerInterval);
+        timerInterval = null;
+        timerStatus.innerText = "Sayacı Sürdür";
+        timerBtn.classList.remove('border-accent/50', 'text-white');
+      } else {
+        // Start timer
+        timerInterval = setInterval(() => {
+          secondsElapsed++;
+          const mins = String(Math.floor(secondsElapsed / 60)).padStart(2, '0');
+          const secs = String(secondsElapsed % 60).padStart(2, '0');
+          document.getElementById('presentationTimer').innerText = `${mins}:${secs}`;
+        }, 1000);
+        timerStatus.innerText = "Sayacı Durdur";
+        timerBtn.classList.add('border-accent/50', 'text-white');
+      }
+    }
+
+    // Initialize Page
+    updateProgressBar();
+    updateJumpMenu();
+    updateSpeakerNotes();
+  </script>
+</body>
+</html>

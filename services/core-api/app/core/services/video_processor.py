@@ -754,7 +754,7 @@ class VideoProcessingService:
         from collections import Counter
         from math import radians, sin, cos, sqrt, atan2
 
-        MAX_OUTLIER_KM = 300   # bu kadar uzaksa outlier say
+        MAX_OUTLIER_KM = 180   # bu kadar uzaksa outlier say
         DOMINANT_MIN   = 2     # dominant il için minimum lokasyon sayısı
 
         if len(locations) < 3:
@@ -838,7 +838,7 @@ class VideoProcessingService:
                 name, km, _get_province(loc),
             )
             new_place = self.places.search_place(
-                name, city_bbox=dominant_bbox
+                name, city_bbox=dominant_bbox, city_hint=dominant_province
             )
             if new_place:
                 new_lat = (new_place.get("location") or {}).get("lat")

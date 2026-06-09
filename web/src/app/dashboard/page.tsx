@@ -161,12 +161,23 @@ export default function DashboardPage() {
     const token = localStorage.getItem("token");
     if (!token) { router.push("/login"); return; }
     const userId = Number(localStorage.getItem("user_id") ?? "0");
-    setEmail(localStorage.getItem("email") ?? "");
+    const storedEmail = localStorage.getItem("email") ?? "";
 
     Promise.all([getUserPlans(userId), getStats()])
-      .then(([up, st]) => { setPlans(up.plans); setStats(st); })
-      .catch(console.error)
-      .finally(() => setLoading(false));
+      .then(([up, st]) => {
+        setTimeout(() => {
+          setEmail(storedEmail);
+          setPlans(up.plans);
+          setStats(st);
+          setLoading(false);
+        }, 0);
+      })
+      .catch(err => {
+        console.error(err);
+        setTimeout(() => {
+          setLoading(false);
+        }, 0);
+      });
   }, [router]);
 
   const completedCount  = plans.filter(p => ["completed","COMPLETED"].includes(p.status)).length;

@@ -164,8 +164,10 @@ export default function ExplorePage() {
   }, []);
 
   useEffect(() => {
-    fetchPlans(city, 0);
-    getStats().then(setStats).catch(() => {});
+    setTimeout(() => {
+      fetchPlans(city, 0);
+      getStats().then(setStats).catch(() => {});
+    }, 0);
   }, [city, fetchPlans]);
 
   const filtered = plans.filter(p =>
@@ -222,7 +224,7 @@ export default function ExplorePage() {
           </motion.div>
 
           <p className="text-muted mt-6 max-w-xl leading-relaxed">
-            AI'ın analiz ettiği gerçek gezi videolarından çıkarılan mekanlar, rotalar ve seyahat hikâyeleri.
+            AI&apos;ın analiz ettiği gerçek gezi videolarından çıkarılan mekanlar, rotalar ve seyahat hikâyeleri.
           </p>
         </div>
       </section>

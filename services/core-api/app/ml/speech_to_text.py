@@ -1,5 +1,6 @@
 import whisper
 import ffmpeg
+import os
 from pathlib import Path
 from typing import Dict, Optional
 import logging
@@ -10,15 +11,16 @@ class AudioProcessingService:
     """Whisper ile audio transcription"""
     
     def __init__(self):
-        self.model =None
-        logger.info("SpeechToTextService initialized(lazy loading)")
+        self.model = None
+        self.model_name = os.getenv("WHISPER_MODEL", "tiny")
+        logger.info(f"SpeechToTextService initialized(lazy loading) with model: {self.model_name}")
        
     def _load_model(self):
         """Load Whisper model when needed"""
         if self.model is None:
-            logger.info("Loading Whisper model...")
-            self.model = whisper.load_model("tiny")
-            logger.info("✅ Whisper model loaded!")
+            logger.info(f"Loading Whisper model ({self.model_name})...")
+            self.model = whisper.load_model(self.model_name)
+            logger.info(f"✅ Whisper model ({self.model_name}) loaded!")
     
     def extract_audio(self, video_path: str, output_path: str) -> bool:
         """Video'dan audio çıkar (FFmpeg)"""

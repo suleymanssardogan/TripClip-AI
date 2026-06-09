@@ -53,7 +53,9 @@ ALLOWED_ORIGINS = (
     [o.strip() for o in _raw.split(",") if o.strip()]
     if _raw
     else [
-        "http://localhost:3001",    # local Next.js dev
+        "http://localhost:3000",    # local Next.js dev
+        "http://127.0.0.1:3000",
+        "http://localhost:3001",
         "http://127.0.0.1:3001",
     ]
 )

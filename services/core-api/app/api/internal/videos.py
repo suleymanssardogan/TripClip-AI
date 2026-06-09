@@ -150,7 +150,7 @@ async def get_video(
 # ── URL Queue Endpoint (Share Extension için) ─────────────────────────────────
 
 _SUPPORTED_URL_PATTERN = re.compile(
-    r"instagram\.com/(reel|p|tv)/|instagr\.am",
+    r"instagram\.com/(reel|p|tv)/|instagr\.am|youtube\.com/|youtu\.be/|\.mp4",
     re.IGNORECASE,
 )
 

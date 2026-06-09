@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 
 class ShareViewController: UIViewController {
 
+    // Simülatör (Localhost) bağlantı adresi.
+    // NOT: Sunumu fiziksel cihazdan yapacaksanız, Mac'inizin yerel IP adresiyle değiştirin (Örn: http://172.20.10.6:8001)
     private let baseURL = "http://127.0.0.1:8001"
 
     // MARK: - Lifecycle
@@ -140,7 +142,7 @@ class ShareViewController: UIViewController {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 20
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["source_url": url.absoluteString])
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["url": url.absoluteString])
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             DispatchQueue.main.async {

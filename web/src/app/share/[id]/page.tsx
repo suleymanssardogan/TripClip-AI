@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
@@ -44,11 +45,26 @@ export default function SharePage() {
 
   useEffect(() => {
     const id = Number(params.id);
-    if (!id || isNaN(id)) { setError("Geçersiz ID"); setLoading(false); return; }
+    if (!id || isNaN(id)) {
+      setTimeout(() => {
+        setError("Geçersiz ID");
+        setLoading(false);
+      }, 0);
+      return;
+    }
     getPlan(id)
-      .then(setVideo)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
+      .then(res => {
+        setTimeout(() => {
+          setVideo(res);
+          setLoading(false);
+        }, 0);
+      })
+      .catch(e => {
+        setTimeout(() => {
+          setError(e.message);
+          setLoading(false);
+        }, 0);
+      });
   }, [params.id]);
 
   /* ─── States ─── */
@@ -139,7 +155,7 @@ export default function SharePage() {
                 onClick={openMaps}
                 className="bg-neon text-surface px-10 py-5 rounded-full font-bold shadow-neon flex items-center gap-3 transition-all hover:scale-105 active:scale-95"
               >
-                <MapIcon className="w-5 h-5" /> Google Maps'te Aç
+                <MapIcon className="w-5 h-5" /> Google Maps&apos;te Aç
               </button>
               <button
                 onClick={handleShare}

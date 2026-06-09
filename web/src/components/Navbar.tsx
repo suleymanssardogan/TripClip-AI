@@ -14,7 +14,10 @@ export default function Navbar() {
   const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
-    setAuthed(!!localStorage.getItem("token"));
+    const hasToken = typeof window !== "undefined" && !!localStorage.getItem("token");
+    setTimeout(() => {
+      setAuthed(hasToken);
+    }, 0);
     const onScroll = () => setScrolled(window.scrollY > 24);
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);

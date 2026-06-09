@@ -25,7 +25,7 @@ export default function SharePage() {
               <Share2 className="text-emerald-500 w-6 h-6" />
             </div>
             <h3 className="text-xl font-bold mb-2">Toplulukta Yayınla</h3>
-            <p className="text-sm text-muted-foreground mb-4">Planını 'Keşfet' sayfasında yayınla ve diğer gezginlere yardımcı ol.</p>
+            <p className="text-sm text-muted-foreground mb-4">Planını &apos;Keşfet&apos; sayfasında yayınla ve diğer gezginlere yardımcı ol.</p>
           </div>
         </div>
       </div>

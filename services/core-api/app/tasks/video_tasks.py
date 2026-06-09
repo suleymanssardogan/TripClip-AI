@@ -16,6 +16,7 @@ Retry politikası:
     - Başarısız olursa repo.mark_failed() çağrılır
 """
 import logging
+import os
 
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
@@ -203,6 +204,7 @@ def _download_url(url: str, video_id: int) -> str:
         ) from exc
 
     upload_dir  = os.getenv("UPLOAD_DIR", "/app/uploads/videos")
+    os.makedirs(upload_dir, exist_ok=True)
     output_tmpl = os.path.join(upload_dir, f"url_{video_id}_%(id)s.%(ext)s")
 
     ydl_opts = {

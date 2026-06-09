@@ -2,7 +2,9 @@ import Foundation
 
 class APIService {
     static let shared = APIService()
-    private let baseURL = "http://172.20.10.6:8001"
+    // Simülatör (Localhost) bağlantı adresi.
+    // NOT: Sunumu fiziksel cihazdan yapacaksanız, Mac'inizin yerel IP adresiyle değiştirin (Örn: http://172.20.10.6:8001)
+    private let baseURL = "http://localhost:8001"
 
     
     private let session: URLSession = {

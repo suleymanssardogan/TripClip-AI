@@ -141,7 +141,7 @@ export default function LandingPage() {
           viewport={{ once: true }} className="text-center mb-14">
           <p className="text-xs font-mono text-neon/40 tracking-widest uppercase mb-3">Dashboard</p>
           <h2 className="font-serif font-black text-4xl md:text-5xl text-ice tracking-tight">
-            Kişisel Gezi <span className="gradient-text-neon">Dashboard'ın</span>
+            Kişisel Gezi <span className="gradient-text-neon">Dashboard&apos;ın</span>
           </h2>
         </motion.div>
 
@@ -253,7 +253,7 @@ export default function LandingPage() {
               </h2>
               <p className="text-muted mb-10 max-w-md mx-auto text-sm leading-relaxed">
                 Yazılım Mühendisliği bitirme projesi. Mobil uygulamadan analiz et,
-                web'den keşfet ve paylaş.
+                web&apos;den keşfet ve paylaş.
               </p>
               <div className="flex flex-col sm:flex-row gap-4 justify-center">
                 <Link href="/login"
