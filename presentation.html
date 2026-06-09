@@ -590,9 +590,6 @@
 
     <!-- Right: Speaker Notes and Timer control -->
     <div class="flex items-center space-x-3">
-      <button onclick="toggleTimer()" id="timerBtn" class="h-9 px-4 rounded-xl flex items-center space-x-2 border border-white/10 bg-surface/85 text-xs text-white/60 hover:text-white hover:border-accent/50 transition-all backdrop-blur-md">
-        <span>⏱️</span> <span id="timerStatus">Sayacı Başlat</span>
-      </button>
       <button onclick="toggleSpeakerNotes()" class="h-9 px-4 rounded-xl flex items-center space-x-2 border border-accent/25 bg-accent/10 text-xs text-accent font-semibold hover:bg-accent/20 transition-all backdrop-blur-md shadow-[0_0_15px_rgba(16,185,129,0.08)]">
         <span>🗣️</span> <span>Konuşmacı Notları (N)</span>
       </button>
@@ -629,9 +626,6 @@
     let currentSlide = 0;
     const totalSlides = slides.length;
 
-    // Timer variables
-    let timerInterval = null;
-    let secondsElapsed = 0;
 
     function updateProgressBar() {
       const percentage = ((currentSlide) / (totalSlides - 1)) * 100;
@@ -707,29 +701,6 @@
       panel.classList.toggle('hidden');
     }
 
-    // Presentation Timer functions
-    function toggleTimer() {
-      const timerBtn = document.getElementById('timerBtn');
-      const timerStatus = document.getElementById('timerStatus');
-      
-      if (timerInterval) {
-        // Stop timer
-        clearInterval(timerInterval);
-        timerInterval = null;
-        timerStatus.innerText = "Sayacı Sürdür";
-        timerBtn.classList.remove('border-accent/50', 'text-white');
-      } else {
-        // Start timer
-        timerInterval = setInterval(() => {
-          secondsElapsed++;
-          const mins = String(Math.floor(secondsElapsed / 60)).padStart(2, '0');
-          const secs = String(secondsElapsed % 60).padStart(2, '0');
-          document.getElementById('presentationTimer').innerText = `${mins}:${secs}`;
-        }, 1000);
-        timerStatus.innerText = "Sayacı Durdur";
-        timerBtn.classList.add('border-accent/50', 'text-white');
-      }
-    }
 
     // Initialize Page
     updateProgressBar();
