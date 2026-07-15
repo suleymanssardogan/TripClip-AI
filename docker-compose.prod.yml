@@ -1,0 +1,281 @@
+# TripClip AI — Production Docker Compose
+# Usage: docker compose -f docker-compose.prod.yml up -d
+# Required env: copy .env.example → .env and fill all values
+
+services:
+
+  # ── Nginx (single public entry point) ────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: tripclip-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - web
+      - web-bff
+      - mobile-bff
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Web (Next.js) ─────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/web}
+    container_name: tripclip-web
+    restart: always
+    environment:
+      NODE_ENV: production
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── Databases ─────────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: tripclip-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tripclip}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-tripclip}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tripclip} -d ${POSTGRES_DB:-tripclip}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  redis:
+    image: redis:7-alpine
+    container_name: tripclip-redis
+    restart: always
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
+      --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  mongodb:
+    image: mongo:7
+    container_name: tripclip-mongo
+    restart: always
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: tripclip-qdrant
+    restart: always
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ── Core API ──────────────────────────────────────────────────────────────────
+  core-api:
+    build: ./services/core-api
+    container_name: tripclip-core-api
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tripclip}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tripclip}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      MONGODB_URL: mongodb://mongodb:27017/tripclip
+      UPLOAD_DIR: /app/uploads/videos
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      APP_ENV: production
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "10"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ── Celery Worker ─────────────────────────────────────────────────────────────
+  celery-worker:
+    build: ./services/core-api
+    container_name: tripclip-celery-worker
+    restart: always
+    command: >
+      celery -A app.core.celery_app worker
+      --loglevel=info
+      -Q video_processing
+      --pool=solo
+      -n worker@%h
+    depends_on:
+      core-api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tripclip}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tripclip}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      MONGODB_URL: mongodb://mongodb:27017/tripclip
+      UPLOAD_DIR: /app/uploads/videos
+      USE_GEMINI: ${USE_GEMINI:-true}
+      USE_HYBRID: ${USE_HYBRID:-true}
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      USE_GOOGLE_VISION: ${USE_GOOGLE_VISION:-false}
+      APP_ENV: production
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      VECLIB_MAXIMUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "10"
+
+  # ── Web BFF ───────────────────────────────────────────────────────────────────
+  web-bff:
+    build: ./services/web-bff
+    container_name: tripclip-web-bff
+    restart: always
+    depends_on:
+      core-api:
+        condition: service_healthy
+    environment:
+      CORE_API_URL: http://core-api:8000
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      APP_ENV: production
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # ── Mobile BFF ────────────────────────────────────────────────────────────────
+  mobile-bff:
+    build: ./services/mobile-bff
+    container_name: tripclip-mobile-bff
+    restart: always
+    depends_on:
+      core-api:
+        condition: service_healthy
+    environment:
+      CORE_API_URL: http://core-api:8000
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      APP_ENV: production
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  mongo_data:
+  qdrant_data:
+  uploads_data:

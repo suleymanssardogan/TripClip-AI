@@ -1,0 +1,28 @@
+# Credentials — must never enter the image
+credentials/
+
+# User-uploaded video content — not needed in the image, served from a volume
+uploads/
+
+# Python build artefacts
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Test files — not needed at runtime
+tests/
+
+# Dev databases
+*.db
+*.sqlite3
+*.sql
+
+# Local env overrides
+.env
+.env.*
+
+# macOS
+.DS_Store

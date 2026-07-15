@@ -1,0 +1,32 @@
+# Secrets — never enter any image
+.env
+.env.*
+*.pem
+*.key
+services/core-api/credentials/
+
+# Python artefacts
+services/*/venv/
+services/**/__pycache__/
+services/**/*.pyc
+services/**/*.pyo
+services/**/.pytest_cache/
+
+# Dev databases
+services/**/*.db
+services/**/*.sqlite3
+
+# Node
+web/node_modules/
+web/.next/
+
+# Xcode
+ios/DerivedData/
+ios/**/*.xcuserstate
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
