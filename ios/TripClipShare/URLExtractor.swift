@@ -9,7 +9,6 @@
 /// path pattern'larına karşı kontrol edilir.
 
 import Foundation
-import MobileCoreServices
 import UniformTypeIdentifiers
 
 // MARK: - URLExtractor
@@ -18,7 +17,7 @@ enum URLExtractor {
 
     // MARK: Public API
 
-    typealias Completion = (Result<URL, ExtractionError>) -> Void
+    typealias Completion = @Sendable (Result<URL, ExtractionError>) -> Void
 
     /// Asenkron çıkarma — ana thread'den çağırılabilir,
     /// completion her zaman caller'ın thread'inde dönmez; main'e dispatch edin.
@@ -33,6 +32,10 @@ enum URLExtractor {
         }
 
         // Strateji 1: public.url
+        // Capture providers as nonisolated to cross the Sendable boundary safely.
+        // NSItemProvider is designed to be used from multiple threads.
+        nonisolated(unsafe) let capturedProviders = providers
+
         if let provider = providers.first(where: {
             $0.hasItemConformingToTypeIdentifier(urlUTI)
         }) {
@@ -40,13 +43,11 @@ enum URLExtractor {
                 switch result {
                 case .success(let url): completion(validate(url))
                 case .failure:
-                    // Strateji 2: public.plain-text
-                    Self.loadText(providers: providers, completion: completion)
+                    Self.loadText(providers: capturedProviders, completion: completion)
                 }
             }
         } else {
-            // Strateji 2 doğrudan
-            loadText(providers: providers, completion: completion)
+            loadText(providers: capturedProviders, completion: completion)
         }
     }
 
@@ -68,26 +69,15 @@ enum URLExtractor {
         }
     }
 
-    // MARK: UTI Helpers (iOS 14+ / öncesi uyumlu)
+    // MARK: UTI Constants (iOS 17+ — no legacy fallback needed)
 
-    private static let urlUTI: String = {
-        if #available(iOSApplicationExtension 14.0, *) {
-            return UTType.url.identifier
-        }
-        return kUTTypeURL as String
-    }()
-
-    private static let plainTextUTI: String = {
-        if #available(iOSApplicationExtension 14.0, *) {
-            return UTType.plainText.identifier
-        }
-        return kUTTypePlainText as String
-    }()
+    private static let urlUTI       = UTType.url.identifier
+    private static let plainTextUTI = UTType.plainText.identifier
 
     // MARK: - Strateji 1: public.url
 
     private static func loadURL(from provider: NSItemProvider,
-                                completion: @escaping (Result<URL, ExtractionError>) -> Void) {
+                                completion: @escaping @Sendable (Result<URL, ExtractionError>) -> Void) {
         provider.loadItem(forTypeIdentifier: urlUTI, options: nil) { item, error in
             if let error = error {
                 completion(.failure(.loadFailed(error)))
