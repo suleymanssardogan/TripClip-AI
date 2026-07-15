@@ -415,26 +415,28 @@ export default function DashboardPage() {
             </div>
           </motion.div>
 
-          {/* ── F: Kullanıcı CTA (gold) ─────────────── 1×1 ── */}
+          {/* ── F: Upload CTA (gold) ─────────────────── 1×1 ── */}
           <motion.div
             custom={5} variants={cardVariants} initial="hidden" animate="visible"
             className="bento-cell bento-gold p-6 flex flex-col justify-between min-h-[180px]"
           >
             <div className="flex items-start gap-3">
-              {/* Avatar */}
               <div className="w-12 h-12 rounded-2xl bg-[#080B14]/15 flex items-center justify-center text-2xl flex-shrink-0">
-                ✈️
+                🎬
               </div>
               <div>
                 <p className="font-display font-black text-[#080B14] text-lg leading-tight">
-                  Mobil uygulamadan<br />video yükle
+                  Yeni gezi<br />analizi başlat
                 </p>
-                <p className="text-[#080B14]/60 text-xs mt-1">iOS · Ücretsiz</p>
+                <p className="text-[#080B14]/60 text-xs mt-1">Video · Instagram URL</p>
               </div>
             </div>
-            <button className="btn-gold w-full py-3 rounded-2xl text-sm font-black mt-4">
-              iOS Uygulaması →
-            </button>
+            <Link
+              href="/upload"
+              className="btn-gold w-full py-3 rounded-2xl text-sm font-black mt-4 text-center block"
+            >
+              Video Yükle →
+            </Link>
           </motion.div>
 
           {/* ── G: Son konum görseli ──────────────────── 1×1 ── */}
@@ -505,7 +507,13 @@ export default function DashboardPage() {
             <div className="text-center py-20 bento-cell bento-dark border border-white/5">
               <div className="text-6xl mb-4">🗺️</div>
               <p className="text-ice font-semibold mb-2">Henüz video analiz edilmedi</p>
-              <p className="text-muted text-sm">iOS uygulamasından ilk videonu yükle.</p>
+              <p className="text-muted text-sm mb-5">İlk gezini oluşturmak için bir video yükle.</p>
+              <Link
+                href="/upload"
+                className="btn-primary inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm"
+              >
+                Video Yükle →
+              </Link>
             </div>
           ) : (
             <div className="space-y-3">
