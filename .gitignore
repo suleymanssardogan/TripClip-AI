@@ -109,3 +109,10 @@ venv/
 .vscode/
 .idea/
 services/core-api/credentials/
+
+# Claude Code local state (worktrees, per-machine launch configs)
+.claude/worktrees/
+.claude/launch.json
+
+# User-uploaded video content — never commit real user data
+services/core-api/uploads/

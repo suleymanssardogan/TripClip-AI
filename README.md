@@ -10,7 +10,7 @@
 **Öğrenci:** Süleyman Sardoğan  
 **Kurum:** Fırat Üniversitesi — Yazılım Mühendisliği (3. Sınıf)  
 **Dönem:** Mart – Haziran 2026 · 12 haftalık akademik proje  
-**Durum:** Hafta 8/12 — Geliştirme tamamlandı, test aşaması
+**Durum:** Hafta 9-10/12 — Gemini pipeline + güvenlik sertleştirmesi tamamlandı, deployment altyapısı sürüyor
 
 ---
 
@@ -31,7 +31,7 @@ Kullanıcılar Instagram'da yüzlerce gezi videosu kaydeder; bu videolar organiz
 ```
 ┌──────────────────────────────────────────────────────┐
 │                   İstemciler                         │
-│  iOS App (Swift)          Web App (Next.js :3001)   │
+│  iOS App (Swift)          Web App (Next.js :3000)   │
 └──────────┬───────────────────────────┬───────────────┘
            │                           │
            ▼                           ▼
@@ -39,21 +39,24 @@ Kullanıcılar Instagram'da yüzlerce gezi videosu kaydeder; bu videolar organiz
            │                           │
            └─────────────┬─────────────┘
                          ▼
-                  Core API :8000
+                  Core API :8000  ──▶  Celery Worker (async pipeline)
                   ┌──────────────────────────────┐
                   │         ML Pipeline          │
-                  │  YOLOv8 → Whisper → EasyOCR │
-                  │  Turkish BERT (NER)          │
+                  │  Gemini (multimodal, tek çağrı) │
+                  │  veya klasik: YOLOv8 + Whisper  │
+                  │  + RapidOCR + Turkish BERT NER  │
                   │  Nominatim (Geocoding)       │
                   │  TSP Route Optimizer         │
-                  │  Mistral RAG (Travel Tips)   │
+                  │  Qdrant RAG (Travel Tips)    │
                   └──────────────────────────────┘
                          │
-        ┌────────────────┼────────────────┐
-        ▼                ▼                ▼
-   PostgreSQL          Redis           Qdrant
-   (Ana DB)         (Cache+Progress) (Vector DB)
+        ┌────────────────┼──────────┬─────────────┐
+        ▼                ▼          ▼             ▼
+   PostgreSQL          Redis     MongoDB       Qdrant
+   (Ana DB)      (Cache+Broker) (Secondary)  (Vector DB)
 ```
+
+`USE_GEMINI=true` (varsayılan) tek bir Gemini çağrısıyla lokasyon çıkarımı yapar; `false` ise YOLOv8 + Google Vision + RapidOCR + Whisper + Turkish BERT NER klasik hattı çalışır. `USE_HYBRID=true` ikisini birleştirir.
 
 ---
 
@@ -64,16 +67,18 @@ Kullanıcılar Instagram'da yüzlerce gezi videosu kaydeder; bu videolar organiz
 |--------|-----------|
 | API Framework | FastAPI 0.109 |
 | ORM | SQLAlchemy + PostgreSQL |
-| Cache / Progress | Redis 7 |
+| Cache / Broker | Redis 7 (Celery broker + progress) |
+| Secondary DB | MongoDB |
 | Vector DB | Qdrant |
-| Computer Vision | YOLOv8 + Google Vision API |
-| Speech-to-Text | OpenAI Whisper |
-| OCR | EasyOCR |
-| NER | Turkish BERT (HuggingFace) |
+| Multimodal AI | Google Gemini 2.5 Flash (`USE_GEMINI=true`, default) |
+| Computer Vision (klasik mod) | YOLOv8 + Google Vision API (opsiyonel, `USE_GOOGLE_VISION`) |
+| Speech-to-Text (klasik mod) | OpenAI Whisper |
+| OCR (klasik mod) | RapidOCR (ONNX) |
+| NER (klasik mod) | Turkish BERT (HuggingFace) |
 | Geocoding | Nominatim (OpenStreetMap) |
 | Route | TSP Solver (Haversine) |
-| Travel Tips | Mistral 7B (RAG) |
-| Konteyner | Docker Compose (7 servis) |
+| Travel Tips | Qdrant + sentence-transformers embeddings |
+| Konteyner | Docker Compose (8 servis: core-api, celery-worker, mobile-bff, web-bff, postgres, redis, mongodb, qdrant) |
 
 ### iOS (Swift)
 | Katman | Teknoloji |
@@ -113,15 +118,18 @@ TripClip-AI/
 │   │   └── tests/              # test_auth.py, test_videos.py, test_health.py
 │   ├── mobile-bff/             # iOS için BFF proxy (:8001)
 │   │   └── app/routes/         # auth.py, videos.py
-│   ├── web-bff/                # Web için BFF proxy (:8002)
-│   │   └── app/routes/         # auth.py, plans.py, videos.py
-│   └── ios/TripClipAI/         # Native iOS uygulaması
-│       └── TripClipAI/
-│           ├── Views/          # LoginView, HomeView, ResultsView, HistoryView
-│           ├── Services/       # APIService, AuthService, PDFExport,
-│           │                   # PersistenceService, TripShareCard
-│           └── Assets.xcassets # AppIcon (1024x1024, dark, tinted)
-└── web/                        # Next.js web uygulaması (:3001)
+│   └── web-bff/                # Web için BFF proxy (:8002)
+│       └── app/routes/         # auth.py, plans.py, videos.py
+├── ios/                         # Native iOS uygulaması (top-level, XcodeGen)
+│   ├── project.yml              # xcodegen ile TripClipApp.xcodeproj üretir
+│   ├── TripClipApp/
+│   │   ├── App/                 # AppDelegate, RootView, TripClipApp (@main)
+│   │   ├── Core/                # Network, Models, Storage (Keychain, CoreData)
+│   │   ├── Features/             # Auth, Home, Processing, Results, History
+│   │   └── Resources/            # Assets.xcassets, Info.plist, entitlements
+│   ├── TripClipShare/            # Share Extension (Instagram → TripClip)
+│   └── Shared/                   # Kod her iki target'ta da paylaşılır
+└── web/                        # Next.js web uygulaması (:3000)
     └── src/app/
         ├── dashboard/          # Kullanıcı videoları + istatistikler
         ├── explore/            # Genel gezi planları keşfi
@@ -136,9 +144,9 @@ TripClip-AI/
 
 ### Gereksinimler
 - Docker & Docker Compose
-- Xcode 15+ (iOS için)
-- Node.js 18+ (Web için)
-- Google Vision API anahtarı
+- Xcode 16+ (iOS için)
+- Node.js 20+ (Web için)
+- Google Gemini API anahtarı ([aistudio.google.com](https://aistudio.google.com))
 
 ### 1. Backend & Servisler
 
@@ -148,8 +156,8 @@ git clone https://github.com/suleymanssardogan/TripClip-AI.git
 cd TripClip-AI
 
 # Ortam değişkenlerini ayarla
-cp services/core-api/.env.example services/core-api/.env
-# .env dosyasına GOOGLE_VISION_API_KEY ekle
+cp .env.example .env
+# .env dosyasına GEMINI_API_KEY ekle (JWT_SECRET_KEY de gerekli)
 
 # Tüm servisleri başlat
 docker compose up -d
@@ -177,9 +185,10 @@ npm run dev
 ### 3. iOS Uygulaması
 
 ```bash
-cd services/ios/TripClipAI
-open TripClipAI.xcodeproj
-# Xcode'da scheme seç → Run (⌘R)
+cd ios
+xcodegen generate      # project.yml'den TripClipApp.xcodeproj üretir
+open TripClipApp.xcodeproj
+# Xcode'da TripClipApp scheme'i seç → Run (⌘R)
 # Backend Docker'da çalışıyor olmalı
 ```
 
@@ -187,22 +196,24 @@ open TripClipAI.xcodeproj
 
 ## ML Pipeline Akışı
 
+Video yükleme, Celery kuyruğuna (`video_processing`) düşer; her aşama `_safe_run()` ile sarılıdır — bir servis başarısız olursa pipeline durmaz, fallback ile devam eder.
+
 ```
-Video Yükle
+Video Yükle (Celery task)
     │
     ├─▶ [1] Metadata çıkarma (FFprobe)
-    ├─▶ [2] Kare örnekleme (FFmpeg, 1fps)
-    ├─▶ [3] Paralel AI analizi
-    │       ├─ YOLOv8 nesne tespiti
-    │       ├─ Google Vision landmark tespiti
-    │       └─ Whisper ses transkripsiyonu
-    ├─▶ [4] Turkish BERT ile NER
-    ├─▶ [5] EasyOCR + NER filtreleme
-    ├─▶ [6] Nominatim geocoding
-    ├─▶ [7] Overpass API POI sorgusu
-    ├─▶ [8] Haversine deduplication
-    ├─▶ [9] TSP rota optimizasyonu
-    └─▶ [10] Mistral RAG seyahat ipuçları
+    ├─▶ [2] Kare örnekleme (FFmpeg)
+    ├─▶ [3] USE_GEMINI=true  → Gemini multimodal (lokasyon çıkarımı, tek çağrı)
+    │       USE_GEMINI=false → Paralel klasik analiz:
+    │           ├─ YOLOv8 nesne tespiti
+    │           ├─ Google Vision landmark tespiti (opsiyonel)
+    │           ├─ RapidOCR metin çıkarma
+    │           ├─ Whisper ses transkripsiyonu
+    │           └─ Turkish BERT ile NER
+    ├─▶ [4] Nominatim geocoding
+    ├─▶ [5] Haversine deduplication
+    ├─▶ [6] TSP rota optimizasyonu
+    └─▶ [7] Qdrant + sentence-transformers RAG — seyahat ipuçları
 ```
 
 Her aşama Redis'e yazılır → iOS & Web gerçek zamanlı progress gösterir.
@@ -229,6 +240,7 @@ Her aşama Redis'e yazılır → iOS & Web gerçek zamanlı progress gösterir.
 | Sayfa | Açıklama |
 |-------|----------|
 | `/dashboard` | Kullanıcının videoları, işlem durumu |
+| `/upload` | Video yükleme (gerçek zamanlı progress bar) veya Instagram/YouTube URL kuyruğa alma |
 | `/explore` | Tüm tamamlanan gezi planları, şehir filtresi |
 | `/analyze/[id]` | Video analiz sonuçları (harita + lokasyonlar + ipuçları) |
 | `/editor/[id]` | Gezi planı timeline editörü (gerçek veri) |
@@ -246,20 +258,19 @@ Her aşama Redis'e yazılır → iOS & Web gerçek zamanlı progress gösterir.
 | 6 | NER (Turkish BERT) + Nominatim geocoding | ✅ |
 | 7 | TSP rota optimizasyonu + Haversine dedup | ✅ |
 | 8 | iOS uygulama + Web frontend + Share Extension | ✅ |
-| 9–10 | Test, optimizasyon, entegrasyon | 🔄 |
-| 11–12 | Deployment, dokümantasyon, sunum | ⏳ |
-
-**Mevcut Durum: Hafta 8 — Core geliştirme tamamlandı**
+| 9–10 | Test, optimizasyon, entegrasyon, Gemini pipeline | ✅ |
+| 11–12 | Deployment altyapısı (nginx, SSL, CI/CD), dokümantasyon, sunum | 🔄 |
 
 ### Tamamlanan Özellikler
-- [x] 10 aşamalı ML video pipeline
+- [x] Gemini multimodal pipeline (+ hibrit/klasik mod fallback)
 - [x] Gerçek zamanlı işlem takibi (Redis + polling)
 - [x] iOS uygulaması (auth, upload, harita, paylaşım, PDF)
 - [x] Share Extension (Instagram → TripClip AI)
-- [x] Web dashboard + analiz + editör + paylaşım sayfaları
-- [x] JWT kimlik doğrulama
+- [x] Web dashboard + upload + analiz + editör + paylaşım sayfaları
+- [x] JWT kimlik doğrulama + rate limiting + production secret validation
 - [x] CoreData offline depolama
-- [x] Docker altyapısı (7 servis)
+- [x] Docker altyapısı (8 servis dev, +nginx/celery-worker/web prod)
+- [x] Production deployment altyapısı (nginx + TLS, deploy/SSL scriptleri, GitHub Actions CI)
 - [x] Veritabanı index optimizasyonları
 
 ---

@@ -1,5 +1,8 @@
 # TripClip AI — Proje Özeti
 
+> ⚠️ **Bu belge belirli bir tarihteki geliştirme notudur, canlı doküman değildir.**
+> Güncel mimari ve kurulum talimatları için [README.md](README.md) ve [CLAUDE.md](CLAUDE.md) kaynak alınmalıdır (ör. iOS artık `services/ios/TripClipAI` değil, üst dizindeki `ios/` altında).
+
 > **Sosyal Medya Videolarından AI Destekli Seyahat Planlayıcısı**
 > Mobil-öncelikli, hibrit ML pipeline'lı, üç katmanlı platform.
 
