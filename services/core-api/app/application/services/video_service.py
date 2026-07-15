@@ -166,9 +166,17 @@ class VideoService:
         ]
         return PlanListResponse(plans=plans, total=len(plans))
 
-    def get_video_detail(self, video_id: int) -> VideoDetailResponse:
+    def get_video_detail(self, video_id: int, requesting_user_id: Optional[int] = None) -> VideoDetailResponse:
         video = self._repo.get_by_id(video_id)
         if not video:
+            raise HTTPException(404, detail="Video not found")
+
+        is_owner = requesting_user_id is not None and video.user_id == requesting_user_id
+        is_completed = video.status == VideoStatus.COMPLETED
+
+        # Non-owners can only access completed (shareable) videos.
+        # Return 404 rather than 403 to avoid leaking video existence to third parties.
+        if not is_owner and not is_completed:
             raise HTTPException(404, detail="Video not found")
 
         return VideoDetailResponse(

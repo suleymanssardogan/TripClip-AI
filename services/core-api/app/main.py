@@ -114,15 +114,58 @@ app.add_middleware(RequestLoggingMiddleware)
 
 @app.get("/")
 async def root():
-    return {
-        "service": "Core API",
-        "message": "Business logic layer",
-        "status": "running"
-    }
+    return {"service": "Core API", "status": "running"}
+
 
 @app.get("/health")
 async def health():
     return {"status": "healthy", "service": "core-api"}
+
+
+@app.get("/health/ready")
+async def health_ready():
+    """
+    Readiness check — verifies all critical dependencies.
+    Returns 200 when the service can handle requests, 503 when degraded.
+    Used by nginx upstream health checks and monitoring.
+    """
+    from fastapi.responses import JSONResponse
+    from sqlalchemy import text as sa_text
+    from app.core.database import SessionLocal
+
+    checks: dict[str, str] = {}
+
+    # PostgreSQL
+    try:
+        db = SessionLocal()
+        db.execute(sa_text("SELECT 1"))
+        db.close()
+        checks["postgres"] = "ok"
+    except Exception as exc:
+        checks["postgres"] = f"error: {type(exc).__name__}"
+
+    # Redis
+    try:
+        from app.core.redis import get_redis
+        r = get_redis()
+        if r:
+            r.ping()
+            checks["redis"] = "ok"
+        else:
+            checks["redis"] = "unavailable"
+    except Exception as exc:
+        checks["redis"] = f"error: {type(exc).__name__}"
+
+    all_ok = all(v == "ok" for v in checks.values())
+    return JSONResponse(
+        status_code=200 if all_ok else 503,
+        content={
+            "status": "ready" if all_ok else "degraded",
+            "service": "core-api",
+            "checks": checks,
+        },
+    )
+
 
 # Import routers AFTER app creation
 from app.api.internal import videos, auth
