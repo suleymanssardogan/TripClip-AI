@@ -1,58 +1,36 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-
-  <!-- ── Extension metadata ──────────────────────────────────────────── -->
-  <key>NSExtension</key>
-  <dict>
-
-    <!-- Share Extension türü -->
-    <key>NSExtensionPointIdentifier</key>
-    <string>com.apple.share-services</string>
-
-    <!-- ShareViewController sınıfı — target adıyla tam qualify edin -->
-    <key>NSExtensionPrincipalClass</key>
-    <string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
-
-    <!-- ── Activation Rule ─────────────────────────────────────────── -->
-    <!--
-      NSPredicate tabanlı kural:
-        - public.url VEYA public.plain-text içeren attachment varsa göster
-        - Bu sayede Instagram'ın hem URL hem de metin içindeki link gönderimi yakalanır
-    -->
-    <key>NSExtensionActivationRule</key>
-    <string>
-      SUBQUERY(
-        extensionItems, $item,
-        SUBQUERY(
-          $item.attachments, $att,
-          ANY $att.registeredTypeIdentifiers UTI-CONFORMS-TO "public.url"
-          OR
-          ANY $att.registeredTypeIdentifiers UTI-CONFORMS-TO "public.plain-text"
-        ).@count > 0
-      ).@count > 0
-    </string>
-
-  </dict>
-
-  <!-- ── App Transport Security ─────────────────────────────────────── -->
-  <!--
-    Production endpoint HTTPS olduğu için ek istisna gerekmez.
-    Geliştirme sırasında localhost'a istek atmak için aşağıyı açın:
-  -->
-  <!--
-  <key>NSAppTransportSecurity</key>
-  <dict>
-    <key>NSAllowsLocalNetworking</key>
-    <true/>
-  </dict>
-  -->
-
-  <!-- ── Minimum OS ──────────────────────────────────────────────────── -->
-  <key>MinimumOSVersion</key>
-  <string>15.0</string>
-
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>XPC!</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionActivationRule</key>
+		<string>SUBQUERY(extensionItems, $item, SUBQUERY($item.attachments, $att, ANY $att.registeredTypeIdentifiers UTI-CONFORMS-TO 'public.url' OR ANY $att.registeredTypeIdentifiers UTI-CONFORMS-TO 'public.plain-text').@count &gt; 0).@count &gt; 0</string>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.share-services</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
+	</dict>
 </dict>
 </plist>

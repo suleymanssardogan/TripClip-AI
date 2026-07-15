@@ -2,6 +2,12 @@
                         TRIPCLİP AI - SİSTEM MİMARİSİ
 ════════════════════════════════════════════════════════════════════════════════
 
+  ⚠️  Bu belge erken bir geliştirme aşamasının notudur (Mart 2026), canlı doküman
+      değildir. OCR motoru o tarihten sonra EasyOCR'dan RapidOCR'a geçti ve Gemini
+      multimodal pipeline eklendi. Güncel mimari için README.md ve CLAUDE.md
+      kaynak alınmalıdır.
+════════════════════════════════════════════════════════════════════════════════
+
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                        KLİENT KATMANI                                       │
 ├─────────────────────────────────────────────────────────────────────────────┤

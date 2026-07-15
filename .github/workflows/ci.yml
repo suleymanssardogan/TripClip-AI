@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+  # ── Backend Tests ────────────────────────────────────────────────────────────
+  test-core-api:
+    name: Core API Tests
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('services/core-api/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # Install CPU-only PyTorch first to avoid downloading CUDA wheels (~2GB)
+      - name: Install CPU-only PyTorch
+        run: |
+          pip install \
+            torch==2.1.1+cpu \
+            torchvision==0.16.1+cpu \
+            --extra-index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install dependencies
+        run: pip install -r services/core-api/requirements.txt
+
+      - name: Run tests
+        working-directory: services/core-api
+        env:
+          JWT_SECRET_KEY: ci-test-secret-not-for-production
+          DATABASE_URL: sqlite:///./test.db
+          REDIS_URL: redis://localhost:6379/1
+          MONGODB_URL: mongodb://localhost:27017/tripclip_test
+          PYTHONPATH: .
+        run: pytest tests/ -v --tb=short
+
+  # ── Web Lint ─────────────────────────────────────────────────────────────────
+  lint-web:
+    name: Web Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Lint
+        working-directory: web
+        run: npm run lint
+
+  # ── Security: .dockerignore coverage check ───────────────────────────────────
+  # Runs on every push/PR to catch credentials leaking into build context.
+  security-dockerignore:
+    name: Credentials not in build context
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify credentials excluded from core-api build context
+        run: |
+          # Create a fake credentials file to test exclusion
+          mkdir -p services/core-api/credentials
+          echo '{"type":"service_account"}' > services/core-api/credentials/test.json
+
+          # Build with --no-cache and check the image does NOT contain credentials/
+          docker build \
+            --no-cache \
+            --tag tripclip/core-api:security-check \
+            services/core-api
+
+          # Attempt to find the credential path in the image filesystem
+          if docker run --rm tripclip/core-api:security-check \
+               test -f /app/credentials/test.json; then
+            echo "❌ SECURITY FAILURE: credentials/ found inside image"
+            exit 1
+          else
+            echo "✅ credentials/ correctly excluded from image"
+          fi
+
+          docker rmi tripclip/core-api:security-check
+
+  # ── Docker Build Verification ─────────────────────────────────────────────────
+  # Only runs on main branch after tests pass — confirms images build cleanly.
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [test-core-api, lint-web, security-dockerignore]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build core-api
+        uses: docker/build-push-action@v5
+        with:
+          context: services/core-api
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: tripclip/core-api:ci
+
+      - name: Build web-bff
+        uses: docker/build-push-action@v5
+        with:
+          context: services/web-bff
+          push: false
+          tags: tripclip/web-bff:ci
+
+      - name: Build mobile-bff
+        uses: docker/build-push-action@v5
+        with:
+          context: services/mobile-bff
+          push: false
+          tags: tripclip/mobile-bff:ci
+
+      - name: Build web
+        uses: docker/build-push-action@v5
+        with:
+          context: web
+          push: false
+          tags: tripclip/web:ci

@@ -3,6 +3,7 @@ Web BFF — Video route handler'ları.
 Tüm Core API hataları web_error_wrapper aracılığıyla Next.js dostu mesajlara çevrilir.
 """
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from pydantic import BaseModel
 import httpx
 import os
 import uuid
@@ -78,3 +79,32 @@ async def get_video(
         if resp.status_code >= 400:
             raise_from_response(resp, request_id=rid)
     return resp.json()
+
+
+class URLQueueRequest(BaseModel):
+    url: str
+
+
+@router.post("/queue-url", status_code=202)
+async def queue_url(
+    body: URLQueueRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """
+    Instagram / YouTube URL'ini arka planda işlemek üzere kuyruğa al.
+    Geçerli JWT zorunlu — user_id core-api'ye x-user-id header olarak iletilir.
+    202 Accepted döner; gerçek işlem Celery worker üzerinde başlar.
+    """
+    rid = str(uuid.uuid4())[:8]
+    async with web_error_wrapper(request_id=rid):
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{CORE_API_URL}/internal/videos/queue-url",
+                json={"url": body.url, "source": "web_upload"},
+                headers={"x-user-id": str(user_id)},
+            )
+        if resp.status_code >= 400:
+            raise_from_response(resp, request_id=rid)
+
+    data = resp.json()
+    return {"id": data["id"], "status": "queued"}

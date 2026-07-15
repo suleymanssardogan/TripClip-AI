@@ -1,0 +1,707 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		082059E394ACA22AAD1E394B /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6BE1D486FE4CA01AA77FFF /* LoginView.swift */; };
+		08D364CE316FF612ABF86788 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03FB87E8E3920D380F6A652F /* RootView.swift */; };
+		0D2B5F2FE3D717DD868B8950 /* URLExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E4804B79221D8965AD7E84 /* URLExtractor.swift */; };
+		0FC211B5B1D80639D5134AD7 /* AppGroupStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A41F817700A394A86DC9EF /* AppGroupStore.swift */; };
+		17720540365DE7A6FCEBB257 /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 558793C78BE2EFC720EEC7DC /* Config.swift */; };
+		2A8650F15BD5EC299E770EB3 /* AuthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE5DD24D1526D167DCA1DB7 /* AuthModels.swift */; };
+		3747DE962DDD76C53907647F /* ProcessingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCE29E0073E0455FABE8A37D /* ProcessingViewModel.swift */; };
+		3B185B7738465036B0DD5B8D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 968FD77836F30B779B3CC7B4 /* Assets.xcassets */; };
+		3E9004802942DA325016C776 /* LocationCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B983A39E9A82C36BFBE87DD6 /* LocationCard.swift */; };
+		4261072B4FD019B68E88439B /* PDFExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B9DB98CE03EBBD876D35E10 /* PDFExportService.swift */; };
+		44C5C824753E0C21F8E00F23 /* ResultsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 485ED9C20DAF04FDC58C838C /* ResultsViewModel.swift */; };
+		471301EF00AF5918CAA667FA /* BackgroundUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B16DD309E3B724FBA8CE45 /* BackgroundUploader.swift */; };
+		5004D599C2AD94FED9B811ED /* PersistenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CBC611FB37ABE8A2FA8067F /* PersistenceController.swift */; };
+		587C391896AA84080537B245 /* RegisterViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35B293E6D103D668154E573B /* RegisterViewModel.swift */; };
+		6807A0337CCF24A692AB3531 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F09F163223BC580F03BBEE16 /* HistoryView.swift */; };
+		7E22CDFF8F112AB1063DD7DC /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0563BA80A92665BB8D3A36D /* AppDelegate.swift */; };
+		808671464A9F8DDC44A75919 /* TripClipApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 143A5A8A5C2354EB64A0F946 /* TripClipApp.swift */; };
+		82AE0D51B2BCCF9606A438D6 /* BackgroundUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B16DD309E3B724FBA8CE45 /* BackgroundUploader.swift */; };
+		8ACEA027B149AE74906C2729 /* APIError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A71CAFE212CFE225B5434D /* APIError.swift */; };
+		8C9A5236AC2BA08600CA7055 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B88E418A97C9B8335A0182 /* ShareViewController.swift */; };
+		9B4E8E31E67157E8FB8B698C /* PlanRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDD0E790D6A67CF3AF6AB16D /* PlanRowView.swift */; };
+		9D7203302EEB74D57AD161DE /* PlanModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26143DBFA5C545A4B9D4C760 /* PlanModels.swift */; };
+		9F64BB29DD6BD8A9A7419EDB /* TravelTipsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2917DDC3423D027754721B5F /* TravelTipsSection.swift */; };
+		A1C5DB090907E4A9DA8B0F17 /* Endpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFCA77B601BF52F62A73B068 /* Endpoint.swift */; };
+		A56C61BC9E5FBCF44A31FEC6 /* AuthEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADF35CFE561AB96B922DB322 /* AuthEnvironment.swift */; };
+		A84581BE16BADAAB51A78C31 /* RegisterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64B1B16045F93DF8A0A3065C /* RegisterView.swift */; };
+		BA24C752A4F5DA672D334766 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74FD6988CA6DE8735788ABE5 /* APIClient.swift */; };
+		BB27274DD95A80DDD2A8E53A /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A3D344230EA31CC3C37BDA /* HomeView.swift */; };
+		BE7975EC6E7D2277D55AE620 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = BF585DBEA2E14514DEA6E08B /* PrivacyInfo.xcprivacy */; };
+		BFC5A5A67F8471A90FB12955 /* TripClipShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 9D992FF160BC6BBBDEB9692A /* TripClipShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		C13AEFB508922F430B724DB5 /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 558793C78BE2EFC720EEC7DC /* Config.swift */; };
+		C252E40A0EE400154CEF9722 /* TripMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 132C959BE851008CB9C4D30B /* TripMapView.swift */; };
+		D45E0B98B4182C2F2DB35113 /* LoginViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE15F960FE7CDF3D4BA5FEE4 /* LoginViewModel.swift */; };
+		D695BB1B432954ECC506D40D /* TripClipAI.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 943BBEDAF9CF71A7C5B03B7D /* TripClipAI.xcdatamodeld */; };
+		D845ECF7F2DF1B7C66DC180D /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 536DF00D1393575E6F659A84 /* WelcomeView.swift */; };
+		DC5F460B1847B9A4C96A165C /* ResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFBFA14096FC8B01ADA05172 /* ResultsView.swift */; };
+		E00CEE7F93833C0D7EED148E /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 078D0B6788566B732166478A /* HomeViewModel.swift */; };
+		E8C230BC762FF9E4831B86E9 /* AppDelegate+BackgroundSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C5D4C5737D28C75BDF4C80A /* AppDelegate+BackgroundSession.swift */; };
+		F008BA49749ABB595686F4B3 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AED6B7F3B523FDF9A4D46607 /* KeychainStore.swift */; };
+		FC4FA733719C851108014441 /* TripShareCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9718E29EE427E8620545B9F9 /* TripShareCard.swift */; };
+		FE4EA46483C084FB9ED91CCF /* ProcessingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2245417A4D703AEFD81A708 /* ProcessingView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		E723FAB809F3156721B0ABCC /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5D911D478BCE029171743BEF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = EB45705A6AE19BAFAC410B9D;
+			remoteInfo = TripClipShare;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		4A465B967895C4BAC69E1A29 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				BFC5A5A67F8471A90FB12955 /* TripClipShare.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		03FB87E8E3920D380F6A652F /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		078D0B6788566B732166478A /* HomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
+		132C959BE851008CB9C4D30B /* TripMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripMapView.swift; sourceTree = "<group>"; };
+		143A5A8A5C2354EB64A0F946 /* TripClipApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripClipApp.swift; sourceTree = "<group>"; };
+		19410676BD43A209514607B7 /* TripClipApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripClipApp.entitlements; sourceTree = "<group>"; };
+		26143DBFA5C545A4B9D4C760 /* PlanModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanModels.swift; sourceTree = "<group>"; };
+		2917DDC3423D027754721B5F /* TravelTipsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelTipsSection.swift; sourceTree = "<group>"; };
+		2B6BE1D486FE4CA01AA77FFF /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		2CBC611FB37ABE8A2FA8067F /* PersistenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceController.swift; sourceTree = "<group>"; };
+		31397122A33782B6BF494595 /* TripClipApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TripClipApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		35B293E6D103D668154E573B /* RegisterViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterViewModel.swift; sourceTree = "<group>"; };
+		3C5D4C5737D28C75BDF4C80A /* AppDelegate+BackgroundSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+BackgroundSession.swift"; sourceTree = "<group>"; };
+		485ED9C20DAF04FDC58C838C /* ResultsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResultsViewModel.swift; sourceTree = "<group>"; };
+		536DF00D1393575E6F659A84 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
+		558793C78BE2EFC720EEC7DC /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
+		5B9DB98CE03EBBD876D35E10 /* PDFExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFExportService.swift; sourceTree = "<group>"; };
+		64B1B16045F93DF8A0A3065C /* RegisterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterView.swift; sourceTree = "<group>"; };
+		658F52C276A51D4ECFD4FB97 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		74FD6988CA6DE8735788ABE5 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		77B16DD309E3B724FBA8CE45 /* BackgroundUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundUploader.swift; sourceTree = "<group>"; };
+		78A41F817700A394A86DC9EF /* AppGroupStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupStore.swift; sourceTree = "<group>"; };
+		78A71CAFE212CFE225B5434D /* APIError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIError.swift; sourceTree = "<group>"; };
+		7EE5DD24D1526D167DCA1DB7 /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
+		826704A52BD579F46C8CA166 /* TripClipAI.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = TripClipAI.xcdatamodel; sourceTree = "<group>"; };
+		83E4804B79221D8965AD7E84 /* URLExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLExtractor.swift; sourceTree = "<group>"; };
+		968FD77836F30B779B3CC7B4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		9718E29EE427E8620545B9F9 /* TripShareCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripShareCard.swift; sourceTree = "<group>"; };
+		9D992FF160BC6BBBDEB9692A /* TripClipShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = TripClipShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A2245417A4D703AEFD81A708 /* ProcessingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingView.swift; sourceTree = "<group>"; };
+		ADF35CFE561AB96B922DB322 /* AuthEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthEnvironment.swift; sourceTree = "<group>"; };
+		AE15F960FE7CDF3D4BA5FEE4 /* LoginViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewModel.swift; sourceTree = "<group>"; };
+		AED6B7F3B523FDF9A4D46607 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		AFBFA14096FC8B01ADA05172 /* ResultsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResultsView.swift; sourceTree = "<group>"; };
+		B0563BA80A92665BB8D3A36D /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		B909B84E18F81BADFB1C56F5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		B983A39E9A82C36BFBE87DD6 /* LocationCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationCard.swift; sourceTree = "<group>"; };
+		BF585DBEA2E14514DEA6E08B /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		C7A3D344230EA31CC3C37BDA /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		CDD0E790D6A67CF3AF6AB16D /* PlanRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanRowView.swift; sourceTree = "<group>"; };
+		D8B88E418A97C9B8335A0182 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		DFCA77B601BF52F62A73B068 /* Endpoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Endpoint.swift; sourceTree = "<group>"; };
+		F09F163223BC580F03BBEE16 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
+		FCE29E0073E0455FABE8A37D /* ProcessingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingViewModel.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		118E59F45BCFF2D7BA2F1C35 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				ADF35CFE561AB96B922DB322 /* AuthEnvironment.swift */,
+				2B6BE1D486FE4CA01AA77FFF /* LoginView.swift */,
+				AE15F960FE7CDF3D4BA5FEE4 /* LoginViewModel.swift */,
+				64B1B16045F93DF8A0A3065C /* RegisterView.swift */,
+				35B293E6D103D668154E573B /* RegisterViewModel.swift */,
+				536DF00D1393575E6F659A84 /* WelcomeView.swift */,
+			);
+			path = Auth;
+			sourceTree = "<group>";
+		};
+		1F1D802CA419F1AD9FB4BB83 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				118E59F45BCFF2D7BA2F1C35 /* Auth */,
+				4DDBBF7B55E3F9D1B891C2A2 /* History */,
+				7C3218D81CCDB2BDB79F8FF5 /* Home */,
+				CBACDBE44D0B59000D61E36A /* Processing */,
+				31896970E59BA9EAC38D0DF2 /* Results */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		31896970E59BA9EAC38D0DF2 /* Results */ = {
+			isa = PBXGroup;
+			children = (
+				FF497F91F779363FB77FB461 /* Components */,
+				693BB507131EF34F9E78F627 /* Services */,
+				AFBFA14096FC8B01ADA05172 /* ResultsView.swift */,
+				485ED9C20DAF04FDC58C838C /* ResultsViewModel.swift */,
+			);
+			path = Results;
+			sourceTree = "<group>";
+		};
+		4DDBBF7B55E3F9D1B891C2A2 /* History */ = {
+			isa = PBXGroup;
+			children = (
+				F09F163223BC580F03BBEE16 /* HistoryView.swift */,
+			);
+			path = History;
+			sourceTree = "<group>";
+		};
+		61E941145A44C64230CEFE1B /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				31397122A33782B6BF494595 /* TripClipApp.app */,
+				9D992FF160BC6BBBDEB9692A /* TripClipShare.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		66F4AD9541B6CC5DA4899A0B /* TripClipApp */ = {
+			isa = PBXGroup;
+			children = (
+				CC828A06A979F45942D7BC94 /* App */,
+				8A608A3E3914C479635921D7 /* Core */,
+				1F1D802CA419F1AD9FB4BB83 /* Features */,
+				C4A2D82543BB12B44C052378 /* Resources */,
+			);
+			path = TripClipApp;
+			sourceTree = "<group>";
+		};
+		693BB507131EF34F9E78F627 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				5B9DB98CE03EBBD876D35E10 /* PDFExportService.swift */,
+				9718E29EE427E8620545B9F9 /* TripShareCard.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
+		7B44EB12C287EBCAB0B60440 /* Network */ = {
+			isa = PBXGroup;
+			children = (
+				74FD6988CA6DE8735788ABE5 /* APIClient.swift */,
+				78A71CAFE212CFE225B5434D /* APIError.swift */,
+				DFCA77B601BF52F62A73B068 /* Endpoint.swift */,
+			);
+			path = Network;
+			sourceTree = "<group>";
+		};
+		7C3218D81CCDB2BDB79F8FF5 /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				C7A3D344230EA31CC3C37BDA /* HomeView.swift */,
+				078D0B6788566B732166478A /* HomeViewModel.swift */,
+				CDD0E790D6A67CF3AF6AB16D /* PlanRowView.swift */,
+			);
+			path = Home;
+			sourceTree = "<group>";
+		};
+		8A608A3E3914C479635921D7 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				BA51781BA454B69F03530009 /* Models */,
+				7B44EB12C287EBCAB0B60440 /* Network */,
+				FF2A0E2E4560D3BB90B4F32C /* Storage */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		BA51781BA454B69F03530009 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				7EE5DD24D1526D167DCA1DB7 /* AuthModels.swift */,
+				26143DBFA5C545A4B9D4C760 /* PlanModels.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		C4A2D82543BB12B44C052378 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				943BBEDAF9CF71A7C5B03B7D /* TripClipAI.xcdatamodeld */,
+				968FD77836F30B779B3CC7B4 /* Assets.xcassets */,
+				658F52C276A51D4ECFD4FB97 /* Info.plist */,
+				BF585DBEA2E14514DEA6E08B /* PrivacyInfo.xcprivacy */,
+				19410676BD43A209514607B7 /* TripClipApp.entitlements */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		CB47CEF9629E4E0C979293FD = {
+			isa = PBXGroup;
+			children = (
+				ED58DE881715AA334C963771 /* Shared */,
+				66F4AD9541B6CC5DA4899A0B /* TripClipApp */,
+				F7B5F8F5AA6FAB74F8548D03 /* TripClipShare */,
+				61E941145A44C64230CEFE1B /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		CBACDBE44D0B59000D61E36A /* Processing */ = {
+			isa = PBXGroup;
+			children = (
+				A2245417A4D703AEFD81A708 /* ProcessingView.swift */,
+				FCE29E0073E0455FABE8A37D /* ProcessingViewModel.swift */,
+			);
+			path = Processing;
+			sourceTree = "<group>";
+		};
+		CC828A06A979F45942D7BC94 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				B0563BA80A92665BB8D3A36D /* AppDelegate.swift */,
+				3C5D4C5737D28C75BDF4C80A /* AppDelegate+BackgroundSession.swift */,
+				03FB87E8E3920D380F6A652F /* RootView.swift */,
+				143A5A8A5C2354EB64A0F946 /* TripClipApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		ED58DE881715AA334C963771 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				77B16DD309E3B724FBA8CE45 /* BackgroundUploader.swift */,
+				558793C78BE2EFC720EEC7DC /* Config.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		F7B5F8F5AA6FAB74F8548D03 /* TripClipShare */ = {
+			isa = PBXGroup;
+			children = (
+				B909B84E18F81BADFB1C56F5 /* Info.plist */,
+				D8B88E418A97C9B8335A0182 /* ShareViewController.swift */,
+				83E4804B79221D8965AD7E84 /* URLExtractor.swift */,
+			);
+			path = TripClipShare;
+			sourceTree = "<group>";
+		};
+		FF2A0E2E4560D3BB90B4F32C /* Storage */ = {
+			isa = PBXGroup;
+			children = (
+				78A41F817700A394A86DC9EF /* AppGroupStore.swift */,
+				AED6B7F3B523FDF9A4D46607 /* KeychainStore.swift */,
+				2CBC611FB37ABE8A2FA8067F /* PersistenceController.swift */,
+			);
+			path = Storage;
+			sourceTree = "<group>";
+		};
+		FF497F91F779363FB77FB461 /* Components */ = {
+			isa = PBXGroup;
+			children = (
+				B983A39E9A82C36BFBE87DD6 /* LocationCard.swift */,
+				2917DDC3423D027754721B5F /* TravelTipsSection.swift */,
+				132C959BE851008CB9C4D30B /* TripMapView.swift */,
+			);
+			path = Components;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		13183EADEDD48DE2DEBE961C /* TripClipApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 444FA6F43D8E9B0414415BBC /* Build configuration list for PBXNativeTarget "TripClipApp" */;
+			buildPhases = (
+				160A1F26CC5066D7E05A024D /* Sources */,
+				2128BDC9939F14EC3AF53A6C /* Resources */,
+				4A465B967895C4BAC69E1A29 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9D402AC61600496F1817D106 /* PBXTargetDependency */,
+			);
+			name = TripClipApp;
+			packageProductDependencies = (
+			);
+			productName = TripClipApp;
+			productReference = 31397122A33782B6BF494595 /* TripClipApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+		EB45705A6AE19BAFAC410B9D /* TripClipShare */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 84C53CDBC1613A571B91AD16 /* Build configuration list for PBXNativeTarget "TripClipShare" */;
+			buildPhases = (
+				A2FB7AF64E5003444EF8392C /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TripClipShare;
+			packageProductDependencies = (
+			);
+			productName = TripClipShare;
+			productReference = 9D992FF160BC6BBBDEB9692A /* TripClipShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		5D911D478BCE029171743BEF /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = C8193204079B72FED2CB4219 /* Build configuration list for PBXProject "TripClipApp" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = CB47CEF9629E4E0C979293FD;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 61E941145A44C64230CEFE1B /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				13183EADEDD48DE2DEBE961C /* TripClipApp */,
+				EB45705A6AE19BAFAC410B9D /* TripClipShare */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		2128BDC9939F14EC3AF53A6C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3B185B7738465036B0DD5B8D /* Assets.xcassets in Resources */,
+				BE7975EC6E7D2277D55AE620 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		160A1F26CC5066D7E05A024D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BA24C752A4F5DA672D334766 /* APIClient.swift in Sources */,
+				8ACEA027B149AE74906C2729 /* APIError.swift in Sources */,
+				E8C230BC762FF9E4831B86E9 /* AppDelegate+BackgroundSession.swift in Sources */,
+				7E22CDFF8F112AB1063DD7DC /* AppDelegate.swift in Sources */,
+				0FC211B5B1D80639D5134AD7 /* AppGroupStore.swift in Sources */,
+				A56C61BC9E5FBCF44A31FEC6 /* AuthEnvironment.swift in Sources */,
+				2A8650F15BD5EC299E770EB3 /* AuthModels.swift in Sources */,
+				82AE0D51B2BCCF9606A438D6 /* BackgroundUploader.swift in Sources */,
+				C13AEFB508922F430B724DB5 /* Config.swift in Sources */,
+				A1C5DB090907E4A9DA8B0F17 /* Endpoint.swift in Sources */,
+				6807A0337CCF24A692AB3531 /* HistoryView.swift in Sources */,
+				BB27274DD95A80DDD2A8E53A /* HomeView.swift in Sources */,
+				E00CEE7F93833C0D7EED148E /* HomeViewModel.swift in Sources */,
+				F008BA49749ABB595686F4B3 /* KeychainStore.swift in Sources */,
+				3E9004802942DA325016C776 /* LocationCard.swift in Sources */,
+				082059E394ACA22AAD1E394B /* LoginView.swift in Sources */,
+				D45E0B98B4182C2F2DB35113 /* LoginViewModel.swift in Sources */,
+				4261072B4FD019B68E88439B /* PDFExportService.swift in Sources */,
+				5004D599C2AD94FED9B811ED /* PersistenceController.swift in Sources */,
+				9D7203302EEB74D57AD161DE /* PlanModels.swift in Sources */,
+				9B4E8E31E67157E8FB8B698C /* PlanRowView.swift in Sources */,
+				FE4EA46483C084FB9ED91CCF /* ProcessingView.swift in Sources */,
+				3747DE962DDD76C53907647F /* ProcessingViewModel.swift in Sources */,
+				A84581BE16BADAAB51A78C31 /* RegisterView.swift in Sources */,
+				587C391896AA84080537B245 /* RegisterViewModel.swift in Sources */,
+				DC5F460B1847B9A4C96A165C /* ResultsView.swift in Sources */,
+				44C5C824753E0C21F8E00F23 /* ResultsViewModel.swift in Sources */,
+				08D364CE316FF612ABF86788 /* RootView.swift in Sources */,
+				9F64BB29DD6BD8A9A7419EDB /* TravelTipsSection.swift in Sources */,
+				D695BB1B432954ECC506D40D /* TripClipAI.xcdatamodeld in Sources */,
+				808671464A9F8DDC44A75919 /* TripClipApp.swift in Sources */,
+				C252E40A0EE400154CEF9722 /* TripMapView.swift in Sources */,
+				FC4FA733719C851108014441 /* TripShareCard.swift in Sources */,
+				D845ECF7F2DF1B7C66DC180D /* WelcomeView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A2FB7AF64E5003444EF8392C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				471301EF00AF5918CAA667FA /* BackgroundUploader.swift in Sources */,
+				17720540365DE7A6FCEBB257 /* Config.swift in Sources */,
+				8C9A5236AC2BA08600CA7055 /* ShareViewController.swift in Sources */,
+				0D2B5F2FE3D717DD868B8950 /* URLExtractor.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		9D402AC61600496F1817D106 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = EB45705A6AE19BAFAC410B9D /* TripClipShare */;
+			targetProxy = E723FAB809F3156721B0ABCC /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		43CC189D4AC93970CDF859EC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TripClipShare/TripClipShare.entitlements;
+				INFOPLIST_FILE = TripClipShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.sardogan.TripClipAI.ShareExtension;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		574326CBC7873F10679C9DFD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_PREVIEWS = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		5D1BB55BA9EBCC9727B6E8FD /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = TripClipApp/Resources/TripClipApp.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = TripClipApp/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.sardogan.TripClipAI;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		89CDC2EB19B8CE0B61AAAC46 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		956F4E93159007FD7ABF4351 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = TripClipShare/TripClipShare.entitlements;
+				INFOPLIST_FILE = TripClipShare/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.sardogan.TripClipAI.ShareExtension;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		B6DEF8FCB5A7C44C96E09F6F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = TripClipApp/Resources/TripClipApp.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				INFOPLIST_FILE = TripClipApp/Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.sardogan.TripClipAI;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		444FA6F43D8E9B0414415BBC /* Build configuration list for PBXNativeTarget "TripClipApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5D1BB55BA9EBCC9727B6E8FD /* Debug */,
+				B6DEF8FCB5A7C44C96E09F6F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		84C53CDBC1613A571B91AD16 /* Build configuration list for PBXNativeTarget "TripClipShare" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				43CC189D4AC93970CDF859EC /* Debug */,
+				956F4E93159007FD7ABF4351 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C8193204079B72FED2CB4219 /* Build configuration list for PBXProject "TripClipApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				574326CBC7873F10679C9DFD /* Debug */,
+				89CDC2EB19B8CE0B61AAAC46 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCVersionGroup section */
+		943BBEDAF9CF71A7C5B03B7D /* TripClipAI.xcdatamodeld */ = {
+			isa = XCVersionGroup;
+			children = (
+				826704A52BD579F46C8CA166 /* TripClipAI.xcdatamodel */,
+			);
+			currentVersion = 826704A52BD579F46C8CA166 /* TripClipAI.xcdatamodel */;
+			path = TripClipAI.xcdatamodeld;
+			sourceTree = "<group>";
+			versionGroupType = wrapper.xcdatamodel;
+		};
+/* End XCVersionGroup section */
+	};
+	rootObject = 5D911D478BCE029171743BEF /* Project object */;
+}

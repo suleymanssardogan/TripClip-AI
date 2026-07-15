@@ -2,10 +2,11 @@
 Pytest fixtures — SQLite in-memory test DB, FastAPI test client
 """
 import os
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
-os.environ.setdefault("REDIS_URL",    "redis://localhost:6379/1")
-os.environ.setdefault("MONGODB_URL",  "mongodb://localhost:27017/tripclip_test")
-os.environ.setdefault("SECRET_KEY",   "test-secret-key-tripclip-ai-2026")
+os.environ.setdefault("DATABASE_URL",   "sqlite:///./test.db")
+os.environ.setdefault("REDIS_URL",      "redis://localhost:6379/1")
+os.environ.setdefault("MONGODB_URL",    "mongodb://localhost:27017/tripclip_test")
+os.environ.setdefault("SECRET_KEY",     "test-secret-key-tripclip-ai-2026")
+os.environ.setdefault("JWT_SECRET_KEY", "test-secret-key-tripclip-ai-2026")
 
 import pytest
 from fastapi.testclient import TestClient
@@ -68,3 +69,25 @@ def registered_user(client):
 @pytest.fixture(scope="function")
 def auth_headers(registered_user):
     return {"Authorization": f"Bearer {registered_user['token']}"}
+
+
+@pytest.fixture(scope="function")
+def bff_headers(registered_user):
+    """BFF'in core-api'ye gönderdiği başlıklar — JWT yerine X-User-Id kullanılır."""
+    return {"x-user-id": str(registered_user["user_id"])}
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiters():
+    """Her testten önce rate limiter sayaçlarını sıfırla.
+
+    Aksi hâlde bir testteki istek sayısı sonraki testi etkiler;
+    test ortamında gerçek dakika bazlı sınırlar anlamsız olur.
+    """
+    from app.main import limiter as main_limiter
+    from app.api.internal.auth import limiter as auth_limiter
+    from app.api.internal.videos import limiter as videos_limiter
+    main_limiter.reset()
+    auth_limiter.reset()
+    videos_limiter.reset()
+    yield

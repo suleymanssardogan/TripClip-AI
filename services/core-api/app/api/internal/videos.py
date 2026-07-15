@@ -62,11 +62,18 @@ async def process_video(
     Video yükle → Celery kuyruğuna gönder → anında yanıt dön.
     Gerçek işlem Celery worker tarafından arka planda yapılır.
     """
+    if x_user_id is None:
+        from fastapi import HTTPException as _HTTPException
+        raise _HTTPException(
+            status_code=401,
+            detail={"code": "UNAUTHORIZED", "message": "Kimlik doğrulama gerekli."},
+        )
+
     content = await file.read()
     video_id, file_path = service.create_upload(
         filename=file.filename,
         content=content,
-        user_id=x_user_id or 1,
+        user_id=x_user_id,
     )
 
     # ── Celery task'ı kuyruğa ekle ────────────────────────────────────────────
@@ -141,8 +148,9 @@ async def get_user_videos(
 async def get_video(
     video_id: int,
     service: VideoService = Depends(get_video_service),
+    x_user_id: Optional[int] = Header(default=None),
 ):
-    detail = service.get_video_detail(video_id)
+    detail = service.get_video_detail(video_id, requesting_user_id=x_user_id)
     # JSON serileştirme tutarlılığı için (Türkçe karakter güvencesi)
     return JSONResponse(content=json.loads(detail.model_dump_json()))
 
@@ -192,7 +200,12 @@ async def queue_url(
           → 202 { "id": 42, "status": "queued" }
           → Celery worker: URL'i indir → ML pipeline → DB'ye kaydet
     """
-    user_id = x_user_id or 1
+    if x_user_id is None:
+        from fastapi import HTTPException as _HTTPException
+        raise _HTTPException(
+            status_code=401,
+            detail={"code": "UNAUTHORIZED", "message": "Kimlik doğrulama gerekli."},
+        )
 
     # DB kaydı oluştur (status = "queued", filename = URL'den türetilir)
     url_slug = body.url.rstrip("/").rsplit("/", 1)[-1][:40]  # son path segment
@@ -201,7 +214,7 @@ async def queue_url(
     video_id, _ = service.create_upload(
         filename=filename,
         content=b"",          # dosya henüz yok — URL'den indirilecek
-        user_id=user_id,
+        user_id=x_user_id,
     )
 
     # Celery task — URL'i indirip işleyecek

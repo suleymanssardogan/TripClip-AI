@@ -7,8 +7,20 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 import os
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "tripclip-secret-change-in-production")
+_DEFAULT_SECRET = "tripclip-secret-change-in-production"
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", _DEFAULT_SECRET)
 ALGORITHM  = "HS256"
+
+if SECRET_KEY == _DEFAULT_SECRET:
+    import logging as _logging
+    _logging.getLogger("web-bff.auth").warning(
+        "⚠️  JWT_SECRET_KEY is using the insecure default value. "
+        "Set JWT_SECRET_KEY in your environment before deploying."
+    )
+    if os.getenv("APP_ENV") == "production":
+        raise RuntimeError(
+            "JWT_SECRET_KEY must not be the default value in production."
+        )
 
 bearer_scheme = HTTPBearer(auto_error=False)
 

@@ -1,5 +1,8 @@
 # 🔧 TripClip AI - Servisler ve Fonksiyonlar Detaylı
 
+> ⚠️ **Bu belge erken bir geliştirme aşamasının notudur (Mart 2026), canlı doküman değildir.**
+> OCR motoru o tarihten sonra EasyOCR'dan RapidOCR'a geçti ve Gemini multimodal pipeline eklendi. Güncel mimari için [README.md](README.md) ve [CLAUDE.md](CLAUDE.md) kaynak alınmalıdır.
+
 ## 📚 Hızlı İçindekiler
 - [1. Core-API Servisleri](#1-core-api-servisleri)
 - [2. ML Modülleri ve Fonksiyonları](#2-ml-modülleri-ve-fonksiyonları)

@@ -8,8 +8,21 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 import os
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "tripclip-secret-change-in-production")
+_DEFAULT_SECRET = "tripclip-secret-change-in-production"
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", _DEFAULT_SECRET)
 ALGORITHM = "HS256"
+
+if SECRET_KEY == _DEFAULT_SECRET:
+    import logging as _logging
+    _logging.getLogger("tripclip.auth").warning(
+        "⚠️  JWT_SECRET_KEY is using the insecure default value. "
+        "Set JWT_SECRET_KEY in your environment before deploying."
+    )
+    if os.getenv("APP_ENV") == "production":
+        raise RuntimeError(
+            "JWT_SECRET_KEY must not be the default value in production. "
+            "Set a secure random value via the JWT_SECRET_KEY environment variable."
+        )
 ACCESS_TOKEN_EXPIRE_DAYS = 30
 
 bearer_scheme = HTTPBearer()

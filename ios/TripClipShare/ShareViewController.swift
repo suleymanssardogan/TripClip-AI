@@ -263,7 +263,7 @@ final class ShareViewController: UIViewController {
 
     @objc private func cancelTapped() {
         let cancelError = NSError(
-            domain: NSCoderErrorDomain,
+            domain: "com.sardogan.TripClipAI.ShareExtension",
             code: NSUserCancelledError,
             userInfo: nil
         )

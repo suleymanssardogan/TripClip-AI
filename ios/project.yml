@@ -1,0 +1,129 @@
+name: TripClipApp
+
+options:
+  bundleIdPrefix: com.sardogan
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    ENABLE_PREVIEWS: YES
+    DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+  configs:
+    Debug:
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+
+targets:
+
+  # ── Main Application ────────────────────────────────────────────────────────
+  TripClipApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+
+    sources:
+      - path: TripClipApp
+        excludes:
+          - "**/.DS_Store"
+      - path: Shared
+
+    resources:
+      - path: TripClipApp/Resources/Assets.xcassets
+      - path: TripClipApp/Resources/PrivacyInfo.xcprivacy
+      - path: TripClipApp/Resources/TripClipAI.xcdatamodeld
+
+    info:
+      path: TripClipApp/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: TripClip
+        CFBundleName: TripClip
+        LSRequiresIPhoneOS: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+        NSLocationWhenInUseUsageDescription: "TripClip, harita üzerinde gezi güzergahlarını göstermek için konumunuzu kullanır."
+        NSPhotoLibraryUsageDescription: "TripClip, gezi videolarını yüklemek için fotoğraf kitaplığınıza erişir."
+        ITSAppUsesNonExemptEncryption: false
+
+    entitlements:
+      path: TripClipApp/Resources/TripClipApp.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.sardogan.TripClipAI
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sardogan.TripClipAI
+        INFOPLIST_FILE: TripClipApp/Resources/Info.plist
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        TARGETED_DEVICE_FAMILY: "1"
+
+    dependencies:
+      - target: TripClipShare
+        embed: true
+
+  # ── Share Extension ──────────────────────────────────────────────────────────
+  TripClipShare:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "17.0"
+
+    sources:
+      - path: TripClipShare
+        excludes:
+          - "**/.DS_Store"
+          - "TripClipShare.entitlements"
+      - path: Shared
+
+    info:
+      path: TripClipShare/Info.plist
+      properties:
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionActivationRule: "SUBQUERY(extensionItems, $item, SUBQUERY($item.attachments, $att, ANY $att.registeredTypeIdentifiers UTI-CONFORMS-TO 'public.url' OR ANY $att.registeredTypeIdentifiers UTI-CONFORMS-TO 'public.plain-text').@count > 0).@count > 0"
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+
+    entitlements:
+      path: TripClipShare/TripClipShare.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.sardogan.TripClipAI
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sardogan.TripClipAI.ShareExtension
+        INFOPLIST_FILE: TripClipShare/Info.plist
+        TARGETED_DEVICE_FAMILY: "1"
+
+schemes:
+  TripClipApp:
+    build:
+      targets:
+        TripClipApp: all
+        TripClipShare: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

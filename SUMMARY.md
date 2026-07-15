@@ -1,4 +1,8 @@
 # TripClip AI — Proje Özeti
+
+> ⚠️ **Bu belge belirli bir tarihteki geliştirme notudur, canlı doküman değildir.**
+> Güncel mimari ve kurulum talimatları için [README.md](README.md) ve [CLAUDE.md](CLAUDE.md) kaynak alınmalıdır (ör. iOS artık `services/ios/TripClipAI` değil, üst dizindeki `ios/` altında).
+
 **Fırat Üniversitesi · Yazılım Mühendisliği 3. Sınıf Bitirme Projesi**
 **Öğrenci:** Süleyman Sardoğan · **Dönem:** Mart–Haziran 2026
 

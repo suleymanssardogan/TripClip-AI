@@ -1,5 +1,8 @@
 # 🚀 TripClip AI - Proje Özeti & Mimarisi
 
+> ⚠️ **Bu belge erken bir geliştirme aşamasının notudur (Mart 2026), canlı doküman değildir.**
+> OCR motoru o tarihten sonra EasyOCR'dan RapidOCR'a geçti ve Gemini multimodal pipeline eklendi. Güncel mimari için [README.md](README.md) ve [CLAUDE.md](CLAUDE.md) kaynak alınmalıdır.
+
 ## 📋 Proje Hakkında
 
 **TripClip AI**, Instagram'da bulduğunuz seyahat videolarını otomatik olarak analiz ederek, optimize edilmiş bir seyahat planı oluşturan **AI-destekli mobil uygulamasıdır**.

@@ -94,3 +94,60 @@ def test_login_missing_fields(client):
     """Eksik alan → 422"""
     resp = client.post("/internal/auth/login", json={"email": "x@x.com"})
     assert resp.status_code == 422
+
+
+# ─── Rate Limiting ──────────────────────────────────────────────────────────
+
+def test_login_rate_limit(client):
+    """Login endpoint 5/dakika limiti — 6. istekte 429 dönmeli"""
+    payload = {"email": "brute@attacker.com", "password": "wrong"}
+    # First 5 requests: 401 (wrong credentials but within rate limit)
+    for i in range(5):
+        r = client.post("/internal/auth/login", json=payload)
+        assert r.status_code == 401, f"Beklenen 401, {i+1}. istekte {r.status_code} geldi"
+
+    # 6th request: 429 Too Many Requests
+    resp = client.post("/internal/auth/login", json=payload)
+    assert resp.status_code == 429, f"6. istekte 429 beklendi, {resp.status_code} geldi"
+
+
+def test_register_rate_limit(client):
+    """Register endpoint 10/dakika limiti — 11. istekte 429 dönmeli"""
+    for i in range(10):
+        client.post("/internal/auth/register", json={
+            "email": f"rl_{i}_{uuid.uuid4().hex[:4]}@test.com",
+            "password": "P1!",
+        })
+
+    resp = client.post("/internal/auth/register", json={
+        "email": f"rl_over_{uuid.uuid4().hex[:4]}@test.com",
+        "password": "P1!",
+    })
+    assert resp.status_code == 429, f"11. istekte 429 beklendi, {resp.status_code} geldi"
+
+
+def test_rate_limit_response_format(client):
+    """429 yanıtı standart JSON formatında dönmeli"""
+    payload = {"email": "brute2@attacker.com", "password": "wrong"}
+    for _ in range(5):
+        client.post("/internal/auth/login", json=payload)
+
+    resp = client.post("/internal/auth/login", json=payload)
+    assert resp.status_code == 429
+    # slowapi'nin varsayılan yanıtı ya "error" ya da "message" içerir
+    body = resp.json()
+    assert isinstance(body, dict), "429 yanıtı JSON dict olmalı"
+
+
+def test_login_rate_limit_resets_between_tests(client, registered_user):
+    """Her test reset_rate_limiters fixture'ı sayesinde temiz başlar.
+
+    Önceki rate limit testleri bu testi etkilememeli.
+    """
+    resp = client.post("/internal/auth/login", json={
+        "email": registered_user["email"],
+        "password": registered_user["password"],
+    })
+    assert resp.status_code == 200, (
+        "Rate limiter sıfırlanmadı — önceki testlerden sayaç taşıyor."
+    )

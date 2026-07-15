@@ -80,7 +80,10 @@ async def get_video_detail(
     rid = str(uuid.uuid4())[:8]
     async with mobile_error_wrapper(request_id=rid):
         async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.get(f"{CORE_API_URL}/internal/videos/{video_id}")
+            resp = await client.get(
+                f"{CORE_API_URL}/internal/videos/{video_id}",
+                headers={"x-user-id": str(user_id)},
+            )
         if resp.status_code >= 400:
             raise_from_response(resp, request_id=rid)
         return to_mobile_detail(resp.json())

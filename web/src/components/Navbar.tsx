@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
-import { LayoutDashboard, Compass, LogOut, Menu, X } from "lucide-react";
+import { LayoutDashboard, Compass, LogOut, Menu, X, Upload } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 
 export default function Navbar() {
@@ -27,7 +27,10 @@ export default function Navbar() {
 
   const links = [
     { href: "/explore",   label: "Keşfet",    icon: Compass },
-    ...(authed ? [{ href: "/dashboard", label: "Dashboard", icon: LayoutDashboard }] : []),
+    ...(authed ? [
+      { href: "/upload",    label: "Yükle",     icon: Upload },
+      { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    ] : []),
   ];
 
   return (
