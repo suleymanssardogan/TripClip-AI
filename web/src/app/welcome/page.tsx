@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { motion } from "framer-motion";
 import { CheckCircle, ArrowRight, Smartphone, Globe, Sparkles } from "lucide-react";
 
 export default function WelcomePage() {
@@ -25,21 +26,41 @@ export default function WelcomePage() {
         <div className="orb w-80 h-80 bg-violet bottom-1/3 -right-40" />
       </div>
 
-      <div className="relative w-full max-w-lg text-center">
+      <motion.div
+        initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: "easeOut" }}
+        className="relative w-full max-w-lg text-center"
+      >
         {/* Başarı ikonu */}
-        <div className="w-20 h-20 bg-neon/10 border border-neon/20 rounded-full flex items-center justify-center mx-auto mb-6">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.4, delay: 0.1, ease: "easeOut" }}
+          className="w-20 h-20 bg-neon/10 border border-neon/20 rounded-full flex items-center justify-center mx-auto mb-6"
+        >
           <CheckCircle className="w-10 h-10 text-neon" />
-        </div>
+        </motion.div>
 
-        <h1 className="font-display font-black text-3xl text-ice mb-2">
+        <motion.h1
+          initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.15 }}
+          className="font-display font-black text-3xl text-ice mb-2"
+        >
           Hoş Geldin! 🎉
-        </h1>
-        <p className="text-muted mb-2">
+        </motion.h1>
+        <motion.p
+          initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="text-muted mb-2"
+        >
           Hesabın başarıyla oluşturuldu.
-        </p>
-        <p className="text-xs text-muted/60 bg-white/5 border border-white/10 rounded-lg px-4 py-2 inline-block mb-10">
+        </motion.p>
+        <motion.p
+          initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="text-xs text-muted/60 bg-white/5 border border-white/10 rounded-lg px-4 py-2 inline-block mb-10"
+        >
           📧 {email}
-        </p>
+        </motion.p>
 
         {/* Adımlar */}
         <div className="glass rounded-2xl p-6 text-left mb-6 space-y-4">
@@ -70,7 +91,12 @@ export default function WelcomePage() {
               bg: "bg-coral/10",
             },
           ].map((step, i) => (
-            <div key={i} className="flex items-center gap-4">
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.3 + i * 0.1 }}
+              className="flex items-center gap-4"
+            >
               <div className={`w-10 h-10 ${step.bg} rounded-xl flex items-center justify-center flex-shrink-0`}>
                 <step.icon className={`w-5 h-5 ${step.color}`} />
               </div>
@@ -78,12 +104,16 @@ export default function WelcomePage() {
                 <p className="text-ice text-sm font-semibold">{step.title}</p>
                 <p className="text-muted text-xs">{step.desc}</p>
               </div>
-            </div>
+            </motion.div>
           ))}
         </div>
 
         {/* Butonlar */}
-        <div className="flex flex-col gap-3">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.65 }}
+          className="flex flex-col gap-3"
+        >
           <Link
             href="/dashboard"
             className="btn-primary py-3.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2"
@@ -96,8 +126,8 @@ export default function WelcomePage() {
           >
             Önce Gezileri Keşfet
           </Link>
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
     </div>
   );
 }
