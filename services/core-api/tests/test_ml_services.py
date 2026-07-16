@@ -44,6 +44,38 @@ def test_landmark_service_enabled_but_invalid_credentials():
         assert service.client is None
 
 
+def test_rag_service_disabled_without_ollama_url():
+    """Test that RAGService stays disabled and degrades gracefully when OLLAMA_URL is unset."""
+    with mock.patch.dict(os.environ, {"OLLAMA_URL": ""}):
+        from app.ml.rag_service import RAGService
+        service = RAGService()
+        assert service.enabled is False
+        assert service.generate_travel_tips([{"name": "Antalya"}]) == {"tips": [], "summary": ""}
+
+
+def test_rag_service_reads_url_and_model_from_env():
+    """Test that RAGService reads OLLAMA_URL / OLLAMA_MODEL from the environment instead of hardcoding them."""
+    with mock.patch.dict(os.environ, {
+        "OLLAMA_URL": "http://ollama.internal:11434",
+        "OLLAMA_MODEL": "llama3",
+    }):
+        from app.ml.rag_service import RAGService
+        service = RAGService()
+        assert service.enabled is True
+        assert service.ollama_url == "http://ollama.internal:11434"
+        assert service.model == "llama3"
+
+
+def test_rag_service_survives_ollama_connection_failure():
+    """Test that an unreachable Ollama server never raises — the pipeline must not crash."""
+    with mock.patch.dict(os.environ, {"OLLAMA_URL": "http://ollama.internal:11434"}):
+        from app.ml.rag_service import RAGService
+        service = RAGService()
+        with mock.patch("requests.post", side_effect=ConnectionError("refused")):
+            result = service.generate_travel_tips([{"name": "Antalya"}])
+        assert result == {"tips": [], "summary": "", "locations_covered": ["Antalya"]}
+
+
 def test_places_service_scoring():
     """Test that PlacesService prioritizes candidates matching city_hint or within bbox range over importance."""
     from app.ml.places_service import PlacesService

@@ -1,3 +1,4 @@
+import os
 import requests
 import time
 from typing import List, Dict, Optional
@@ -10,17 +11,29 @@ _OLLAMA_RETRY_AFTER = 120  # saniye
 
 
 class RAGService:
-    """RAG sistemi - Qdrant + Mistral ile travel tips üretimi"""
+    """RAG sistemi - Qdrant + Ollama (LLM) ile travel tips üretimi.
+
+    Ollama tamamen opsiyoneldir. OLLAMA_URL ayarlanmazsa bu servis
+    devre dışı kalır ve generate_travel_tips() boş sonuç döner —
+    pipeline'ın geri kalanı etkilenmez.
+    """
 
     def __init__(self):
-        self.ollama_url = "http://host.docker.internal:11434"
-        self.model = "mistral"
+        self.ollama_url = os.getenv("OLLAMA_URL", "").rstrip("/")
+        self.model = os.getenv("OLLAMA_MODEL", "mistral")
+        self.enabled = bool(self.ollama_url)
         # Sticky bool → timestamp: None = hiç denenmedí / hata yok
         self._ollama_failed_at: Optional[float] = None
-        logger.info("RAGService initialized")
+
+        if self.enabled:
+            logger.info(f"RAGService initialized — Ollama at {self.ollama_url} (model={self.model})")
+        else:
+            logger.info("⚠️ RAGService: OLLAMA_URL not set — travel tips generation is disabled (optional feature)")
 
     def _ollama_available(self) -> bool:
         """Ollama'ya istek atılabilir mi? Son hatadan _OLLAMA_RETRY_AFTER sn geçtiyse tekrar dene."""
+        if not self.enabled:
+            return False
         if self._ollama_failed_at is None:
             return True
         if time.monotonic() - self._ollama_failed_at >= _OLLAMA_RETRY_AFTER:
@@ -30,7 +43,7 @@ class RAGService:
         return False
 
     def _generate(self, prompt: str) -> str:
-        """Mistral ile metin üret. Cooldown süresi dolmadan skip et."""
+        """Ollama ile metin üret. Devre dışıysa veya cooldown süresi dolmadıysa skip et."""
         if not self._ollama_available():
             return ""
         try:
@@ -52,7 +65,10 @@ class RAGService:
             return ""
 
     def generate_travel_tips(self, locations: List[Dict]) -> Dict:
-        """Lokasyonlar için travel tips üret"""
+        """Lokasyonlar için travel tips üret. Ollama devre dışıysa boş sonuç döner."""
+
+        if not self.enabled:
+            return {"tips": [], "summary": ""}
 
         if not locations:
             return {"tips": [], "summary": ""}

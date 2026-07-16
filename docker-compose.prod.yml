@@ -15,10 +15,14 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/certbot-webroot:/var/www/certbot:ro
     depends_on:
-      - web
-      - web-bff
-      - mobile-bff
+      web:
+        condition: service_healthy
+      web-bff:
+        condition: service_healthy
+      mobile-bff:
+        condition: service_healthy
     networks:
       - app-network
     logging:
@@ -210,6 +214,8 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       WHISPER_MODEL: ${WHISPER_MODEL:-base}
       USE_GOOGLE_VISION: ${USE_GOOGLE_VISION:-false}
+      OLLAMA_URL: ${OLLAMA_URL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
       APP_ENV: production
       SENTRY_DSN: ${SENTRY_DSN:-}
       OMP_NUM_THREADS: "1"
@@ -226,6 +232,12 @@ services:
       options:
         max-size: "50m"
         max-file: "10"
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery_app inspect ping -d worker@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 40s
 
   # ── Web BFF ───────────────────────────────────────────────────────────────────
   web-bff:
@@ -247,6 +259,12 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   # ── Mobile BFF ────────────────────────────────────────────────────────────────
   mobile-bff:
@@ -268,6 +286,12 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
 networks:
   app-network:
