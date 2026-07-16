@@ -27,8 +27,7 @@ struct ProcessingView: View {
 
     var body: some View {
         ZStack {
-            // Arka plan — mevcut tasarımla aynı koyu tema
-            Color(red: 0.06, green: 0.07, blue: 0.13)
+            AppColors.background
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
@@ -113,10 +112,10 @@ private struct CircularProgressView: View {
 
     private var strokeColor: Color {
         switch stage {
-        case .done:           return .green
-        case .failed, .timedOut: return .red
+        case .done:           return AppColors.neon
+        case .failed, .timedOut: return AppColors.coral
         default:
-            return Color(red: 0.55, green: 0.35, blue: 0.95)  // mor-mavi gradyan rengi
+            return AppColors.violet
         }
     }
 
@@ -193,7 +192,7 @@ private struct StageDotRow: View {
             ForEach(0..<allStages.count, id: \.self) { i in
                 Circle()
                     .fill(isActive(allStages[i])
-                          ? Color(red: 0.22, green: 0.55, blue: 0.95)
+                          ? AppColors.violet
                           : Color.white.opacity(0.2))
                     .frame(width: 8, height: 8)
                     .animation(.easeInOut, value: stage.percent)
@@ -209,13 +208,13 @@ private struct ErrorBanner: View {
     var body: some View {
         HStack {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundColor(.orange)
+                .foregroundColor(AppColors.coral)
             Text(message)
                 .font(.system(size: 14))
                 .foregroundColor(.white.opacity(0.85))
         }
         .padding(14)
-        .background(Color.red.opacity(0.18))
+        .background(AppColors.coral.opacity(0.18))
         .cornerRadius(12)
     }
 }

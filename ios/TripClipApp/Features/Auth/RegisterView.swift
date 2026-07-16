@@ -84,6 +84,7 @@ struct RegisterView: View {
                         .foregroundStyle(.black)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                     }
+                    .buttonStyle(PressableButtonStyle())
                     .disabled(!vm.canSubmit)
                 }
                 .padding(.horizontal, 24)

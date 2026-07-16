@@ -233,7 +233,7 @@ struct HomeView: View {
                     } label: {
                         PlanRowView(plan: plan)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PressableButtonStyle())
                 }
             }
             .padding(.horizontal, 16)
@@ -270,6 +270,7 @@ struct HomeView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.neon.opacity(0.3)))
             }
+            .buttonStyle(PressableButtonStyle())
             Spacer()
         }
     }
