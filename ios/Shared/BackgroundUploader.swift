@@ -88,6 +88,17 @@ final class BackgroundUploader: NSObject, @unchecked Sendable {
     // MARK: - Background URLSession
 
     private lazy var backgroundSession: URLSession = {
+        #if targetEnvironment(simulator)
+        // Background URLSession'ın delegate callback'leri (didCompleteWithError,
+        // urlSessionDidFinishEvents) Simulator'da güvenilir şekilde tetiklenmiyor —
+        // background session'ın tüm amacı (extension process ölse bile devam etmek)
+        // zaten Simulator'da anlamsız. Test edilebilirlik için normal (foreground)
+        // bir session kullanıyoruz; gerçek cihazda hâlâ background session kullanılır.
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest  = 30
+        config.timeoutIntervalForResource = 120
+        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        #else
         var config = URLSessionConfiguration.background(withIdentifier: Config.sessionID)
         config.sharedContainerIdentifier = Config.appGroupID
         config.isDiscretionary           = false
@@ -95,6 +106,7 @@ final class BackgroundUploader: NSObject, @unchecked Sendable {
         config.timeoutIntervalForRequest  = 30
         config.timeoutIntervalForResource = 120
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        #endif
     }()
 
     // MARK: - Public API

@@ -12,6 +12,8 @@ enum Endpoint {
     case login(email: String, password: String)
     case register(email: String, password: String, username: String?)
     case appleSignIn(identityToken: String, fullName: String?)
+    case refresh(refreshToken: String)
+    case logout(refreshToken: String)
 
     // Videos
     case userVideos(userID: Int)
@@ -31,6 +33,8 @@ extension Endpoint {
         case .login:                        return "/api/mobile/auth/login"
         case .register:                     return "/api/mobile/auth/register"
         case .appleSignIn:                  return "/api/mobile/auth/apple"
+        case .refresh:                      return "/api/mobile/auth/refresh"
+        case .logout:                       return "/api/mobile/auth/logout"
         case .userVideos:                   return "/api/mobile/videos"
         case .videoDetail(let id):          return "/api/mobile/videos/\(id)"
         case .videoProgress(let id):        return "/api/mobile/videos/\(id)/progress"
@@ -42,7 +46,7 @@ extension Endpoint {
 
     var method: HTTPMethod {
         switch self {
-        case .login, .register, .appleSignIn, .queueUrl: return .post
+        case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl: return .post
         default: return .get
         }
     }
@@ -64,6 +68,9 @@ extension Endpoint {
 
         case .queueUrl(let url):
             return ["url": url, "source": "ios_app"]
+
+        case .refresh(let refreshToken), .logout(let refreshToken):
+            return ["refresh_token": refreshToken]
 
         default:
             return nil

@@ -4,6 +4,7 @@ import OSLog
 
 // MARK: - AuthEnvironment
 
+@MainActor
 @Observable
 final class AuthEnvironment {
 
@@ -22,6 +23,9 @@ final class AuthEnvironment {
 
     init(apiClient: APIClient = APIClient()) {
         self.apiClient = apiClient
+        apiClient.refreshHandler = { @MainActor [weak self] in
+            await self?.refreshTokens()
+        }
         restoreSession()
     }
 
@@ -68,10 +72,42 @@ final class AuthEnvironment {
 
     @MainActor
     func logout() {
+        // Sunucu tarafında da refresh token'ı iptal et — best-effort, UI'ı bloklamaz.
+        if let refreshToken = KeychainStore.loadRefresh() {
+            Task {
+                let _: StatusResponse? = try? await apiClient.send(.logout(refreshToken: refreshToken), token: nil)
+            }
+        }
         user = nil
         KeychainStore.delete()
+        KeychainStore.deleteRefresh()
         AppGroupStore.clearAll()
         Logger.auth.info("User logged out")
+    }
+
+    // MARK: - Token Refresh
+
+    /// 401 alındığında APIClient tarafından çağrılır — refresh token ile yeni
+    /// bir access token almayı dener. Başarısızsa oturumu tamamen kapatır.
+    @MainActor
+    private func refreshTokens() async -> String? {
+        guard let refreshToken = KeychainStore.loadRefresh() else {
+            handleUnauthorized()
+            return nil
+        }
+        do {
+            let response: AuthResponse = try await apiClient.send(
+                .refresh(refreshToken: refreshToken),
+                token: nil
+            )
+            persist(response: response)
+            Logger.auth.info("Access token refreshed")
+            return response.accessToken
+        } catch {
+            Logger.auth.error("Token refresh failed: \(error.localizedDescription)")
+            handleUnauthorized()
+            return nil
+        }
     }
 
     // MARK: - Apple Sign In
@@ -118,7 +154,9 @@ final class AuthEnvironment {
         let authUser = AuthUser(id: response.userId, email: response.email, token: response.accessToken)
         user = authUser
         KeychainStore.save(response.accessToken)
+        KeychainStore.saveRefresh(response.refreshToken)
         AppGroupStore.saveToken(response.accessToken)
+        AppGroupStore.saveRefreshToken(response.refreshToken)
         AppGroupStore.saveUserID(response.userId)
         Logger.auth.info("Session persisted: userID=\(response.userId)")
     }

@@ -15,6 +15,16 @@ import Social
 
 final class ShareViewController: UIViewController {
 
+    // MARK: - Design tokens (Ember accent — matches TripClipApp/AppColors)
+    // Defined inline since Share Extension targets don't share the main
+    // app's AppColors.swift file membership.
+    private static let accent = UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 1.0,   green: 0.690, blue: 0.125, alpha: 1)
+            : UIColor(red: 0.910, green: 0.537, blue: 0.102, alpha: 1)
+    }
+    private static let onAccent = UIColor(red: 0.102, green: 0.071, blue: 0.024, alpha: 1)
+
     // MARK: - State
 
     private enum ViewState {
@@ -40,7 +50,7 @@ final class ShareViewController: UIViewController {
     private let iconView: UIImageView = {
         let iv = UIImageView()
         iv.image = UIImage(systemName: "mappin.and.ellipse")
-        iv.tintColor = UIColor(red: 0.40, green: 0.78, blue: 0.96, alpha: 1) // TripClip neon-blue
+        iv.tintColor = ShareViewController.accent
         iv.contentMode = .scaleAspectFit
         iv.translatesAutoresizingMaskIntoConstraints = false
         return iv
@@ -79,8 +89,8 @@ final class ShareViewController: UIViewController {
         config.image           = UIImage(systemName: "paperplane.fill")
         config.imagePadding    = 8
         config.cornerStyle     = .capsule
-        config.baseBackgroundColor = UIColor(red: 0.40, green: 0.78, blue: 0.96, alpha: 1)
-        config.baseForegroundColor = .black
+        config.baseBackgroundColor = ShareViewController.accent
+        config.baseForegroundColor = ShareViewController.onAccent
         let btn = UIButton(configuration: config)
         btn.isEnabled = false
         btn.translatesAutoresizingMaskIntoConstraints = false

@@ -9,13 +9,21 @@ protocol APIClientProtocol: Sendable {
 
 // MARK: - Live Implementation
 
-final class APIClient: APIClientProtocol {
+// @unchecked Sendable: `refreshHandler` yalnızca AuthEnvironment.init sırasında
+// bir kez atanır (main actor), sonrasında salt okunur gibi kullanılır — YOLO
+// tarzı bir race koşulu pratikte oluşmaz (aynı desen BackgroundUploader'da da var).
+final class APIClient: APIClientProtocol, @unchecked Sendable {
 
     let baseURL:       URL
     var baseURLString: String { baseURL.absoluteString }
 
     private let session: URLSession
     private let decoder: JSONDecoder
+
+    /// Access token süresi dolduğunda (401) çağrılır — yeni bir access token
+    /// döndürürse istek bir kez tekrarlanır; `nil` dönerse (refresh de başarısız)
+    /// orijinal 401 hatası fırlatılır. AuthEnvironment tarafından bağlanır.
+    var refreshHandler: (() async -> String?)?
 
     init(baseURL: URL = Config.apiBaseAsURL,
          session: URLSession = .shared) {
@@ -28,6 +36,22 @@ final class APIClient: APIClientProtocol {
     // MARK: - JSON request
 
     func send<T: Decodable>(_ endpoint: Endpoint, token: String? = nil) async throws -> T {
+        do {
+            return try await performSend(endpoint, token: token)
+        } catch APIError.unauthorized {
+            // Refresh endpoint'inin kendisi 401 dönerse tekrar refresh denemeye
+            // kalkışma — sonsuz döngüyü önler, refresh token da geçersizdir.
+            if case .refresh = endpoint {
+                throw APIError.unauthorized
+            }
+            guard let refreshHandler, let newToken = await refreshHandler() else {
+                throw APIError.unauthorized
+            }
+            return try await performSend(endpoint, token: newToken)
+        }
+    }
+
+    private func performSend<T: Decodable>(_ endpoint: Endpoint, token: String?) async throws -> T {
         let request: URLRequest
         do {
             request = try endpoint.urlRequest(baseURL: baseURL, token: token)
