@@ -18,10 +18,10 @@ struct RegisterView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "person.badge.plus.fill")
                             .font(.system(size: 52))
-                            .foregroundStyle(AppColors.neon)
+                            .foregroundStyle(AppColors.accentText)
                         Text("Hesap Oluştur")
                             .font(.system(size: 28, weight: .bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(AppColors.text)
                     }
                     .padding(.top, 40)
 
@@ -61,7 +61,7 @@ struct RegisterView: View {
                     if let error = vm.error {
                         Text(error.localizedDescription ?? "Bir hata oluştu.")
                             .font(.system(size: 14))
-                            .foregroundStyle(AppColors.coral)
+                            .foregroundStyle(AppColors.destructive)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal)
                     }
@@ -72,7 +72,7 @@ struct RegisterView: View {
                     } label: {
                         Group {
                             if vm.isLoading {
-                                ProgressView().tint(.black)
+                                ProgressView().tint(AppColors.onAccent)
                             } else {
                                 Text("Kayıt Ol")
                                     .font(.system(size: 16, weight: .semibold))
@@ -80,8 +80,8 @@ struct RegisterView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
-                        .background(vm.canSubmit ? AppColors.neon : AppColors.neon.opacity(0.35))
-                        .foregroundStyle(.black)
+                        .background(vm.canSubmit ? AppColors.accent : AppColors.accent.opacity(0.35))
+                        .foregroundStyle(AppColors.onAccent)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                     }
                     .buttonStyle(PressableButtonStyle())
@@ -93,7 +93,6 @@ struct RegisterView: View {
         }
         .navigationTitle("Kayıt Ol")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(.dark, for: .navigationBar)
     }
 }
 

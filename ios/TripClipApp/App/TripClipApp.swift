@@ -13,7 +13,6 @@ struct TripClipApp: App {
             RootView()
                 .environment(auth)
                 .environment(\.managedObjectContext, persistence.context)
-                .preferredColorScheme(.dark)
         }
     }
 }

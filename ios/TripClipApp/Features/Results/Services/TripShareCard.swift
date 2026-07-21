@@ -12,13 +12,17 @@ struct TripShareCard {
         let size     = CGSize(width: 1080, height: 1920)
         let renderer = UIGraphicsImageRenderer(size: size)
 
+        // Fixed dark card — a shareable branded export, not an app screen,
+        // so it always renders in the dark ground regardless of system appearance.
+        let accent = UIColor(red: 1.0, green: 0.690, blue: 0.125, alpha: 1) // Ember
+
         return renderer.image { ctx in
             let cg = ctx.cgContext
 
-            // Background gradient
+            // Background — same dark ground as the app itself, not an invented gradient.
             let bgColors = [
-                UIColor(red: 0.04, green: 0.06, blue: 0.10, alpha: 1).cgColor,
-                UIColor(red: 0.05, green: 0.08, blue: 0.20, alpha: 1).cgColor,
+                UIColor(red: 0.047, green: 0.051, blue: 0.063, alpha: 1).cgColor, // bg
+                UIColor(red: 0.102, green: 0.110, blue: 0.129, alpha: 1).cgColor, // surface
             ]
             let bgGrad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
                                     colors: bgColors as CFArray, locations: [0, 1])!
@@ -37,22 +41,12 @@ struct TripShareCard {
             }
             cg.strokePath()
 
-            // Neon orb
-            let neon = UIColor(red: 0.30, green: 1.0, blue: 0.76, alpha: 1)
-            let orbGrad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                                     colors: [neon.withAlphaComponent(0.18).cgColor,
-                                              UIColor.clear.cgColor] as CFArray,
-                                     locations: [0, 1])!
-            let orbCenter = CGPoint(x: size.width * 0.8, y: size.height * 0.25)
-            cg.drawRadialGradient(orbGrad, startCenter: orbCenter, startRadius: 0,
-                                   endCenter: orbCenter, endRadius: 500, options: [])
-
             // Brand
             let logoAttrs:  [NSAttributedString.Key: Any] = [
                 .font: UIFont.systemFont(ofSize: 52, weight: .black), .foregroundColor: UIColor.white
             ]
             let clipAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 52, weight: .black), .foregroundColor: neon
+                .font: UIFont.systemFont(ofSize: 52, weight: .black), .foregroundColor: accent
             ]
             let logo = NSMutableAttributedString(string: "Trip", attributes: logoAttrs)
             logo.append(NSAttributedString(string: "Clip", attributes: clipAttrs))
@@ -81,14 +75,14 @@ struct TripShareCard {
             // Count badge
             let badgeY    = midY + citySize.height + 80
             let badgeRect = CGRect(x: (size.width - 300) / 2, y: badgeY, width: 300, height: 72)
-            neon.withAlphaComponent(0.12).setFill()
+            accent.withAlphaComponent(0.12).setFill()
             UIBezierPath(roundedRect: badgeRect, cornerRadius: 36).fill()
-            neon.withAlphaComponent(0.3).setStroke()
+            accent.withAlphaComponent(0.3).setStroke()
             UIBezierPath(roundedRect: badgeRect, cornerRadius: 36).stroke()
 
             let badgeText  = "\(count) Mekan Keşfedildi" as NSString
             let badgeAttrs: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 28, weight: .bold), .foregroundColor: neon
+                .font: UIFont.systemFont(ofSize: 28, weight: .bold), .foregroundColor: accent
             ]
             let bs = badgeText.size(withAttributes: badgeAttrs)
             badgeText.draw(at: CGPoint(x: (size.width - bs.width) / 2, y: badgeY + (72 - bs.height) / 2),

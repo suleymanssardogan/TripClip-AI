@@ -26,7 +26,6 @@ struct HistoryView: View {
         }
         .navigationTitle("Geçmiş Geziler")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(.dark, for: .navigationBar)
         .navigationDestination(isPresented: $showPlan) {
             if let plan = selectedPlan {
                 ResultsView(planID: plan.id, preloadedPlan: plan)
@@ -65,13 +64,13 @@ struct HistoryView: View {
         VStack(spacing: 16) {
             Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
                 .font(.system(size: 52))
-                .foregroundStyle(AppColors.muted)
+                .foregroundStyle(AppColors.textTertiary)
             Text("Henüz kaydedilmiş gezi yok")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.text)
             Text("Tamamlanan geziler otomatik olarak\nburada saklanır.")
                 .font(.system(size: 14))
-                .foregroundStyle(AppColors.muted)
+                .foregroundStyle(AppColors.textSecondary)
                 .multilineTextAlignment(.center)
         }
     }
@@ -99,23 +98,23 @@ private struct HistoryRowView: View {
         HStack(spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(AppColors.neon.opacity(0.1))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.neon.opacity(0.2)))
+                    .fill(AppColors.route.opacity(0.1))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.route.opacity(0.2)))
                 Image(systemName: "mappin.circle.fill")
                     .font(.system(size: 22))
-                    .foregroundStyle(AppColors.neon)
+                    .foregroundStyle(AppColors.route)
             }
             .frame(width: 50, height: 50)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppColors.text)
                     .lineLimit(1)
                 if !savedDate.isEmpty {
                     Text(savedDate)
                         .font(.system(size: 12))
-                        .foregroundStyle(AppColors.muted)
+                        .foregroundStyle(AppColors.textSecondary)
                 }
             }
 
@@ -123,14 +122,14 @@ private struct HistoryRowView: View {
 
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(AppColors.muted)
+                .foregroundStyle(AppColors.textTertiary)
         }
         .padding(14)
         .background(AppColors.surface)
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay(
             RoundedRectangle(cornerRadius: 18)
-                .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                .stroke(AppColors.border, lineWidth: 1)
         )
     }
 }

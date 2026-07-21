@@ -4,6 +4,7 @@ import AuthenticationServices
 struct WelcomeView: View {
 
     @Environment(AuthEnvironment.self) private var auth
+    @Environment(\.colorScheme) private var colorScheme
     @State private var path     = NavigationPath()
     @State private var appleErr = ""
     @State private var loading  = false
@@ -20,16 +21,16 @@ struct WelcomeView: View {
                     VStack(spacing: 16) {
                         Image(systemName: "mappin.and.ellipse")
                             .font(.system(size: 64))
-                            .foregroundStyle(AppColors.neon)
+                            .foregroundStyle(AppColors.accentText)
                             .symbolEffect(.pulse)
 
                         Text("TripClip")
                             .font(.system(size: 42, weight: .black, design: .rounded))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(AppColors.text)
 
                         Text("Instagram videolarından\ngezi planı oluştur")
                             .font(.system(size: 16))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(AppColors.textSecondary)
                             .multilineTextAlignment(.center)
                     }
 
@@ -42,8 +43,8 @@ struct WelcomeView: View {
                                 .font(.system(size: 16, weight: .semibold))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 16)
-                                .background(AppColors.neon)
-                                .foregroundStyle(Color.black)
+                                .background(AppColors.accent)
+                                .foregroundStyle(AppColors.onAccent)
                                 .clipShape(RoundedRectangle(cornerRadius: 16))
                         }
                         .buttonStyle(PressableButtonStyle())
@@ -53,17 +54,17 @@ struct WelcomeView: View {
                                 .font(.system(size: 16, weight: .semibold))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 16)
-                                .background(Color.white.opacity(0.08))
-                                .foregroundStyle(.white)
+                                .background(AppColors.surface2)
+                                .foregroundStyle(AppColors.text)
                                 .clipShape(RoundedRectangle(cornerRadius: 16))
                         }
                         .buttonStyle(PressableButtonStyle())
 
                         // ── Divider ─────────────────────────────────────────
                         HStack(spacing: 12) {
-                            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
-                            Text("veya").font(.caption).foregroundStyle(.white.opacity(0.4))
-                            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+                            Rectangle().fill(AppColors.border).frame(height: 1)
+                            Text("veya").font(.caption).foregroundStyle(AppColors.textTertiary)
+                            Rectangle().fill(AppColors.border).frame(height: 1)
                         }
 
                         // ── Apple Sign In ────────────────────────────────────
@@ -81,7 +82,7 @@ struct WelcomeView: View {
                                 loading = false
                             }
                         }
-                        .signInWithAppleButtonStyle(.white)
+                        .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
                         .frame(maxWidth: .infinity)
                         .frame(height: 50)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -90,7 +91,7 @@ struct WelcomeView: View {
                         if !appleErr.isEmpty {
                             Text(appleErr)
                                 .font(.caption)
-                                .foregroundStyle(AppColors.coral)
+                                .foregroundStyle(AppColors.destructive)
                                 .multilineTextAlignment(.center)
                         }
                     }

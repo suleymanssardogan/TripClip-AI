@@ -76,7 +76,7 @@ struct TripMapView: UIViewRepresentable {
                      rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let polyline = overlay as? MKPolyline {
                 let r = MKPolylineRenderer(polyline: polyline)
-                r.strokeColor = UIColor(red: 0.30, green: 1.00, blue: 0.76, alpha: 0.85)
+                r.strokeColor = UIColor(red: 0.247, green: 0.851, blue: 0.769, alpha: 0.85) // Route teal
                 r.lineWidth   = 3
                 r.lineDashPattern = [8, 4]
                 return r
@@ -91,7 +91,7 @@ struct TripMapView: UIViewRepresentable {
             let view = mapView.dequeueReusableAnnotationView(withIdentifier: id)
                 ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: id)
             if let marker = view as? MKMarkerAnnotationView {
-                marker.markerTintColor = UIColor(red: 0.30, green: 1.00, blue: 0.76, alpha: 1)
+                marker.markerTintColor = UIColor(red: 0.247, green: 0.851, blue: 0.769, alpha: 1) // Route teal
                 marker.glyphTintColor  = .black
                 marker.canShowCallout  = true
             }

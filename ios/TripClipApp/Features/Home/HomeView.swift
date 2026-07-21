@@ -47,7 +47,7 @@ struct HomeView: View {
                         uploadErrorBanner(msg)
                     } else if vm.isLoading && vm.plans.isEmpty {
                         Spacer()
-                        ProgressView().tint(AppColors.neon)
+                        ProgressView().tint(AppColors.accentText)
                         Spacer()
                     } else if let error = vm.error {
                         errorState(error)
@@ -140,11 +140,11 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Gezi Planlarım")
                     .font(.system(size: 26, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppColors.text)
                 if let email = auth.user?.email, !email.isEmpty {
                     Text(email.components(separatedBy: "@").first ?? email)
                         .font(.system(size: 13))
-                        .foregroundStyle(AppColors.muted)
+                        .foregroundStyle(AppColors.textSecondary)
                 }
             }
             Spacer()
@@ -157,7 +157,7 @@ struct HomeView: View {
             ) {
                 Image(systemName: "video.badge.plus")
                     .font(.system(size: 20))
-                    .foregroundStyle(uploadState.isActive ? AppColors.muted : AppColors.neon)
+                    .foregroundStyle(uploadState.isActive ? AppColors.textTertiary : AppColors.accentText)
             }
             .disabled(uploadState.isActive)
             .padding(.trailing, 8)
@@ -166,7 +166,7 @@ struct HomeView: View {
             NavigationLink(destination: HistoryView()) {
                 Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
                     .font(.system(size: 18))
-                    .foregroundStyle(AppColors.muted)
+                    .foregroundStyle(AppColors.textSecondary)
             }
             .padding(.trailing, 12)
 
@@ -175,7 +175,7 @@ struct HomeView: View {
             } label: {
                 Image(systemName: "rectangle.portrait.and.arrow.right")
                     .font(.system(size: 18))
-                    .foregroundStyle(AppColors.muted)
+                    .foregroundStyle(AppColors.textSecondary)
             }
         }
     }
@@ -185,24 +185,24 @@ struct HomeView: View {
             Spacer()
             ZStack {
                 Circle()
-                    .stroke(Color.white.opacity(0.08), lineWidth: 5)
+                    .stroke(AppColors.surface2, lineWidth: 5)
                     .frame(width: 80, height: 80)
                 Circle()
                     .trim(from: 0, to: percent)
-                    .stroke(AppColors.neon, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    .stroke(AppColors.accent, style: StrokeStyle(lineWidth: 5, lineCap: .round))
                     .frame(width: 80, height: 80)
                     .rotationEffect(.degrees(-90))
                     .animation(.easeInOut(duration: 0.3), value: percent)
                 Image(systemName: "icloud.and.arrow.up")
                     .font(.title2)
-                    .foregroundStyle(AppColors.neon)
+                    .foregroundStyle(AppColors.accentText)
             }
             Text(label)
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.text)
             Text("Sayfa kapatılmayın")
                 .font(.caption)
-                .foregroundStyle(AppColors.muted)
+                .foregroundStyle(AppColors.textSecondary)
             Spacer()
         }
     }
@@ -212,14 +212,14 @@ struct HomeView: View {
             Spacer()
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 40))
-                .foregroundStyle(AppColors.coral)
+                .foregroundStyle(AppColors.destructive)
             Text(message)
                 .font(.system(size: 15))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.text)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
             Button("Tamam") { uploadState = .idle }
-                .foregroundStyle(AppColors.neon)
+                .foregroundStyle(AppColors.accentText)
             Spacer()
         }
     }
@@ -247,13 +247,13 @@ struct HomeView: View {
             Spacer()
             Image(systemName: "map")
                 .font(.system(size: 56))
-                .foregroundStyle(AppColors.muted)
+                .foregroundStyle(AppColors.textTertiary)
             Text("Henüz gezi yok")
                 .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.text)
             Text("Instagram'da bir video paylaşarak\nveya kamera rolünden yükleyerek\nilk gezini oluştur.")
                 .font(.system(size: 15))
-                .foregroundStyle(AppColors.muted)
+                .foregroundStyle(AppColors.textSecondary)
                 .multilineTextAlignment(.center)
             // Camera roll shortcut in empty state
             PhotosPicker(
@@ -265,10 +265,10 @@ struct HomeView: View {
                     .font(.system(size: 15, weight: .semibold))
                     .padding(.horizontal, 24)
                     .padding(.vertical, 12)
-                    .background(AppColors.neon.opacity(0.12))
-                    .foregroundStyle(AppColors.neon)
+                    .background(AppColors.accent.opacity(0.12))
+                    .foregroundStyle(AppColors.accentText)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.neon.opacity(0.3)))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.accent.opacity(0.3)))
             }
             .buttonStyle(PressableButtonStyle())
             Spacer()
@@ -280,14 +280,14 @@ struct HomeView: View {
             Spacer()
             Image(systemName: "wifi.exclamationmark")
                 .font(.system(size: 48))
-                .foregroundStyle(AppColors.coral)
+                .foregroundStyle(AppColors.destructive)
             Text(error.localizedDescription ?? "Bir hata oluştu.")
                 .font(.system(size: 15))
-                .foregroundStyle(AppColors.muted)
+                .foregroundStyle(AppColors.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
             Button("Tekrar Dene") { Task { await vm.load(auth: auth) } }
-                .foregroundStyle(AppColors.neon)
+                .foregroundStyle(AppColors.accentText)
             Spacer()
         }
     }
