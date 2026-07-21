@@ -13,10 +13,13 @@ from app.application.dto.auth_dto import (
     RegisterRequest,
     LoginRequest,
     AppleSignInRequest,
+    RefreshRequest,
+    LogoutRequest,
     AuthResponse,
 )
 from app.application.services.auth_service import AuthService
 from app.infrastructure.repositories.sql_user_repository import SqlUserRepository
+from app.infrastructure.repositories.sql_refresh_token_repository import SqlRefreshTokenRepository
 
 router  = APIRouter(prefix="/internal/auth", tags=["auth"])
 limiter = Limiter(key_func=get_remote_address)
@@ -26,7 +29,8 @@ limiter = Limiter(key_func=get_remote_address)
 
 def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
     user_repo = SqlUserRepository(db)
-    return AuthService(user_repo)
+    refresh_token_repo = SqlRefreshTokenRepository(db)
+    return AuthService(user_repo, refresh_token_repo)
 
 
 # ── Route Handler'lar ─────────────────────────────────────────────────────────
@@ -57,12 +61,33 @@ def login(
 
 @router.post("/apple", response_model=AuthResponse)
 @limiter.limit("5/minute")
-async def apple_sign_in(
+def apple_sign_in(
     request: Request,
     body: AppleSignInRequest,
     service: AuthService = Depends(get_auth_service),
 ):
-    return await service.apple_sign_in(
+    return service.apple_sign_in(
         identity_token=body.identity_token,
         full_name=body.full_name,
     )
+
+
+@router.post("/refresh", response_model=AuthResponse)
+@limiter.limit("20/minute")
+def refresh(
+    request: Request,
+    body: RefreshRequest,
+    service: AuthService = Depends(get_auth_service),
+):
+    return service.refresh(body.refresh_token)
+
+
+@router.post("/logout")
+@limiter.limit("20/minute")
+def logout(
+    request: Request,
+    body: LogoutRequest,
+    service: AuthService = Depends(get_auth_service),
+):
+    service.logout(body.refresh_token)
+    return {"status": "ok"}

@@ -1,5 +1,6 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -7,6 +8,7 @@ from contextlib import asynccontextmanager
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
+from prometheus_fastapi_instrumentator import Instrumentator
 import logging
 import sys
 import os
@@ -62,7 +64,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         _startup_logger.warning(f"⚠️ Alembic migration atlandı: {e}")
 
+    # ── Queue-depth metriği — 15s'de bir Redis'ten oku, Prometheus gauge'unu güncelle ──
+    import asyncio
+    from app.core.redis import update_queue_depth_metric
+
+    async def _queue_depth_loop():
+        while True:
+            update_queue_depth_metric()
+            await asyncio.sleep(15)
+
+    metrics_task = asyncio.create_task(_queue_depth_loop())
+
     yield  # ← uygulama burada çalışır
+
+    metrics_task.cancel()
 
 
 # Rate limiter — IP başına istek limiti
@@ -99,6 +114,17 @@ ALLOWED_ORIGINS = (
     ]
 )
 
+# Host-header doğrulaması — sadece BFF'lerden gelen dahili istekleri kabul eder.
+# ALLOWED_HOSTS env ile production'da daraltılabilir.
+_raw_hosts = os.getenv("ALLOWED_HOSTS", "")
+ALLOWED_HOSTS = (
+    [h.strip() for h in _raw_hosts.split(",") if h.strip()]
+    if _raw_hosts
+    # "testserver" — FastAPI/Starlette TestClient'ın varsayılan Host header'ı
+    else ["core-api", "localhost", "127.0.0.1", "testserver"]
+)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -110,6 +136,12 @@ app.add_middleware(
 # ── Request logging middleware ────────────────────────────────────────────────
 # CORSMiddleware'den SONRA eklenir → her isteğe request_id atanır
 app.add_middleware(RequestLoggingMiddleware)
+
+# ── Prometheus metrikleri ──────────────────────────────────────────────────────
+# /metrics — sadece Docker network içinden (Prometheus container'ı) erişilir,
+# host'a hiç port açılmadığı için ekstra auth gerekmiyor (diğer internal-only
+# servislerle — Qdrant, Postgres, Redis — aynı güvenlik varsayımı).
+Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
 
 @app.get("/")
@@ -123,7 +155,7 @@ async def health():
 
 
 @app.get("/health/ready")
-async def health_ready():
+def health_ready():
     """
     Readiness check — verifies all critical dependencies.
     Returns 200 when the service can handle requests, 503 when degraded.
@@ -168,6 +200,7 @@ async def health_ready():
 
 
 # Import routers AFTER app creation
+from app.core.internal_auth import verify_internal_secret
 from app.api.internal import videos, auth
-app.include_router(videos.router)
-app.include_router(auth.router)
+app.include_router(videos.router, dependencies=[Depends(verify_internal_secret)])
+app.include_router(auth.router, dependencies=[Depends(verify_internal_secret)])

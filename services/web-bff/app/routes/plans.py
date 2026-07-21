@@ -5,6 +5,7 @@ Tüm Core API hataları web_error_wrapper aracılığıyla Next.js dostu mesajla
 """
 from fastapi import APIRouter, Query
 import httpx
+from app.core.internal_client import internal_client
 import os
 import uuid
 
@@ -29,7 +30,7 @@ async def get_plans(
     """Public feed — web kart formatında."""
     rid = str(uuid.uuid4())[:8]
     async with web_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with internal_client(15.0) as client:
             resp = await client.get(f"{CORE_API_URL}/internal/videos/public", params={
                 "city": city, "limit": limit, "offset": offset
             })
@@ -50,7 +51,7 @@ async def get_stats():
     """Platform istatistikleri."""
     rid = str(uuid.uuid4())[:8]
     async with web_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with internal_client(10.0) as client:
             resp = await client.get(f"{CORE_API_URL}/internal/videos/stats")
         if resp.status_code >= 400:
             # İstatistik hatası kritik değil — sıfır döndür
@@ -63,7 +64,7 @@ async def get_user_plans(user_id: int):
     """Kullanıcıya ait planlar — dashboard formatında."""
     rid = str(uuid.uuid4())[:8]
     async with web_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with internal_client(15.0) as client:
             resp = await client.get(f"{CORE_API_URL}/internal/videos/user/{user_id}")
         if resp.status_code >= 400:
             return {"plans": [], "total": 0}
@@ -107,7 +108,7 @@ async def get_plan(video_id: int):
 async def _fetch_video(video_id: int) -> dict:
     rid = str(uuid.uuid4())[:8]
     async with web_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with internal_client(15.0) as client:
             resp = await client.get(f"{CORE_API_URL}/internal/videos/{video_id}")
         if resp.status_code >= 400:
             raise_from_response(resp, request_id=rid)

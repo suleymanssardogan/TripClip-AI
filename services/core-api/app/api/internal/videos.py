@@ -5,13 +5,14 @@ DB sorguları, ML pipeline, json dönüşümleri burada YOK.
 """
 from fastapi import APIRouter, UploadFile, File, Depends, Header, Request
 from fastapi.responses import JSONResponse
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, HttpUrl, field_validator
 from sqlalchemy.orm import Session
 from typing import Optional
+from urllib.parse import urlparse
 import json
 import logging
 import os
-import re
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -70,7 +71,11 @@ async def process_video(
         )
 
     content = await file.read()
-    video_id, file_path = service.create_upload(
+    # create_upload senkron DB yazımı yapıyor — event loop'u bloklamaması için
+    # threadpool'a devrediliyor (bu route genuine bir await (file.read) içerdiği
+    # için async kalıyor, ama içindeki sync işi thread'e taşımak gerekiyor).
+    video_id, file_path = await run_in_threadpool(
+        service.create_upload,
         filename=file.filename,
         content=content,
         user_id=x_user_id,
@@ -114,7 +119,7 @@ def _fallback_run_ml_pipeline(video_id: int, video_path: str) -> None:
 
 
 @router.get("/{video_id}/progress", response_model=ProgressResponse)
-async def get_video_progress(
+def get_video_progress(
     video_id: int,
     service: VideoService = Depends(get_video_service),
 ):
@@ -122,12 +127,12 @@ async def get_video_progress(
 
 
 @router.get("/stats", response_model=StatsResponse)
-async def get_platform_stats(service: VideoService = Depends(get_video_service)):
+def get_platform_stats(service: VideoService = Depends(get_video_service)):
     return service.get_stats()
 
 
 @router.get("/public", response_model=PlanListResponse)
-async def get_public_plans(
+def get_public_plans(
     city: Optional[str] = None,
     limit: int = 20,
     offset: int = 0,
@@ -137,7 +142,7 @@ async def get_public_plans(
 
 
 @router.get("/user/{user_id}", response_model=PlanListResponse)
-async def get_user_videos(
+def get_user_videos(
     user_id: int,
     service: VideoService = Depends(get_video_service),
 ):
@@ -145,7 +150,7 @@ async def get_user_videos(
 
 
 @router.get("/{video_id}", response_model=VideoDetailResponse)
-async def get_video(
+def get_video(
     video_id: int,
     service: VideoService = Depends(get_video_service),
     x_user_id: Optional[int] = Header(default=None),
@@ -156,11 +161,34 @@ async def get_video(
 
 
 # ── URL Queue Endpoint (Share Extension için) ─────────────────────────────────
+#
+# GÜVENLİK: Bu URL doğrudan yt-dlp'ye (Celery worker, `_download_url`) geçer.
+# Eskiden burada sadece bir substring regex vardı (`.search`, anchor YOK) —
+# yani "http://169.254.169.254/x.mp4" veya "http://evil.com/?instagram.com/reel/1"
+# gibi bir SSRF payload'ı da doğrulamadan geçiyordu. Artık scheme + hostname
+# gerçekten parse edilip izin verilen domain'lerle TAM eşleşme aranıyor.
 
-_SUPPORTED_URL_PATTERN = re.compile(
-    r"instagram\.com/(reel|p|tv)/|instagr\.am|youtube\.com/|youtu\.be/|\.mp4",
-    re.IGNORECASE,
+_ALLOWED_URL_HOSTS = (
+    "instagram.com", "www.instagram.com", "instagr.am",
+    "youtube.com", "www.youtube.com", "youtu.be",
 )
+
+
+def _is_supported_video_url(v: str) -> bool:
+    try:
+        parsed = urlparse(v.strip())
+    except ValueError:
+        return False
+
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+
+    return any(host == allowed or host.endswith(f".{allowed}")
+               for allowed in _ALLOWED_URL_HOSTS)
+
 
 class URLQueueRequest(BaseModel):
     url: str
@@ -169,13 +197,13 @@ class URLQueueRequest(BaseModel):
     @field_validator("url")
     @classmethod
     def validate_instagram_url(cls, v: str) -> str:
-        if not _SUPPORTED_URL_PATTERN.search(v):
+        if not _is_supported_video_url(v):
             from fastapi import HTTPException
             raise HTTPException(
                 status_code=422,
                 detail={
                     "code": "UNSUPPORTED_URL",
-                    "message": "Yalnızca Instagram Reels/Post linkleri desteklenmektedir.",
+                    "message": "Yalnızca Instagram Reels/Post veya YouTube linkleri desteklenmektedir.",
                 }
             )
         return v.strip()
@@ -183,7 +211,7 @@ class URLQueueRequest(BaseModel):
 
 @router.post("/queue-url", status_code=202)
 @limiter.limit("20/minute")
-async def queue_url(
+def queue_url(
     request: Request,
     body: URLQueueRequest,
     service: VideoService = Depends(get_video_service),

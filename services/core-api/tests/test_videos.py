@@ -119,6 +119,50 @@ def test_upload_non_video_file(client, bff_headers):
     assert resp.status_code in (200, 400, 422, 500)
 
 
+# ─── Güvenlik: queue-url SSRF koruması ──────────────────────────────────────
+#
+# Eskiden /internal/videos/queue-url'deki doğrulama sadece bir substring regex'ti
+# (anchor yok) — yt-dlp'ye geçmeden önce scheme/host hiç kontrol edilmiyordu.
+# Bu testler o açığın kapalı kaldığını doğrular.
+
+def test_queue_url_rejects_internal_ip(client, bff_headers):
+    """Cloud metadata endpoint gibi bir IP'ye giden istek reddedilmeli"""
+    resp = client.post(
+        "/internal/videos/queue-url",
+        json={"url": "http://169.254.169.254/latest/meta-data/", "source": "test"},
+        headers=bff_headers,
+    )
+    assert resp.status_code == 422
+
+
+def test_queue_url_rejects_host_spoofed_via_query_string(client, bff_headers):
+    """'instagram.com' string'i URL içinde geçse bile gerçek host allowlist'te değilse reddedilmeli"""
+    resp = client.post(
+        "/internal/videos/queue-url",
+        json={"url": "http://evil.example.com/?redirect=instagram.com/reel/1", "source": "test"},
+        headers=bff_headers,
+    )
+    assert resp.status_code == 422
+
+
+def test_queue_url_rejects_file_scheme(client, bff_headers):
+    resp = client.post(
+        "/internal/videos/queue-url",
+        json={"url": "file:///etc/passwd", "source": "test"},
+        headers=bff_headers,
+    )
+    assert resp.status_code == 422
+
+
+def test_queue_url_accepts_real_instagram_url(client, bff_headers):
+    resp = client.post(
+        "/internal/videos/queue-url",
+        json={"url": "https://www.instagram.com/reel/ABC123/", "source": "test"},
+        headers=bff_headers,
+    )
+    assert resp.status_code == 202
+
+
 # ─── Güvenlik: Sahiplik Kontrolü ────────────────────────────────────────────
 
 def test_get_processing_video_as_different_user_returns_404(client):

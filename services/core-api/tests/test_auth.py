@@ -151,3 +151,160 @@ def test_login_rate_limit_resets_between_tests(client, registered_user):
     assert resp.status_code == 200, (
         "Rate limiter sıfırlanmadı — önceki testlerden sayaç taşıyor."
     )
+
+
+# ─── Refresh Token ──────────────────────────────────────────────────────────
+
+def _register(client) -> dict:
+    email = f"refresh_{uuid.uuid4().hex[:8]}@test.com"
+    resp = client.post("/internal/auth/register", json={
+        "email": email,
+        "password": "Refresh123!",
+        "username": f"ru_{uuid.uuid4().hex[:6]}",
+    })
+    assert resp.status_code == 200
+    return resp.json()
+
+
+def test_register_includes_refresh_token(client):
+    """Register yanıtı artık refresh_token da içermeli"""
+    data = _register(client)
+    assert "refresh_token" in data
+    assert data["refresh_token"]
+
+
+def test_refresh_success_rotates_token(client):
+    """Geçerli refresh token → yeni access+refresh token çifti üretir"""
+    initial = _register(client)
+
+    resp = client.post("/internal/auth/refresh", json={
+        "refresh_token": initial["refresh_token"],
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    # NOT: access_token'lar aynı saniyede üretilirse payload'ları (sub/email/exp/type)
+    # birebir aynı olabileceğinden byte-eşitliği garanti edilemez — asıl güvenlik
+    # özelliği refresh_token'ın rotate edilmesidir, onu doğruluyoruz.
+    assert data["refresh_token"] != initial["refresh_token"]
+    assert data["user_id"] == initial["user_id"]
+
+
+def test_refresh_reused_token_returns_401(client):
+    """Rotate edilmiş (artık iptal) bir refresh token tekrar kullanılamaz"""
+    initial = _register(client)
+
+    first_refresh = client.post("/internal/auth/refresh", json={
+        "refresh_token": initial["refresh_token"],
+    })
+    assert first_refresh.status_code == 200
+
+    # Aynı (artık eski/iptal) refresh token'ı tekrar kullanmayı dene
+    reuse = client.post("/internal/auth/refresh", json={
+        "refresh_token": initial["refresh_token"],
+    })
+    assert reuse.status_code == 401
+    assert reuse.json()["error"]["code"] == "REFRESH_TOKEN_REUSED"
+
+
+def test_refresh_reuse_revokes_entire_family(client):
+    """Reuse tespiti sadece eski token'ı değil, o kullanıcının TÜM aktif
+    refresh token'larını (yeni rotate edilmiş olan dahil) iptal etmeli.
+    """
+    initial = _register(client)
+
+    rotated = client.post("/internal/auth/refresh", json={
+        "refresh_token": initial["refresh_token"],
+    }).json()
+
+    # Eski token'ı tekrar kullan → reuse detection, tüm aile iptal edilir
+    reuse = client.post("/internal/auth/refresh", json={
+        "refresh_token": initial["refresh_token"],
+    })
+    assert reuse.status_code == 401
+
+    # Rotation sonucu üretilen YENİ token da artık geçersiz olmalı
+    after_family_revoke = client.post("/internal/auth/refresh", json={
+        "refresh_token": rotated["refresh_token"],
+    })
+    assert after_family_revoke.status_code == 401
+
+
+def test_refresh_invalid_token_returns_401(client):
+    """Hiç var olmayan bir refresh token → 401 REFRESH_TOKEN_INVALID"""
+    resp = client.post("/internal/auth/refresh", json={"refresh_token": "not-a-real-token"})
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "REFRESH_TOKEN_INVALID"
+
+
+def test_refresh_expired_token_returns_401(client, monkeypatch):
+    """Süresi dolmuş bir refresh token → 401 REFRESH_TOKEN_EXPIRED"""
+    # Yeni üretilecek refresh token'ları anında "geçmişte sona ermiş" yap
+    monkeypatch.setattr(
+        "app.application.services.auth_service.REFRESH_TOKEN_EXPIRE_DAYS", -1
+    )
+    initial = _register(client)
+
+    resp = client.post("/internal/auth/refresh", json={
+        "refresh_token": initial["refresh_token"],
+    })
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "REFRESH_TOKEN_EXPIRED"
+
+
+def test_logout_revokes_refresh_token(client):
+    """Logout sonrası aynı refresh token ile yenileme yapılamamalı"""
+    initial = _register(client)
+
+    logout_resp = client.post("/internal/auth/logout", json={
+        "refresh_token": initial["refresh_token"],
+    })
+    assert logout_resp.status_code == 200
+
+    refresh_resp = client.post("/internal/auth/refresh", json={
+        "refresh_token": initial["refresh_token"],
+    })
+    assert refresh_resp.status_code == 401
+
+
+def test_logout_is_idempotent(client):
+    """Aynı refresh token ile iki kez logout çağrısı hata vermemeli"""
+    initial = _register(client)
+
+    first = client.post("/internal/auth/logout", json={"refresh_token": initial["refresh_token"]})
+    second = client.post("/internal/auth/logout", json={"refresh_token": initial["refresh_token"]})
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+
+def test_logout_unknown_token_is_noop(client):
+    """Var olmayan bir refresh token ile logout hata fırlatmamalı"""
+    resp = client.post("/internal/auth/logout", json={"refresh_token": "ghost-token"})
+    assert resp.status_code == 200
+
+
+def test_revoke_if_active_is_race_safe(client):
+    """revoke_if_active — iki eşzamanlı çağrıdan sadece biri True dönmeli.
+
+    Read-then-write yerine tek bir UPDATE...WHERE kullanıldığını doğrudan
+    repository seviyesinde kanıtlar: aynı token_id üzerinde art arda çağrılan
+    revoke_if_active, ikinci seferde False dönmeli (biri "önce" davranmış gibi).
+    """
+    from app.core.database import SessionLocal
+    from app.core.auth import hash_refresh_token
+    from app.infrastructure.repositories.sql_refresh_token_repository import SqlRefreshTokenRepository
+
+    initial = _register(client)
+
+    db = SessionLocal()
+    try:
+        repo = SqlRefreshTokenRepository(db)
+        stored = repo.get_by_hash(hash_refresh_token(initial["refresh_token"]))
+        assert stored is not None
+
+        first_claim  = repo.revoke_if_active(stored.id)
+        second_claim = repo.revoke_if_active(stored.id)
+
+        assert first_claim is True
+        assert second_claim is False
+    finally:
+        db.close()

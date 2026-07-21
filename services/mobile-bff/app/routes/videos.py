@@ -6,6 +6,7 @@ Tüm Core API hataları mobile_error_wrapper ile iOS dostu mesajlara çevrilir.
 from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
 from pydantic import BaseModel
 import httpx
+from app.core.internal_client import internal_client
 import os
 import uuid
 from slowapi import Limiter
@@ -43,7 +44,7 @@ async def upload_video(
         })
 
     async with mobile_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with internal_client(30.0) as client:
             resp = await client.post(
                 f"{CORE_API_URL}/internal/videos/process",
                 files={"file": (file.filename, content, file.content_type)},
@@ -64,7 +65,7 @@ async def get_video_progress(
     """İşlem ilerlemesi — stage + percent (0-100)."""
     rid = str(uuid.uuid4())[:8]
     async with mobile_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with internal_client(10.0) as client:
             resp = await client.get(f"{CORE_API_URL}/internal/videos/{video_id}/progress")
         if resp.status_code >= 400:
             raise_from_response(resp, request_id=rid)
@@ -79,7 +80,7 @@ async def get_video_detail(
     """Video detayı — iOS ResultsView için transformer uygulanır."""
     rid = str(uuid.uuid4())[:8]
     async with mobile_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with internal_client(30.0) as client:
             resp = await client.get(
                 f"{CORE_API_URL}/internal/videos/{video_id}",
                 headers={"x-user-id": str(user_id)},
@@ -109,7 +110,7 @@ async def queue_url(
     """
     rid = str(uuid.uuid4())[:8]
     async with mobile_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with internal_client(15.0) as client:
             resp = await client.post(
                 f"{CORE_API_URL}/internal/videos/queue-url",
                 json={"url": body.url, "source": body.source},
@@ -130,7 +131,7 @@ async def get_user_videos(user_id: int = Depends(get_current_user_id)):
     """Kullanıcının tüm videoları — iOS HomeView kart listesi."""
     rid = str(uuid.uuid4())[:8]
     async with mobile_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with internal_client(15.0) as client:
             resp = await client.get(f"{CORE_API_URL}/internal/videos/user/{user_id}")
         if resp.status_code >= 400:
             # Liste boşluğu kabul edilebilir — hata yerine boş döndür
