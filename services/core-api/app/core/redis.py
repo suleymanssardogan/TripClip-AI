@@ -10,10 +10,19 @@ Kullanım:
 import os
 import logging
 import redis
+from prometheus_client import Gauge
 
 logger = logging.getLogger(__name__)
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
+
+# video_processing kuyruğu Celery broker'ın (db=0) Redis list'i olarak tutulur —
+# scripts/monitor.sh'te elle yapılan `redis-cli LLEN video_processing` kontrolünün
+# Prometheus'a taşınmış hali.
+CELERY_QUEUE_DEPTH = Gauge(
+    "celery_queue_depth",
+    "Celery video_processing kuyruğunda bekleyen task sayısı",
+)
 
 
 def _make_client(db_override: int | None = None) -> redis.Redis | None:
@@ -85,3 +94,19 @@ def get_progress(video_id: int) -> dict | None:
         return json.loads(raw) if raw else None
     except Exception:
         return None
+
+
+# ── Prometheus queue-depth gauge'u ────────────────────────────────────────────
+
+def update_queue_depth_metric() -> None:
+    """Redis'ten video_processing kuyruk uzunluğunu okuyup gauge'u günceller.
+
+    core-api'nin FastAPI lifespan'inde periyodik olarak çağrılır.
+    """
+    r = get_redis()
+    if not r:
+        return
+    try:
+        CELERY_QUEUE_DEPTH.set(r.llen("video_processing"))
+    except Exception as exc:
+        logger.debug("Queue depth okunamadı: %s", exc)
