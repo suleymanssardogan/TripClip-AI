@@ -27,6 +27,24 @@ from app.core.celery_app import celery_app as _celery_app  # noqa: F401
 
 logger = logging.getLogger("tripclip.tasks.video")
 
+# ── Paylaşılan VideoProcessingService instance'ı ──────────────────────────────
+#
+# VideoProcessingService.__init__ YOLO/BERT NER/Whisper/SentenceTransformer gibi
+# ağır ML modellerini yükler (BERT NER tek başına soğuk yüklemede ~30-60s).
+# Worker `--pool=solo` ile tek process olarak çalıştığı için (aynı anda tek task),
+# bu servisi her task'ta yeniden oluşturmak yerine worker process başına bir kez
+# oluşturup yeniden kullanıyoruz. __init__ video'ya özgü hiçbir mutable state
+# tutmaz (frames_dir video_id ile parametrize edilir), bu yüzden paylaşım güvenli.
+_processor = None
+
+
+def _get_processor():
+    global _processor
+    if _processor is None:
+        from app.core.services.video_processor import VideoProcessingService
+        _processor = VideoProcessingService()
+    return _processor
+
 
 @shared_task(
     name="app.tasks.video_tasks.process_video_task",
@@ -54,7 +72,6 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
     """
     from app.core.database import SessionLocal
     from app.infrastructure.repositories.sql_video_repository import SqlVideoRepository
-    from app.core.services.video_processor import VideoProcessingService
     from app.core.redis import set_progress
 
     logger.info("🎬 Task başladı | video_id=%s | attempt=%s", video_id, self.request.retries + 1)
@@ -66,7 +83,7 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
         repo.mark_processing(video_id)
         set_progress(video_id, "queued", 2)
 
-        processor = VideoProcessingService()
+        processor = _get_processor()
         result    = processor.process_video(video_path, video_id)
 
         repo.save_results(video_id, result)
@@ -133,7 +150,6 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
     import tempfile
     from app.core.database import SessionLocal
     from app.infrastructure.repositories.sql_video_repository import SqlVideoRepository
-    from app.core.services.video_processor import VideoProcessingService
     from app.core.redis import set_progress
 
     logger.info(
@@ -153,7 +169,7 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
         set_progress(video_id, "queued", 10)
 
         # ── Adım 2: ML pipeline ─────────────────────────────────────────────
-        processor = VideoProcessingService()
+        processor = _get_processor()
         result    = processor.process_video(video_path, video_id)
 
         # ── Adım 3: Kaydet ──────────────────────────────────────────────────

@@ -314,7 +314,7 @@ class VideoProcessingService:
             logger.info("🤖 Gemini lokasyon çıkarma başlıyor…")
             r_gemini = _safe_run(
                 "Gemini(locations)",
-                lambda: self.gemini.extract_locations(frames, transcript_text),
+                lambda: self.gemini.extract_locations(frames, transcript_text, video_id=video_id),
                 fallback=[],
             )
             # Gemini artık List[Dict] döndürüyor: [{"name":..,"lat":..,"lng":..,"type":..}]
@@ -466,10 +466,14 @@ class VideoProcessingService:
             enriched_names = {
                 e["original_name"].lower().strip() for e in ner_enriched
             }
+            # NOT: buradaki fallback'e bilerek ner_enriched[0] atanmıyor. Sıradaki ilk
+            # eleman şehir/kasaba olmayabilir (örn. bir ülke adı veya yanlış geocode
+            # edilmiş bir POI) — o zaman gerçekte alakasız bir koordinata pin basmak
+            # yerine, bu lokasyonu tamamen atlıyoruz (aşağıdaki `if city_coords:` kontrolü).
             city_entry = next(
                 (e for e in ner_enriched
                  if (e.get("place_data") or {}).get("type") in ("city", "town", "administrative")),
-                ner_enriched[0] if ner_enriched else None,
+                None,
             )
             city_coords = (city_entry or {}).get("place_data", {}).get("location") if city_entry else None
             fallback_city = gemini_city_hint or city_hint or ""
@@ -572,7 +576,7 @@ class VideoProcessingService:
             tip_names = [loc.get("original_name", "") for loc in deduplicated_locations]
             r_rag = _safe_run(
                 "Gemini(tips)",
-                lambda: self.gemini.generate_travel_tips(tip_names) if tip_names else {},
+                lambda: self.gemini.generate_travel_tips(tip_names, video_id=video_id) if tip_names else {},
                 fallback={},
             )
         else:
@@ -878,20 +882,34 @@ class VideoProcessingService:
         """
         Dominant şehir adını çıkar — OCR geocoding için qualifier.
         "Nohut Durumu" → "Nohut Durumu Gaziantep" şeklinde Nominatim'de aranır.
+
+        Çoğunluk oyu (mode) kullanılır — sadece listedeki İLK eşleşen giriş
+        kullanılırsa, tek bir yanlış/alakasız geocoding sonucu (örn. BERT-NER'in
+        transkriptte hayal ettiği bir yer adı) tüm videonun city_hint'ini
+        yanlış yöne çekebilir. Çoğunluk arasında birden fazla doğru lokasyon
+        aynı şehri işaret ediyorsa o kazanır.
         """
         if not ner_enriched:
             return None
+
+        from collections import Counter
+        votes: Counter = Counter()
         for loc in ner_enriched:
             addr = (loc.get("place_data") or {}).get("address_details") or {}
             # Nominatim address hierarchy: city > town > province > state
             for key in ("city", "town", "province", "state"):
                 if name := addr.get(key):
-                    return name
-            # Fallback: original_name eğer şehir seviyesindeyse
-            place = loc.get("place_data") or {}
-            if place.get("type") in ("city", "town"):
-                return loc.get("original_name")
-        return None
+                    votes[name] += 1
+                    break
+            else:
+                # Fallback: original_name eğer şehir seviyesindeyse
+                place = loc.get("place_data") or {}
+                if place.get("type") in ("city", "town"):
+                    votes[loc.get("original_name")] += 1
+
+        if not votes:
+            return None
+        return votes.most_common(1)[0][0]
 
     @staticmethod
     def _detect_city_from_list(locations: List[str]) -> Optional[str]:

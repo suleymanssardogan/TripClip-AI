@@ -167,15 +167,35 @@ class NERService:
             logger.warning("NER OCR filter timeout — heuristic'e düşüldü (%d metin)", len(ocr_texts))
             return ocr_texts
 
-        # OCR ASCII Türkçe içerebilir → eşik 0.50
-        found_words = {
-            ent["word"].lower().strip()
-            for ent in entities
-            if ent["entity_group"] in ["LOC", "GPE"]
-            and ent["score"] > 0.50
-            and len(ent["word"]) >= 3
-            and not ent["word"].startswith("##")
+        # Türkçe dini/genel kelimeler ORG sayılmasın (extract_locations_from_transcript ile aynı liste)
+        org_noise = {
+            "allah", "bismillah", "türk", "türkiye", "türklerin",
+            "devlet", "hükümet", "belediye", "bakanlık",
         }
+
+        # OCR ASCII Türkçe içerebilir → LOC/GPE eşiği 0.50.
+        # ORG (restoran/işletme adı — tabela metinlerinde çok yaygın, örn.
+        # "Ciğerci Aziz Usta", "Şafi Künefe") daha önce hiç kabul edilmiyordu;
+        # bu yüzden storefront/tabela POI'leri sessizce düşüyordu. Transcript
+        # NER'deki (extract_locations_from_transcript) ORG eşiğiyle aynı mantık.
+        found_words = set()
+        for ent in entities:
+            if ent["word"].startswith("##"):
+                continue
+            word = ent["word"]
+            if (
+                ent["entity_group"] in ("LOC", "GPE")
+                and ent["score"] > 0.50
+                and len(word) >= 3
+            ):
+                found_words.add(word.lower().strip())
+            elif (
+                ent["entity_group"] == "ORG"
+                and ent["score"] > 0.65
+                and len(word) >= 4
+                and word.lower().strip() not in org_noise
+            ):
+                found_words.add(word.lower().strip())
 
         result = []
         for text in ocr_texts:
