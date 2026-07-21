@@ -3,7 +3,10 @@
 
 import React, { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
-import { MapPin, ArrowLeft, Clock, Mic, FileText, Globe2, Navigation, PenLine, Share2, Download } from "lucide-react";
+import {
+  MapPin, ArrowLeft, Clock, Mic, FileText, Globe2, Navigation, PenLine, Share2, Download,
+  Sparkles, Landmark, Map, Lightbulb, Check, AlertTriangle, Info, BookOpen, Building2,
+} from "lucide-react";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import AIStatsCard from "@/components/AIStatsCard";
@@ -13,20 +16,36 @@ import dynamic from "next/dynamic";
 
 const MapPreview = dynamic(() => import("@/components/MapPreview"), { ssr: false });
 
-/* ─── Stage metadata ─── */
-const STAGE_MAP: Record<string, { label: string; icon: string }> = {
-  metadata:    { label: "Video Meta Verisi Alınıyor",      icon: "🎬" },
-  frames:      { label: "Kareler Çıkarılıyor",             icon: "🎞️" },
-  ai_parallel: { label: "Görüntü Analizi Yapılıyor",       icon: "🔍" },
-  ner:         { label: "Metin Tanıma (NER)",              icon: "🧠" },
-  ner_ocr:     { label: "OCR Sonuçları İşleniyor",         icon: "📝" },
-  geocoding:   { label: "Konumlar Eşleştiriliyor",         icon: "🗺️" },
-  overpass:    { label: "Mekan Sorgusu Yapılıyor",         icon: "📍" },
-  dedup:       { label: "Lokasyonlar Temizleniyor",        icon: "✨" },
-  route:       { label: "Rota Optimize Ediliyor",          icon: "🧭" },
-  rag:         { label: "Seyahat İpuçları Hazırlanıyor",   icon: "💡" },
-};
+/* ─────────────────────────────────────────────────────────────────────────
+   Backend reports progress against 10 raw pipeline stages. We group them
+   into the 6 user-facing stages from the product brief so the ring never
+   resets mid-analysis, and the stage list reads as a story, not internals.
+   ───────────────────────────────────────────────────────────────────────── */
 const STAGE_ORDER = ["metadata","frames","ai_parallel","ner","ner_ocr","geocoding","overpass","dedup","route","rag"];
+
+const STAGE_BUCKETS: { label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { label: "Görüntü Analizi",   icon: Sparkles },
+  { label: "Yer Tespiti",       icon: Landmark },
+  { label: "Konum Eşleştirme",  icon: MapPin },
+  { label: "Gezi Planlama",     icon: Navigation },
+  { label: "Harita Oluşturma",  icon: Map },
+  { label: "Seyahat İpuçları",  icon: Lightbulb },
+];
+
+const BUCKET_RANGES = [[0,2],[3,4],[5,6],[7,7],[8,8],[9,9]];
+
+function bucketIndexOf(stage: string): number {
+  const rawIdx = STAGE_ORDER.indexOf(stage);
+  if (rawIdx < 0) return 0;
+  const i = BUCKET_RANGES.findIndex(([lo, hi]) => rawIdx >= lo && rawIdx <= hi);
+  return i < 0 ? 0 : i;
+}
+
+function overallPercentOf(stage: string, percent: number): number {
+  const rawIdx = STAGE_ORDER.indexOf(stage);
+  if (rawIdx < 0) return percent;
+  return Math.round(((rawIdx + percent / 100) / STAGE_ORDER.length) * 100);
+}
 
 function formatElapsed(s: number) {
   const m = Math.floor(s / 60);
@@ -36,62 +55,67 @@ function formatElapsed(s: number) {
 
 /* ─── Processing screen ─── */
 function ProcessingView({ stage, percent, elapsed }: { stage: string; percent: number; elapsed: number }) {
-  const info = STAGE_MAP[stage] ?? { label: "İşleniyor…", icon: "⚙️" };
-  const currentIdx = STAGE_ORDER.indexOf(stage);
+  const bucketIdx = bucketIndexOf(stage);
+  const overall = overallPercentOf(stage, percent);
   const R = 68;
   const circ = 2 * Math.PI * R;
-  const offset = circ * (1 - percent / 100);
+  const offset = circ * (1 - overall / 100);
+  const ActiveIcon = STAGE_BUCKETS[bucketIdx].icon;
 
   return (
-    <div className="min-h-screen bg-surface flex flex-col">
+    <div className="min-h-screen bg-bg flex flex-col">
       <Navbar />
-      <div className="flex-1 flex flex-col items-center justify-center px-6 pt-24 pb-16 text-center">
+      <div className="flex-1 flex flex-col items-center justify-center px-6 pt-24 pb-16">
 
         {/* Circular arc */}
-        <div className="relative w-48 h-48 mb-10">
+        <div className="relative w-44 h-44 mb-8">
           <svg className="w-full h-full -rotate-90" viewBox="0 0 160 160">
-            <circle cx="80" cy="80" r={R} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="8" />
+            <circle cx="80" cy="80" r={R} fill="none" stroke="rgb(var(--c-surface2))" strokeWidth="8" />
             <circle
               cx="80" cy="80" r={R} fill="none"
-              stroke="#4DFFC3" strokeWidth="8" strokeLinecap="round"
+              stroke="rgb(var(--c-accent))" strokeWidth="8" strokeLinecap="round"
               strokeDasharray={circ}
               strokeDashoffset={offset}
               style={{ transition: "stroke-dashoffset 0.6s ease" }}
             />
           </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-4xl mb-0.5">{info.icon}</span>
-            <span className="text-3xl font-black text-neon">{percent}%</span>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+            <ActiveIcon className="w-6 h-6 text-accent-text" />
+            <span className="font-mono text-2xl font-semibold text-text tabular-nums">{overall}%</span>
           </div>
         </div>
 
-        {/* Stage label */}
-        <h2 className="text-2xl font-black text-ice tracking-tight mb-2">Videonuz Analiz Ediliyor</h2>
-        <p className="text-muted text-sm font-medium mb-10">{info.label}</p>
+        <h2 className="font-display text-xl font-bold text-text tracking-tight mb-1 text-center">Gezi planınız hazırlanıyor</h2>
+        <p className="text-text-tertiary text-xs mb-10 text-center">
+          <Clock className="w-3 h-3 inline -mt-0.5 mr-1" />
+          {formatElapsed(elapsed)} geçti · genellikle 2 dakikadan az sürer
+        </p>
 
-        {/* Stage dots */}
-        <div className="flex gap-2 mb-8">
-          {STAGE_ORDER.map((s, i) => (
-            <div
-              key={s}
-              className={`rounded-full transition-all duration-300 ${
-                i < currentIdx  ? "w-2 h-2 bg-neon"
-                : i === currentIdx ? "w-3 h-3 bg-neon animate-pulse shadow-neon"
-                : "w-2 h-2 bg-white/10"
-              }`}
-            />
-          ))}
-        </div>
-
-        {/* Elapsed */}
-        <p className="text-muted text-xs">⏱ {formatElapsed(elapsed)} geçti · sayfa otomatik yenilenecek</p>
-
-        {/* Subtle progress bar */}
-        <div className="mt-8 w-64 h-1 bg-white/5 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-neon rounded-full transition-all duration-700"
-            style={{ width: `${percent}%` }}
-          />
+        {/* Stage list */}
+        <div className="w-full max-w-xs">
+          {STAGE_BUCKETS.map((b, i) => {
+            const state = i < bucketIdx ? "done" : i === bucketIdx ? "active" : "pending";
+            const Icon = b.icon;
+            return (
+              <div key={b.label} className="relative flex items-center gap-3 py-2">
+                {i < STAGE_BUCKETS.length - 1 && (
+                  <div className="absolute left-[15px] top-[34px] w-px h-[calc(100%-6px)] bg-border" />
+                )}
+                <div className={`relative z-10 w-8 h-8 rounded-full flex items-center justify-center shrink-0 border-[1.5px] transition-colors ${
+                  state === "done" ? "bg-success border-success"
+                  : state === "active" ? "bg-accent border-accent animate-pulse-ring"
+                  : "bg-surface2 border-border-strong"
+                }`}>
+                  {state === "done"
+                    ? <Check className="w-4 h-4 text-bg" />
+                    : <Icon className={`w-3.5 h-3.5 ${state === "active" ? "text-on-accent" : "text-text-tertiary"}`} />}
+                </div>
+                <p className={`text-sm font-semibold ${state === "pending" ? "text-text-tertiary" : "text-text"}`}>
+                  {b.label}
+                </p>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -168,17 +192,17 @@ export default function AnalysisResultPage() {
   /* ─── States ─── */
   if (loading) {
     return (
-      <div className="min-h-screen bg-surface flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-neon border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-bg flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   if (error || !video) {
     return (
-      <div className="min-h-screen bg-surface flex flex-col items-center justify-center gap-4">
-        <p className="text-red-400 text-sm">{error || "Plan bulunamadı"}</p>
-        <button onClick={() => router.back()} className="text-neon hover:underline text-sm">Geri Dön</button>
+      <div className="min-h-screen bg-bg flex flex-col items-center justify-center gap-4">
+        <p className="text-destructive text-sm">{error || "Plan bulunamadı"}</p>
+        <button onClick={() => router.back()} className="text-accent-text hover:underline text-sm">Geri Dön</button>
       </div>
     );
   }
@@ -189,10 +213,10 @@ export default function AnalysisResultPage() {
 
   if (video.status === "failed") {
     return (
-      <div className="min-h-screen bg-surface flex flex-col items-center justify-center gap-4">
-        <p className="text-4xl">⚠️</p>
-        <p className="text-ice font-bold">Video işlenirken hata oluştu</p>
-        <button onClick={() => router.back()} className="text-neon hover:underline text-sm">Geri Dön</button>
+      <div className="min-h-screen bg-bg flex flex-col items-center justify-center gap-4">
+        <AlertTriangle className="w-9 h-9 text-destructive" />
+        <p className="text-text font-bold">Video işlenirken hata oluştu</p>
+        <button onClick={() => router.back()} className="text-accent-text hover:underline text-sm">Geri Dön</button>
       </div>
     );
   }
@@ -209,34 +233,34 @@ export default function AnalysisResultPage() {
   const totalDistance = ai?.route?.optimized_route?.total_distance_km;
 
   return (
-    <div className="min-h-screen bg-surface text-ice">
+    <div className="min-h-screen bg-bg text-text">
       <Navbar />
 
       <main className="pt-24 pb-20 px-6 max-w-screen-xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <button
             onClick={() => router.back()}
-            className="flex items-center gap-2 text-muted hover:text-ice transition-all group font-bold uppercase tracking-widest text-[10px]"
+            className="flex items-center gap-2 text-text-tertiary hover:text-text transition-all group font-bold uppercase tracking-widest text-[10px]"
           >
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Geri
           </button>
           <div className="flex items-center gap-3 no-print">
             <button
               onClick={() => window.print()}
-              className="flex items-center gap-2 px-5 py-2.5 bg-white/5 border border-white/15 text-ice rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-white/10 transition-all"
+              className="flex items-center gap-2 px-5 py-2.5 bg-surface2 border border-border-strong text-text rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-border transition-all"
               title="Tarayıcı yazdırma diyalogundan PDF olarak kaydet"
             >
               <Download className="w-3.5 h-3.5" /> PDF İndir
             </button>
             <Link
               href={`/editor/${params.id}`}
-              className="flex items-center gap-2 px-5 py-2.5 bg-neon/10 border border-neon/30 text-neon rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-neon/20 transition-all"
+              className="flex items-center gap-2 px-5 py-2.5 bg-accent/10 border border-accent/30 text-accent-text rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-accent/20 transition-all"
             >
               <PenLine className="w-3.5 h-3.5" /> Planı Düzenle
             </Link>
             <Link
               href={`/share/${params.id}`}
-              className="flex items-center gap-2 px-5 py-2.5 bg-violet/10 border border-violet/30 text-violet rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-violet/20 transition-all"
+              className="flex items-center gap-2 px-5 py-2.5 bg-route/10 border border-route/30 text-route rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-route/20 transition-all"
             >
               <Share2 className="w-3.5 h-3.5" /> Paylaş
             </Link>
@@ -245,12 +269,12 @@ export default function AnalysisResultPage() {
 
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-4xl font-black tracking-tighter mb-2">
+          <h1 className="font-display text-4xl font-black tracking-tighter mb-2 text-text">
             {locations.length > 0
               ? locations[0].original_name.charAt(0).toUpperCase() + locations[0].original_name.slice(1) + " Gezi Planı"
               : "Gezi Planı"}
           </h1>
-          <div className="flex flex-wrap items-center gap-6 text-sm text-muted">
+          <div className="flex flex-wrap items-center gap-6 text-sm text-text-tertiary">
             {ai?.processing_time && <span className="flex items-center gap-1"><Clock className="w-4 h-4" /> {Math.round(ai.processing_time)}s analiz</span>}
             {video.duration      && <span className="flex items-center gap-1"><FileText className="w-4 h-4" /> {video.duration}s video</span>}
             {totalDistance       && <span className="flex items-center gap-1"><Navigation className="w-4 h-4" /> {Math.round(totalDistance)} km rota</span>}
@@ -278,14 +302,14 @@ export default function AnalysisResultPage() {
           <div className="lg:col-span-4 space-y-6">
 
             {locations.length > 0 && (
-              <Card title="🏙️ Bulunan Şehirler">
+              <Card title="Bulunan Şehirler" icon={Building2}>
                 <div className="space-y-3">
                   {locations.map((loc, i) => (
                     <div key={i} className="flex items-start gap-3">
-                      <MapPin className="w-4 h-4 text-neon mt-0.5 flex-shrink-0" />
+                      <MapPin className="w-4 h-4 text-route mt-0.5 flex-shrink-0" />
                       <div>
-                        <p className="font-semibold text-sm">{loc.original_name.charAt(0).toUpperCase() + loc.original_name.slice(1)}</p>
-                        <p className="text-xs text-muted">{loc.place_data?.name}</p>
+                        <p className="font-semibold text-sm text-text">{loc.original_name.charAt(0).toUpperCase() + loc.original_name.slice(1)}</p>
+                        <p className="text-xs text-text-tertiary">{loc.place_data?.name}</p>
                       </div>
                     </div>
                   ))}
@@ -294,7 +318,7 @@ export default function AnalysisResultPage() {
             )}
 
             {locations.length === 0 && nerLocations.length > 0 && (
-              <Card title="📍 Tespit Edilen Yerler">
+              <Card title="Tespit Edilen Yerler" icon={MapPin}>
                 <div className="flex flex-wrap gap-2">
                   {nerLocations.map((loc, i) => (
                     <span key={i} className="tag">{loc}</span>
@@ -304,12 +328,12 @@ export default function AnalysisResultPage() {
             )}
 
             {tips.length > 0 && (
-              <Card title="💡 Seyahat İpuçları">
+              <Card title="Seyahat İpuçları" icon={Lightbulb}>
                 <div className="space-y-3">
                   {tips.map((tip: any, i: number) => (
-                    <div key={i} className="p-3 bg-white/5 rounded-xl">
-                      <p className="text-xs font-bold text-neon mb-1">{tip.location}</p>
-                      <p className="text-xs text-muted leading-relaxed">{tip.tip}</p>
+                    <div key={i} className="p-3 bg-surface2 rounded-md">
+                      <p className="text-xs font-bold text-accent-text mb-1">{tip.location}</p>
+                      <p className="text-xs text-text-tertiary leading-relaxed">{tip.tip}</p>
                     </div>
                   ))}
                 </div>
@@ -317,8 +341,8 @@ export default function AnalysisResultPage() {
             )}
 
             {summary && (
-              <Card title="📖 Özet">
-                <p className="text-sm text-muted leading-relaxed">{summary}</p>
+              <Card title="Özet" icon={BookOpen}>
+                <p className="text-sm text-text-tertiary leading-relaxed">{summary}</p>
               </Card>
             )}
           </div>
@@ -327,35 +351,35 @@ export default function AnalysisResultPage() {
           <div className="lg:col-span-8 space-y-6">
 
             {locations.length > 0 && (
-              <Card title="🗺️ Harita">
-                <div className="h-[350px] rounded-xl overflow-hidden">
+              <Card title="Harita" icon={Map}>
+                <div className="h-[350px] rounded-md overflow-hidden">
                   <MapPreview locations={locations} />
                 </div>
               </Card>
             )}
 
             {(ocrPois.length > 0 || ocrTexts.length > 0) && (
-              <Card title="📝 Videodaki Yazılar">
+              <Card title="Videodaki Yazılar" icon={FileText}>
                 <div className="flex flex-wrap gap-2">
                   {(ocrPois.length > 0 ? ocrPois : ocrTexts).map((text, i) => (
-                    <span key={i} className="bg-white/5 border border-white/10 text-ice text-xs px-3 py-1.5 rounded-lg">{text}</span>
+                    <span key={i} className="bg-surface2 border border-border text-text text-xs px-3 py-1.5 rounded-md">{text}</span>
                   ))}
                 </div>
               </Card>
             )}
 
             {transcript && (
-              <Card title="🎙️ Ses Transkripsiyonu">
+              <Card title="Ses Transkripsiyonu" icon={Mic}>
                 <div className="flex items-start gap-3">
-                  <Mic className="w-4 h-4 text-neon mt-0.5 flex-shrink-0" />
-                  <p className="text-sm text-muted leading-relaxed">{transcript}</p>
+                  <Mic className="w-4 h-4 text-route mt-0.5 flex-shrink-0" />
+                  <p className="text-sm text-text-tertiary leading-relaxed">{transcript}</p>
                 </div>
               </Card>
             )}
 
             {locations.length === 0 && nerLocations.length === 0 && ocrTexts.length === 0 && (
-              <Card title="ℹ️ Bilgi">
-                <p className="text-sm text-muted">Bu videodan lokasyon bilgisi çıkarılamadı. Türkçe yazı veya yer adı içeren videolar deneyin.</p>
+              <Card title="Bilgi" icon={Info}>
+                <p className="text-sm text-text-tertiary">Bu videodan lokasyon bilgisi çıkarılamadı. Türkçe yazı veya yer adı içeren videolar deneyin.</p>
               </Card>
             )}
           </div>
@@ -365,14 +389,16 @@ export default function AnalysisResultPage() {
   );
 }
 
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
+function Card({ title, icon: Icon, children }: { title: string; icon: React.ComponentType<{ className?: string }>; children: React.ReactNode }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      className="neon-card rounded-2xl p-6"
+      className="bg-surface border border-border rounded-lg p-6"
     >
-      <h3 className="font-bold text-sm mb-4 text-ice">{title}</h3>
+      <h3 className="flex items-center gap-2 font-display font-bold text-sm mb-4 text-text">
+        <Icon className="w-4 h-4 text-text-tertiary" /> {title}
+      </h3>
       {children}
     </motion.div>
   );

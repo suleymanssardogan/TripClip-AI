@@ -35,7 +35,7 @@ export default function QRShareCard({ url, title = "Telefonla Paylaş" }: Props)
 
   const qrSrc =
     `https://api.qrserver.com/v1/create-qr-code/` +
-    `?size=320x320&margin=8&color=080B14&bgcolor=ffffff&qzone=2&data=` +
+    `?size=320x320&margin=8&color=0C0D10&bgcolor=ffffff&qzone=2&data=` +
     encodeURIComponent(safeUrl);
 
   function handleCopy() {
@@ -61,15 +61,15 @@ export default function QRShareCard({ url, title = "Telefonla Paylaş" }: Props)
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      className="neon-card p-8 rounded-[2.5rem] flex flex-col items-center text-center gap-5"
+      className="bg-surface border border-border p-8 rounded-lg flex flex-col items-center text-center gap-5"
     >
-      <div className="flex items-center gap-2 text-neon">
+      <div className="flex items-center gap-2 text-accent-text">
         <QrCode className="w-5 h-5" />
-        <span className="text-[10px] font-black uppercase tracking-widest">{title}</span>
+        <span className="font-mono text-[10px] font-black uppercase tracking-widest">{title}</span>
       </div>
 
       {/* QR */}
-      <div className="bg-white p-4 rounded-2xl shadow-2xl">
+      <div className="bg-white p-4 rounded-md shadow-card">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={qrSrc}
@@ -80,7 +80,7 @@ export default function QRShareCard({ url, title = "Telefonla Paylaş" }: Props)
         />
       </div>
 
-      <p className="text-xs text-muted max-w-[260px] leading-relaxed">
+      <p className="text-xs text-text-tertiary max-w-[260px] leading-relaxed">
         <Smartphone className="inline w-3.5 h-3.5 -mt-0.5 mr-1" />
         Kamerayla okut, planı telefonunda aç
       </p>
@@ -89,11 +89,11 @@ export default function QRShareCard({ url, title = "Telefonla Paylaş" }: Props)
       <div className="flex gap-2 w-full">
         <button
           onClick={handleCopy}
-          className="flex-1 flex items-center justify-center gap-2 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-ice transition-all"
+          className="flex-1 flex items-center justify-center gap-2 py-3 bg-surface2 hover:bg-border border border-border-strong rounded-md text-[10px] font-black uppercase tracking-widest text-text transition-all"
         >
           {copied ? (
             <>
-              <Check className="w-3.5 h-3.5 text-neon" /> Kopyalandı
+              <Check className="w-3.5 h-3.5 text-success" /> Kopyalandı
             </>
           ) : (
             <>
@@ -103,7 +103,7 @@ export default function QRShareCard({ url, title = "Telefonla Paylaş" }: Props)
         </button>
         <button
           onClick={handleDownload}
-          className="flex-1 flex items-center justify-center gap-2 py-3 bg-neon/10 hover:bg-neon/20 border border-neon/25 rounded-xl text-[10px] font-black uppercase tracking-widest text-neon transition-all"
+          className="flex-1 flex items-center justify-center gap-2 py-3 bg-accent/10 hover:bg-accent/20 border border-accent/25 rounded-md text-[10px] font-black uppercase tracking-widest text-accent-text transition-all"
         >
           <Download className="w-3.5 h-3.5" /> QR İndir
         </button>

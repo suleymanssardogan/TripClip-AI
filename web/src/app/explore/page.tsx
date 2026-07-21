@@ -37,19 +37,10 @@ const CITY_FILTERS = [
   "Gaziantep", "Kapadokya", "Trabzon", "Bodrum", "Mardin",
 ];
 
-const DEST_COLORS = [
-  { from: "#4DFFC3", to: "#8B5CF6" },
-  { from: "#FF6B4A", to: "#4DFFC3" },
-  { from: "#8B5CF6", to: "#FF6B4A" },
-  { from: "#F5C842", to: "#4DFFC3" },
-  { from: "#4DFFC3", to: "#F5C842" },
-];
-
 /* ─── Plan kartı ──────────────────────────────────────────── */
 function PlanCard({ plan, index }: { plan: Plan; index: number }) {
-  const city     = plan.top_location ?? "Türkiye";
-  const colorSet = DEST_COLORS[plan.id % DEST_COLORS.length];
-  const created  = new Date(plan.created_at).toLocaleDateString("tr-TR", {
+  const city    = plan.top_location ?? "Türkiye";
+  const created = new Date(plan.created_at).toLocaleDateString("tr-TR", {
     day: "numeric", month: "long", year: "numeric",
   });
 
@@ -60,48 +51,35 @@ function PlanCard({ plan, index }: { plan: Plan; index: number }) {
       transition={{ delay: index * 0.05, duration: 0.5, ease: "easeOut" }}
     >
       <Link href={`/analyze/${plan.id}`} className="block group">
-        <div className="neon-card rounded-2xl overflow-hidden">
+        <div className="bg-surface border border-border rounded-lg overflow-hidden hover:border-border-strong hover:-translate-y-0.5 transition-all">
 
           {/* Görsel alanı */}
-          <div className="relative overflow-hidden" style={{ height: "200px" }}>
-            <div className="w-full h-full transition-transform duration-700 group-hover:scale-[1.04]"
-              style={{
-                background: `linear-gradient(135deg, ${colorSet.from}22 0%, ${colorSet.to}33 100%)`,
-                backgroundColor: "#0A0D1A",
-              }}>
-              <div className="absolute inset-0"
-                style={{ background: "linear-gradient(to top, rgba(8,11,20,0.8) 0%, transparent 60%)" }} />
-
-              {/* Badge */}
-              <div className="absolute top-4 left-4">
-                <span className="tag">{plan.locations_count} Mekan</span>
-              </div>
-
-              {/* Şehir */}
-              <div className="absolute bottom-4 left-4">
-                <div className="flex items-center gap-1.5 text-ice/70 mb-1">
-                  <MapPin className="w-3 h-3 text-neon" />
-                  <span className="text-xs tracking-widest uppercase text-ice/80">{city}</span>
-                </div>
-              </div>
-
-              {/* Gradient accent çizgi */}
-              <div className="absolute bottom-0 left-0 right-0 h-[2px]"
-                style={{ background: `linear-gradient(90deg, ${colorSet.from}, ${colorSet.to})` }} />
+          <div className="relative overflow-hidden bg-surface2" style={{ height: "160px" }}>
+            <div className="w-full h-full flex items-center justify-center">
+              <MapPin className="w-8 h-8 text-text-tertiary" />
+            </div>
+            <div className="absolute top-4 left-4">
+              <span className="font-mono text-[10px] font-semibold px-2.5 py-1 rounded-full bg-bg/80 border border-border text-text-secondary">
+                {plan.locations_count} Mekan
+              </span>
+            </div>
+            <div className="absolute bottom-4 left-4 flex items-center gap-1.5">
+              <MapPin className="w-3 h-3 text-route" />
+              <span className="text-xs tracking-widest uppercase text-text-secondary">{city}</span>
             </div>
           </div>
 
           {/* Metin */}
           <div className="p-5">
-            <h3 className="font-display font-bold text-ice text-sm leading-snug mb-3
-              group-hover:text-neon transition-colors line-clamp-1">
+            <h3 className="font-display font-bold text-text text-sm leading-snug mb-3
+              group-hover:text-accent-text transition-colors line-clamp-1">
               {planTitle(plan, index)}
             </h3>
 
             {(plan.ocr_preview ?? []).length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-3">
                 {(plan.ocr_preview ?? []).slice(0, 2).map((t, i) => (
-                  <span key={i} className="text-[10px] text-muted border border-white/10
+                  <span key={i} className="text-[10px] text-text-tertiary border border-border
                     px-2 py-0.5 rounded-full">
                     {t}
                   </span>
@@ -109,12 +87,12 @@ function PlanCard({ plan, index }: { plan: Plan; index: number }) {
               </div>
             )}
 
-            <div className="flex items-center justify-between pt-3 border-t border-white/[0.06]">
-              <span className="flex items-center gap-1.5 text-[11px] text-muted">
+            <div className="flex items-center justify-between pt-3 border-t border-border">
+              <span className="flex items-center gap-1.5 text-[11px] text-text-tertiary">
                 <Clock className="w-3 h-3" />
                 {created}
               </span>
-              <span className="flex items-center gap-1 text-[11px] text-neon font-semibold
+              <span className="flex items-center gap-1 text-[11px] text-accent-text font-semibold
                 group-hover:gap-2 transition-all">
                 Keşfet <ArrowRight className="w-3 h-3" />
               </span>
@@ -129,12 +107,12 @@ function PlanCard({ plan, index }: { plan: Plan; index: number }) {
 /* ─── Skeleton ────────────────────────────────────────────── */
 function Skeleton() {
   return (
-    <div className="neon-card rounded-2xl overflow-hidden animate-pulse">
-      <div className="bg-white/[0.03]" style={{ height: "200px" }} />
+    <div className="bg-surface border border-border rounded-lg overflow-hidden animate-pulse">
+      <div className="bg-surface2" style={{ height: "160px" }} />
       <div className="p-5 space-y-3">
-        <div className="h-4 bg-white/[0.05] rounded w-3/4" />
-        <div className="h-3 bg-white/[0.04] rounded w-1/2" />
-        <div className="h-px bg-white/[0.06] mt-4" />
+        <div className="h-4 bg-surface2 rounded w-3/4" />
+        <div className="h-3 bg-surface2 rounded w-1/2" />
+        <div className="h-px bg-border mt-4" />
       </div>
     </div>
   );
@@ -181,12 +159,6 @@ export default function ExplorePage() {
     <div className="min-h-screen bg-bg">
       <Navbar />
 
-      {/* Arka plan orb'lar */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="orb w-[500px] h-[500px] bg-neon top-0 -left-40" />
-        <div className="orb w-[400px] h-[400px] bg-violet top-1/3 -right-32" />
-      </div>
-
       {/* ── Hero ────────────────────────────────────────── */}
       <section className="relative pt-36 pb-20 px-8">
         <div className="max-w-7xl mx-auto">
@@ -196,15 +168,15 @@ export default function ExplorePage() {
             <div>
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
                 className="inline-flex items-center gap-2.5 mb-5 px-4 py-1.5 rounded-full
-                  border border-neon/20 bg-neon/[0.05]">
-                <div className="glow-dot" />
-                <span className="text-xs font-mono text-neon/80 tracking-widest uppercase">Keşfet</span>
+                  border border-border bg-surface2">
+                <span className="glow-dot" />
+                <span className="font-mono text-xs text-text-secondary tracking-widest uppercase">Keşfet</span>
               </motion.div>
 
-              <h1 className="font-display font-black text-ice leading-tight"
-                style={{ fontSize: "clamp(2.5rem, 5vw, 5rem)" }}>
+              <h1 className="font-display font-black text-text leading-tight"
+                style={{ fontSize: "clamp(2.25rem, 4.5vw, 4rem)" }}>
                 Gerçek Seyahat<br />
-                <span className="gradient-text">Deneyimleri</span>
+                <span className="text-accent-text">Deneyimleri</span>
               </h1>
             </div>
 
@@ -215,47 +187,47 @@ export default function ExplorePage() {
                   { val: stats.total_cities,     label: "Şehir" },
                 ].map((s, i) => (
                   <div key={i} className="text-right">
-                    <p className="font-display font-black text-ice text-3xl">{s.val}+</p>
-                    <p className="text-xs font-mono text-neon/60 uppercase tracking-widest mt-1">{s.label}</p>
+                    <p className="font-mono font-semibold text-text text-3xl tabular-nums">{s.val}+</p>
+                    <p className="font-mono text-xs text-text-tertiary uppercase tracking-widest mt-1">{s.label}</p>
                   </div>
                 ))}
               </div>
             )}
           </motion.div>
 
-          <p className="text-muted mt-6 max-w-xl leading-relaxed">
+          <p className="text-text-secondary mt-6 max-w-xl leading-relaxed">
             AI&apos;ın analiz ettiği gerçek gezi videolarından çıkarılan mekanlar, rotalar ve seyahat hikâyeleri.
           </p>
         </div>
       </section>
 
       {/* ── Arama + filtreler ───────────────────────────────── */}
-      <div className="sticky top-[68px] z-40 glass border-b border-white/[0.06]">
+      <div className="sticky top-[68px] z-40 bg-bg/90 backdrop-blur-lg border-b border-border">
         <div className="max-w-7xl mx-auto px-8 py-3 flex items-center gap-4">
 
           {/* Arama */}
           <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
             <input
               type="text" value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Şehir veya mekan ara..."
-              className="w-full bg-white/[0.04] border border-white/10 rounded-lg pl-9 pr-4 py-2.5
-                text-ice placeholder:text-muted text-sm
-                focus:outline-none focus:border-neon/40 transition-colors"
+              className="w-full bg-surface2 border border-border-strong rounded-md pl-9 pr-4 py-2.5
+                text-text placeholder:text-text-tertiary text-sm
+                focus:outline-none focus:border-accent-text transition-colors"
             />
           </div>
 
           {/* Şehir filtreleri */}
           <div className="hidden md:flex items-center gap-1 overflow-x-auto no-scrollbar">
-            <Filter className="w-3.5 h-3.5 text-muted flex-shrink-0 mr-2" />
+            <Filter className="w-3.5 h-3.5 text-text-tertiary flex-shrink-0 mr-2" />
             {CITY_FILTERS.map(c => (
               <button key={c}
                 onClick={() => { setCity(c); setOffset(0); }}
-                className={`flex-shrink-0 px-3 py-1.5 text-xs rounded-lg tracking-wide transition-all ${
+                className={`flex-shrink-0 px-3 py-1.5 text-xs rounded-md tracking-wide transition-all ${
                   city === c
-                    ? "bg-neon text-bg font-bold"
-                    : "text-muted hover:text-ice hover:bg-white/[0.05]"
+                    ? "bg-accent text-on-accent font-bold"
+                    : "text-text-secondary hover:text-text hover:bg-surface2"
                 }`}>
                 {c}
               </button>
@@ -270,9 +242,9 @@ export default function ExplorePage() {
         {/* Sonuç sayısı */}
         {!loading && filtered.length > 0 && (
           <div className="flex items-center justify-between mb-8">
-            <p className="text-muted text-sm">
-              <span className="text-ice font-semibold">{total}</span> gezi analizi
-              {city !== "Tümü" && <span className="text-neon"> · {city}</span>}
+            <p className="text-text-tertiary text-sm">
+              <span className="text-text font-semibold">{total}</span> gezi analizi
+              {city !== "Tümü" && <span className="text-accent-text"> · {city}</span>}
             </p>
           </div>
         )}
@@ -283,16 +255,16 @@ export default function ExplorePage() {
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-32">
-            <p className="text-5xl mb-4">{total === 0 ? "🗺️" : "🔍"}</p>
-            <h3 className="font-display font-bold text-ice text-xl mb-2">
+            <MapPin className="w-10 h-10 text-text-tertiary mx-auto mb-4" />
+            <h3 className="font-display font-bold text-text text-xl mb-2">
               {total === 0 ? "Henüz video analiz edilmedi" : "Sonuç bulunamadı"}
             </h3>
-            <p className="text-muted text-sm mb-8">
+            <p className="text-text-secondary text-sm mb-8">
               {total === 0 ? "iOS uygulamasından ilk videoyu yükle!" : "Farklı bir arama dene"}
             </p>
             {search && (
               <button onClick={() => setSearch("")}
-                className="btn-neon flex items-center gap-2 mx-auto text-xs px-5 py-2.5 rounded-xl">
+                className="flex items-center gap-2 mx-auto text-xs px-5 py-2.5 rounded-md bg-route/10 border border-route/25 text-route hover:bg-route/20 transition-colors">
                 <RotateCcw className="w-3 h-3" /> Aramayı Temizle
               </button>
             )}
@@ -309,20 +281,20 @@ export default function ExplorePage() {
 
             {/* Sayfalama */}
             {total > LIMIT && (
-              <div className="flex items-center justify-center gap-4 mt-16 pt-8 border-t border-white/[0.06]">
+              <div className="flex items-center justify-center gap-4 mt-16 pt-8 border-t border-border">
                 <button
                   onClick={() => { const o = Math.max(0, offset - LIMIT); setOffset(o); fetchPlans(city, o); }}
                   disabled={offset === 0}
-                  className="btn-neon text-xs py-2.5 px-6 rounded-xl disabled:opacity-30">
+                  className="text-xs py-2.5 px-6 rounded-md bg-route/10 border border-route/25 text-route hover:bg-route/20 transition-colors disabled:opacity-30">
                   ← Önceki
                 </button>
-                <span className="text-muted text-sm">
+                <span className="text-text-tertiary text-sm">
                   {Math.floor(offset / LIMIT) + 1} / {Math.ceil(total / LIMIT)}
                 </span>
                 <button
                   onClick={() => { const o = offset + LIMIT; setOffset(o); fetchPlans(city, o); }}
                   disabled={offset + LIMIT >= total}
-                  className="btn-primary text-xs py-2.5 px-6 rounded-xl disabled:opacity-30">
+                  className="text-xs py-2.5 px-6 rounded-md bg-accent text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30">
                   Sonraki →
                 </button>
               </div>
@@ -331,21 +303,21 @@ export default function ExplorePage() {
         )}
 
         {/* Alt CTA */}
-        <div className="mt-28 pt-16 border-t border-white/[0.06] text-center">
+        <div className="mt-28 pt-16 border-t border-border text-center">
           <div className="inline-flex items-center gap-2 mb-4 px-4 py-1.5 rounded-full
-            border border-neon/20 bg-neon/[0.05]">
-            <span className="text-xs font-mono text-neon/80 tracking-widest uppercase">Kendi Planını Oluştur</span>
+            border border-border bg-surface2">
+            <span className="font-mono text-xs text-text-secondary tracking-widest uppercase">Kendi Planını Oluştur</span>
           </div>
-          <h2 className="font-display font-black text-ice mt-2 mb-4"
-            style={{ fontSize: "clamp(1.8rem, 3vw, 2.8rem)" }}>
+          <h2 className="font-display font-black text-text mt-2 mb-4"
+            style={{ fontSize: "clamp(1.75rem, 2.8vw, 2.5rem)" }}>
             Videonu Yükle, Rotanı Keşfet
           </h2>
-          <p className="text-muted mb-8 max-w-md mx-auto text-sm leading-relaxed">
+          <p className="text-text-secondary mb-8 max-w-md mx-auto text-sm leading-relaxed">
             iOS uygulamasından gezi videonu yükle. AI otomatik olarak mekanları tespit eder,
             haritaya işler ve sana özel rota oluşturur.
           </p>
           <Link href="/signup"
-            className="btn-primary inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm">
+            className="inline-flex items-center gap-2 px-8 py-3.5 rounded-md text-sm font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors">
             Ücretsiz Başla <ArrowRight className="w-4 h-4" />
           </Link>
         </div>

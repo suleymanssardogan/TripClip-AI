@@ -62,10 +62,10 @@ function Tab({ active, onClick, icon, label }: TabProps) {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+      className={`flex items-center gap-2 px-5 py-2.5 rounded-md text-sm font-semibold transition-all ${
         active
-          ? "bg-neon/10 text-neon border border-neon/25"
-          : "text-muted hover:text-ice hover:bg-white/[0.05] border border-transparent"
+          ? "bg-accent/10 text-accent-text border border-accent/25"
+          : "text-text-secondary hover:text-text hover:bg-surface2 border border-transparent"
       }`}
     >
       {icon}
@@ -82,8 +82,8 @@ function ErrorBanner({ message, onDismiss }: ErrorBannerProps) {
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
-      className="flex items-start gap-3 bg-red-500/10 border border-red-500/25 text-red-400
-        px-4 py-3.5 rounded-xl text-sm"
+      className="flex items-start gap-3 bg-destructive/10 border border-destructive/25 text-destructive
+        px-4 py-3.5 rounded-md text-sm"
       role="alert"
       aria-live="assertive"
     >
@@ -91,7 +91,7 @@ function ErrorBanner({ message, onDismiss }: ErrorBannerProps) {
       <span className="flex-1">{message}</span>
       <button
         onClick={onDismiss}
-        className="flex-shrink-0 hover:text-red-300 transition-colors"
+        className="flex-shrink-0 hover:opacity-70 transition-opacity"
         aria-label="Hatayı kapat"
       >
         <X className="w-3.5 h-3.5" />
@@ -128,18 +128,18 @@ function DropZone({ file, onFile, onClear, disabled }: DropZoneProps) {
 
   if (file) {
     return (
-      <div className="relative flex items-center gap-4 p-5 bg-neon/5 border border-neon/20 rounded-2xl">
-        <div className="w-12 h-12 rounded-xl bg-neon/10 flex items-center justify-center flex-shrink-0">
-          <Video className="w-6 h-6 text-neon" aria-hidden />
+      <div className="relative flex items-center gap-4 p-5 bg-accent/5 border border-accent/20 rounded-lg">
+        <div className="w-12 h-12 rounded-md bg-accent/10 flex items-center justify-center flex-shrink-0">
+          <Video className="w-6 h-6 text-accent-text" aria-hidden />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-ice text-sm font-semibold truncate">{file.name}</p>
-          <p className="text-muted text-xs mt-0.5">{formatBytes(file.size)}</p>
+          <p className="text-text text-sm font-semibold truncate">{file.name}</p>
+          <p className="text-text-tertiary text-xs mt-0.5">{formatBytes(file.size)}</p>
         </div>
         {!disabled && (
           <button
             onClick={onClear}
-            className="flex-shrink-0 p-1.5 rounded-lg hover:bg-white/[0.08] text-muted hover:text-coral transition-colors"
+            className="flex-shrink-0 p-1.5 rounded-sm hover:bg-surface2 text-text-tertiary hover:text-destructive transition-colors"
             aria-label="Dosyayı kaldır"
           >
             <X className="w-4 h-4" />
@@ -161,27 +161,27 @@ function DropZone({ file, onFile, onClear, disabled }: DropZoneProps) {
       onKeyDown={(e) => { if (!disabled && (e.key === "Enter" || e.key === " ")) inputRef.current?.click(); }}
       className={`
         relative flex flex-col items-center justify-center gap-4 p-10
-        rounded-2xl border-2 border-dashed cursor-pointer select-none
+        rounded-lg border-[1.5px] border-dashed cursor-pointer select-none
         transition-all duration-200
         ${disabled
-          ? "border-white/10 opacity-50 cursor-not-allowed"
+          ? "border-border opacity-50 cursor-not-allowed"
           : dragging
-            ? "border-neon scale-[1.01] bg-neon/8 shadow-neon"
-            : "border-white/15 hover:border-neon/40 hover:bg-white/[0.02]"
+            ? "border-accent-text bg-accent/[0.06]"
+            : "border-border-strong hover:border-accent/40 hover:bg-surface2/50"
         }
       `}
     >
-      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-colors
-        ${dragging ? "bg-neon/20" : "bg-white/[0.04]"}`}>
-        <Upload className={`w-7 h-7 ${dragging ? "text-neon" : "text-muted"}`} aria-hidden />
+      <div className={`w-14 h-14 rounded-full flex items-center justify-center transition-colors
+        ${dragging ? "bg-accent/20" : "bg-surface2"}`}>
+        <Upload className={`w-6 h-6 ${dragging ? "text-accent-text" : "text-text-tertiary"}`} aria-hidden />
       </div>
 
       <div className="text-center">
-        <p className="text-ice font-semibold">
+        <p className="text-text font-semibold">
           {dragging ? "Bırakabilirsiniz" : "Dosyayı buraya sürükleyin"}
         </p>
-        <p className="text-muted text-sm mt-1">veya tıklayarak seçin</p>
-        <p className="text-muted/60 text-xs mt-2">MP4, MOV, AVI, WebM · Maks. 200 MB</p>
+        <p className="text-text-secondary text-sm mt-1">veya tıklayarak seçin</p>
+        <p className="text-text-tertiary text-xs mt-2">MP4, MOV, AVI, WebM · Maks. 200 MB</p>
       </div>
 
       <input
@@ -203,19 +203,19 @@ function UploadProgress({ percent }: { percent: number }) {
   return (
     <div className="space-y-3" role="status" aria-live="polite" aria-label={`Yükleme: %${percent}`}>
       <div className="flex items-center justify-between text-sm">
-        <span className="text-muted flex items-center gap-2">
-          <Loader2 className="w-4 h-4 animate-spin text-neon" aria-hidden />
+        <span className="text-text-secondary flex items-center gap-2">
+          <Loader2 className="w-4 h-4 animate-spin text-accent-text" aria-hidden />
           Sunucuya yükleniyor…
         </span>
-        <span className="font-mono text-neon font-bold">%{percent}</span>
+        <span className="font-mono text-accent-text font-semibold tabular-nums">%{percent}</span>
       </div>
-      <div className="h-2 bg-white/[0.06] rounded-full overflow-hidden">
+      <div className="h-1.5 bg-surface2 rounded-full overflow-hidden">
         <div
-          className="h-full bg-neon rounded-full transition-all duration-300"
+          className="h-full bg-accent rounded-full transition-all duration-300"
           style={{ width: `${percent}%` }}
         />
       </div>
-      <p className="text-muted/60 text-xs">Sayfa kapatılmayın, yükleme devam ediyor.</p>
+      <p className="text-text-tertiary text-xs">Sayfa kapatılmayın, yükleme devam ediyor.</p>
     </div>
   );
 }
@@ -297,12 +297,6 @@ export default function UploadPage() {
 
   return (
     <div className="min-h-screen bg-bg">
-      {/* Ambient orbs */}
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="orb w-[500px] h-[500px] bg-neon -top-40 -left-40" />
-        <div className="orb w-[400px] h-[400px] bg-violet bottom-0 -right-32" />
-      </div>
-
       <Navbar />
 
       <main className="relative pt-28 pb-24 px-4 sm:px-6 max-w-2xl mx-auto">
@@ -313,11 +307,11 @@ export default function UploadPage() {
           animate={{ opacity: 1, y: 0 }}
           className="mb-10"
         >
-          <p className="text-xs font-mono text-neon/60 tracking-widest uppercase mb-2">
+          <p className="font-mono text-xs text-text-tertiary tracking-widest uppercase mb-2">
             Gezi Analizi
           </p>
-          <h1 className="font-display font-black text-3xl text-ice">Video Yükle</h1>
-          <p className="text-muted text-sm mt-2">
+          <h1 className="font-display font-black text-3xl text-text">Video Yükle</h1>
+          <p className="text-text-secondary text-sm mt-2">
             Video dosyanızı yükleyin veya bir Instagram / YouTube linki yapıştırın.
             AI, konumları otomatik çıkarır ve gezi planı oluşturur.
           </p>
@@ -327,7 +321,7 @@ export default function UploadPage() {
           initial={{ opacity: 0, y: 24 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.08 }}
-          className="neon-card rounded-3xl p-6 sm:p-8 space-y-6"
+          className="bg-surface border border-border rounded-lg p-6 sm:p-8 space-y-6"
         >
           {/* ── Mode Tabs ──────────────────────────────────────────────── */}
           <div className="flex gap-2" role="tablist" aria-label="Yükleme yöntemi">
@@ -377,9 +371,9 @@ export default function UploadPage() {
                     <button
                       onClick={handleFileSubmit}
                       disabled={!file || uploading}
-                      className="btn-primary w-full flex items-center justify-center gap-2
-                        py-4 rounded-2xl text-sm font-bold
-                        disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
+                      className="w-full flex items-center justify-center gap-2
+                        py-4 rounded-md text-sm font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors
+                        disabled:opacity-40 disabled:cursor-not-allowed"
                       aria-label="Videoyu yükle ve analiz başlat"
                     >
                       <Upload className="w-4 h-4" aria-hidden />
@@ -403,7 +397,7 @@ export default function UploadPage() {
                   <div>
                     <label
                       htmlFor="video-url"
-                      className="text-xs font-mono text-neon/60 uppercase tracking-widest block mb-2"
+                      className="font-mono text-xs text-text-tertiary uppercase tracking-widest block mb-2"
                     >
                       Video Linki
                     </label>
@@ -417,12 +411,12 @@ export default function UploadPage() {
                       autoComplete="off"
                       spellCheck={false}
                       aria-describedby="url-hint"
-                      className="w-full bg-white/[0.04] border border-white/10 rounded-xl
-                        px-4 py-3.5 text-ice placeholder:text-muted text-sm
-                        focus:outline-none focus:border-neon/40 transition-colors
+                      className="w-full bg-surface2 border border-border-strong rounded-md
+                        px-4 py-3.5 text-text placeholder:text-text-tertiary text-sm
+                        focus:outline-none focus:border-accent-text transition-colors
                         disabled:opacity-50"
                     />
-                    <p id="url-hint" className="text-muted/60 text-xs mt-2">
+                    <p id="url-hint" className="text-text-tertiary text-xs mt-2">
                       Instagram Reels, YouTube Shorts veya doğrudan MP4 linki desteklenmektedir.
                     </p>
                   </div>
@@ -430,9 +424,9 @@ export default function UploadPage() {
                   <button
                     type="submit"
                     disabled={!url.trim() || uploading}
-                    className="btn-primary w-full flex items-center justify-center gap-2
-                      py-4 rounded-2xl text-sm font-bold
-                      disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
+                    className="w-full flex items-center justify-center gap-2
+                      py-4 rounded-md text-sm font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors
+                      disabled:opacity-40 disabled:cursor-not-allowed"
                     aria-label="Linki kuyruğa al ve analiz başlat"
                   >
                     {uploading ? (
@@ -463,13 +457,13 @@ export default function UploadPage() {
           aria-label="Süreç adımları"
         >
           {[
-            { step: "1", icon: "🎬", label: "Video veya link seç" },
-            { step: "2", icon: "🤖", label: "AI analiz eder" },
-            { step: "3", icon: "🗺️", label: "Gezi planın hazır" },
-          ].map(({ step, icon, label }) => (
-            <div key={step} className="bg-white/[0.02] border border-white/[0.06] rounded-2xl p-4">
-              <div className="text-2xl mb-2" aria-hidden>{icon}</div>
-              <p className="text-muted text-xs leading-snug">{label}</p>
+            { step: "1", label: "Video veya link seç" },
+            { step: "2", label: "AI analiz eder" },
+            { step: "3", label: "Gezi planın hazır" },
+          ].map(({ step, label }) => (
+            <div key={step} className="bg-surface border border-border rounded-lg p-4">
+              <div className="font-mono text-xs text-accent-text mb-2">0{step}</div>
+              <p className="text-text-secondary text-xs leading-snug">{label}</p>
             </div>
           ))}
         </motion.div>

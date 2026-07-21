@@ -57,7 +57,7 @@ export default function MapPreview({ locations }: Props) {
   }, []);
 
   if (!mounted || !MapContainer) {
-    return <div className="w-full h-full bg-zinc-900 animate-pulse rounded-xl" />;
+    return <div className="w-full h-full bg-surface2 animate-pulse rounded-md" />;
   }
 
   const validPoints = points.filter(p => p.place_data?.location?.lat && p.place_data?.location?.lng);
@@ -85,7 +85,7 @@ export default function MapPreview({ locations }: Props) {
         />
 
         {validPoints.length > 1 && (
-          <Polyline positions={polylinePositions} color="#3b82f6" weight={2} opacity={0.6} dashArray="8,4" />
+          <Polyline positions={polylinePositions} color="#3FD9C4" weight={2} opacity={0.6} dashArray="8,4" />
         )}
 
         {validPoints.map((point, i) => (

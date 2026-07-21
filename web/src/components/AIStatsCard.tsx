@@ -22,7 +22,6 @@ interface Stat {
   label: string;
   value: string;
   hint?: string;
-  color: string;
 }
 
 export default function AIStatsCard(p: Props) {
@@ -34,56 +33,48 @@ export default function AIStatsCard(p: Props) {
       hint: p.processingTime && p.videoDuration
         ? `${(p.processingTime / p.videoDuration).toFixed(1)}x video`
         : undefined,
-      color: "neon",
     },
     {
       icon: <MapPin className="w-5 h-5" />,
       label: "Lokasyon",
       value: String(p.locationsCount),
       hint: "tespit edildi",
-      color: "violet",
     },
     {
       icon: <Eye className="w-5 h-5" />,
       label: "Görsel Nesne",
       value: String(p.detectionsCount),
       hint: "YOLOv8 tarafından",
-      color: "coral",
     },
     {
       icon: <FileSearch className="w-5 h-5" />,
       label: "OCR Yazı",
       value: String(p.ocrCount),
       hint: "tabela / yazı",
-      color: "neon",
     },
     {
       icon: <Mic className="w-5 h-5" />,
       label: "Transkript",
       value: p.transcriptLength > 0 ? `${p.transcriptLength}` : "—",
       hint: "karakter",
-      color: "violet",
     },
     {
       icon: <Lightbulb className="w-5 h-5" />,
       label: "AI İpucu",
       value: String(p.tipsCount),
       hint: "RAG sistemi",
-      color: "coral",
     },
     {
       icon: <Navigation className="w-5 h-5" />,
       label: "Toplam Rota",
       value: p.totalDistanceKm ? `${Math.round(p.totalDistanceKm)} km` : "—",
       hint: "TSP optimize",
-      color: "neon",
     },
     {
       icon: <Timer className="w-5 h-5" />,
       label: "Video",
       value: p.videoDuration ? `${p.videoDuration}s` : "—",
       hint: "süresi",
-      color: "violet",
     },
   ];
 
@@ -92,22 +83,22 @@ export default function AIStatsCard(p: Props) {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.5 }}
-      className="neon-card rounded-2xl p-6 mb-8"
+      className="bg-surface border border-border rounded-lg p-6 mb-8"
     >
       {/* Başlık */}
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-neon/10 border border-neon/25 flex items-center justify-center">
-            <Cpu className="w-4 h-4 text-neon" />
+          <div className="w-9 h-9 rounded-md bg-accent/10 border border-accent/25 flex items-center justify-center">
+            <Cpu className="w-4 h-4 text-accent-text" />
           </div>
           <div>
-            <h3 className="font-black text-sm text-ice tracking-tight">AI Pipeline İstatistikleri</h3>
-            <p className="text-[10px] text-muted uppercase tracking-widest mt-0.5">
+            <h3 className="font-display font-bold text-sm text-text tracking-tight">AI Pipeline İstatistikleri</h3>
+            <p className="font-mono text-[10px] text-text-tertiary uppercase tracking-widest mt-0.5">
               7 ML modeli · paralel işleme
             </p>
           </div>
         </div>
-        <span className="px-3 py-1 rounded-full bg-neon/10 border border-neon/25 text-neon text-[9px] font-black uppercase tracking-widest">
+        <span className="px-3 py-1 rounded-full bg-route/10 border border-route/25 text-route font-mono text-[9px] font-bold uppercase tracking-widest">
           Live
         </span>
       </div>
@@ -120,17 +111,17 @@ export default function AIStatsCard(p: Props) {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.04 }}
-            className="bg-white/[0.03] border border-white/5 rounded-xl p-3 hover:border-white/15 transition-colors"
+            className="bg-surface2 border border-border rounded-md p-3 hover:border-border-strong transition-colors"
           >
-            <div className={`text-${s.color} mb-2 opacity-90`}>{s.icon}</div>
-            <p className="text-2xl font-black text-ice leading-none mb-1.5 tabular-nums">
+            <div className="text-text-tertiary mb-2">{s.icon}</div>
+            <p className="font-mono text-2xl font-semibold text-text leading-none mb-1.5 tabular-nums">
               {s.value}
             </p>
-            <p className="text-[10px] text-muted uppercase tracking-wider font-bold">
+            <p className="text-[10px] text-text-secondary uppercase tracking-wider font-semibold">
               {s.label}
             </p>
             {s.hint && (
-              <p className="text-[9px] text-muted/70 mt-1">{s.hint}</p>
+              <p className="text-[9px] text-text-tertiary mt-1">{s.hint}</p>
             )}
           </motion.div>
         ))}

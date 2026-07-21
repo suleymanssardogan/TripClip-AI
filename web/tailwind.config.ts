@@ -1,5 +1,7 @@
 import type { Config } from "tailwindcss";
 
+const cssVar = (name: string) => `rgb(var(${name}) / <alpha-value>)`;
+
 const config: Config = {
   content: [
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
@@ -9,35 +11,35 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        bg:        "#080B14",
-        surface:   "#0D1117",
-        card:      "#0F1521",
-        border:    "#1E2D40",
-        neon:      "#4DFFC3",
-        violet:    "#8B5CF6",
-        coral:     "#FF6B4A",
-        ice:       "#E2F0FF",
-        muted:     "#4A5568",
-        dim:       "#1A2535",
-        gold:      "#F5C842",
-        "bento-orange": "#2A1205",
-        "bento-navy":   "#080B2A",
-        "bento-green":  "#091A12",
-        "bento-purple": "#130A28",
-        // Light / Luxury palette
-        cream:           "#FAF7F2",
-        charcoal:        "#1C1C1E",
-        "charcoal-mid":  "#5C5C5E",
-        "charcoal-lt":   "#9A9A9C",
-        "warm-gold":     "#C8A96E",
-        "warm-border":   "#E8E0D0",
+        // ── Design system tokens (see design-system artifact) ──────────────
+        bg:            cssVar("--c-bg"),
+        surface:       cssVar("--c-surface"),
+        surface2:      cssVar("--c-surface2"),
+        border:        cssVar("--c-border"),
+        "border-strong": cssVar("--c-border-strong"),
+        text:          cssVar("--c-text"),
+        "text-secondary": cssVar("--c-text-secondary"),
+        "text-tertiary":  cssVar("--c-text-tertiary"),
+        accent:        cssVar("--c-accent"),
+        "accent-hover": cssVar("--c-accent-hover"),
+        "accent-text":  cssVar("--c-accent-text"),
+        "on-accent":    cssVar("--c-on-accent"),
+        route:         cssVar("--c-route"),
+        success:       cssVar("--c-success"),
+        warning:       cssVar("--c-warning"),
+        destructive:   cssVar("--c-destructive"),
       },
       fontFamily: {
-        display:  ["var(--font-jakarta)", "sans-serif"],
-        serif:    ["var(--font-playfair)", "Georgia", "serif"],
-        sans:     ["var(--font-inter)", "sans-serif"],
+        display: ["var(--font-satoshi)", "sans-serif"],
+        sans:    ["var(--font-general-sans)", "sans-serif"],
+        mono:    ["var(--font-jbmono)", "ui-monospace", "monospace"],
       },
       borderRadius: {
+        xs:  "6px",
+        sm:  "10px",
+        md:  "14px",
+        lg:  "20px",
+        xl:  "28px",
         "4xl": "2rem",
         "5xl": "2.5rem",
       },
@@ -47,15 +49,20 @@ const config: Config = {
         "slide-up":    "slide-up 0.6s cubic-bezier(0.16,1,0.3,1) forwards",
         "fade-in":     "fade-in 0.8s ease forwards",
         "ticker":      "ticker 25s linear infinite",
+        "shimmer":     "shimmer 1.4s ease infinite",
+        "pulse-ring":  "pulse-ring 1.6s cubic-bezier(0.4,0,0.2,1) infinite",
       },
       keyframes: {
         float: {
           "0%,100%": { transform: "translateY(0px)" },
           "50%":     { transform: "translateY(-12px)" },
         },
+        // Decorative glow only — kept as a static dark-mode accent color
+        // since @keyframes can't consume CSS custom properties cleanly
+        // through Tailwind's config-time string interpolation.
         "glow-pulse": {
-          "0%,100%": { boxShadow: "0 0 20px rgba(77,255,195,0.15)" },
-          "50%":     { boxShadow: "0 0 40px rgba(77,255,195,0.4), 0 0 80px rgba(77,255,195,0.1)" },
+          "0%,100%": { boxShadow: "0 0 20px rgba(255,176,32,0.15)" },
+          "50%":     { boxShadow: "0 0 40px rgba(255,176,32,0.4), 0 0 80px rgba(255,176,32,0.1)" },
         },
         "slide-up": {
           from: { opacity: "0", transform: "translateY(24px)" },
@@ -69,13 +76,18 @@ const config: Config = {
           from: { transform: "translateX(0)" },
           to:   { transform: "translateX(-33.33%)" },
         },
+        shimmer: {
+          "0%":   { backgroundPosition: "100% 0" },
+          "100%": { backgroundPosition: "0 0" },
+        },
+        "pulse-ring": {
+          "0%":   { boxShadow: "0 0 0 0 rgba(255,176,32,0.5)" },
+          "70%":  { boxShadow: "0 0 0 8px rgba(255,176,32,0)" },
+          "100%": { boxShadow: "0 0 0 0 rgba(255,176,32,0)" },
+        },
       },
       boxShadow: {
-        "neon":    "0 0 30px rgba(77,255,195,0.3)",
-        "violet":  "0 0 30px rgba(139,92,246,0.3)",
-        "coral":   "0 0 30px rgba(255,107,74,0.3)",
-        "gold":    "0 0 30px rgba(245,200,66,0.3)",
-        "card":    "0 4px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)",
+        card: "0 4px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)",
       },
     },
   },
