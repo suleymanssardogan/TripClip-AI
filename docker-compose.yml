@@ -88,6 +88,7 @@ services:
       - MONGODB_URL=mongodb://mongodb:27017/tripclip
       - UPLOAD_DIR=/app/uploads/videos
       - ALLOWED_ORIGINS=
+      - ALLOWED_HOSTS=
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - GEMINI_MODEL=gemini-2.5-flash
     volumes:
@@ -151,6 +152,7 @@ services:
     environment:
       - CORE_API_URL=http://core-api:8000
       - ALLOWED_ORIGINS=
+      - ALLOWED_HOSTS=
     volumes:
       - ./services/mobile-bff/app:/app/app
 
@@ -167,6 +169,7 @@ services:
     environment:
       - CORE_API_URL=http://core-api:8000
       - ALLOWED_ORIGINS=
+      - ALLOWED_HOSTS=
     volumes:
       - ./services/web-bff/app:/app/app
 
