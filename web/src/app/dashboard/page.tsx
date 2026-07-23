@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   MapPin, Clock, CheckCircle2, ChevronRight,
-  Globe2, Video, LogOut, Loader2, Plus,
+  Globe2, Video, LogOut, Loader2, Plus, AlertTriangle, RotateCcw,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -115,12 +115,11 @@ export default function DashboardPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [stats, setStats] = useState<PlatformStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [email, setEmail] = useState("");
   const username = email.split("@")[0];
 
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) { router.push("/login"); return; }
+  function load() {
     const userId = Number(localStorage.getItem("user_id") ?? "0");
     const storedEmail = localStorage.getItem("email") ?? "";
 
@@ -136,9 +135,22 @@ export default function DashboardPage() {
       .catch(err => {
         console.error(err);
         setTimeout(() => {
+          setError(true);
           setLoading(false);
         }, 0);
       });
+  }
+
+  function retry() {
+    setLoading(true);
+    setError(false);
+    load();
+  }
+
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) { router.push("/login"); return; }
+    load();
   }, [router]);
 
   const completedCount = plans.filter(p => ["completed", "COMPLETED"].includes(p.status)).length;
@@ -148,6 +160,25 @@ export default function DashboardPage() {
     return (
       <div className="min-h-screen bg-bg flex items-center justify-center">
         <Loader2 className="w-8 h-8 text-accent-text animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-bg">
+        <Navbar />
+        <div className="pt-32 pb-20 px-6 max-w-screen-xl mx-auto flex flex-col items-center justify-center gap-4 text-center">
+          <AlertTriangle className="w-10 h-10 text-destructive" />
+          <h2 className="font-display text-2xl font-black tracking-tight text-text">Gezileriniz yüklenemedi</h2>
+          <p className="text-text-secondary text-sm max-w-sm">Sunucuya ulaşılamadı. İnternet bağlantınızı kontrol edip tekrar deneyin.</p>
+          <button
+            onClick={retry}
+            className="flex items-center gap-2 px-6 py-3 rounded-md text-sm font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors"
+          >
+            <RotateCcw className="w-4 h-4" /> Tekrar Dene
+          </button>
+        </div>
       </div>
     );
   }

@@ -175,7 +175,14 @@ export default function LandingPage() {
 
         <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }} transition={{ delay: 0.1 }}
-          className="max-w-md rounded-lg border border-border bg-surface overflow-hidden shadow-card">
+          className="relative max-w-md rounded-lg border border-border bg-surface overflow-hidden shadow-card">
+          {/* Kartın kendisi gerçek bir sonuçla birebir aynı stilde olduğu için
+              (aynı rozet, aynı düzen) — üstteki bölüm etiketi ("Örnek") yeterli
+              değil, kart tek başına paylaşılsa/kopyalansa bile bunun bir mockup
+              olduğu net olmalı. */}
+          <span className="absolute top-3 left-3 z-10 font-mono text-[9px] px-2 py-1 rounded-full bg-bg/90 backdrop-blur border border-border-strong text-text-tertiary uppercase tracking-widest">
+            Örnek Görünüm
+          </span>
           <SceneCard className="h-40" />
           <div className="p-5">
             <div className="flex items-center justify-between mb-2">
