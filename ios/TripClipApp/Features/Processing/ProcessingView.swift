@@ -13,6 +13,7 @@ struct ProcessingView: View {
     var onCompleted: ((Int) -> Void)? = nil
 
     @StateObject private var vm: ProcessingViewModel
+    @Environment(\.dismiss) private var dismiss
 
     init(videoID: Int, apiClient: APIClient, token: String,
          onCompleted: ((Int) -> Void)? = nil) {
@@ -78,15 +79,55 @@ struct ProcessingView: View {
                 }
 
                 // ── Hata / Timeout CTA ─────────────────────────────────────
+                // Eskiden bu ekranda sadece bir uyarı metni vardı, aksiyon
+                // butonu yoktu — kullanıcı çıkmaz sokakta kalıyordu.
                 if case .failed(let msg) = vm.stage {
-                    ErrorBanner(message: msg)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 32)
+                    VStack(spacing: 12) {
+                        ErrorBanner(message: msg)
+                        Button {
+                            dismiss()
+                        } label: {
+                            Text("Geri Dön")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        }
+                        .background(AppColors.surface2)
+                        .foregroundColor(AppColors.text)
+                        .cornerRadius(12)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 32)
                 }
                 if case .timedOut = vm.stage {
-                    ErrorBanner(message: "İşlem zaman aşımına uğradı. Lütfen tekrar deneyin.")
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 32)
+                    VStack(spacing: 12) {
+                        ErrorBanner(message: "İşlem zaman aşımına uğradı. Sunucuda hâlâ devam ediyor olabilir.")
+                        Button {
+                            vm.retryAfterTimeout()
+                        } label: {
+                            Text("Beklemeye Devam Et")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        }
+                        .background(AppColors.accentText)
+                        .foregroundColor(AppColors.background)
+                        .cornerRadius(12)
+
+                        Button {
+                            dismiss()
+                        } label: {
+                            Text("Geri Dön")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        }
+                        .background(AppColors.surface2)
+                        .foregroundColor(AppColors.text)
+                        .cornerRadius(12)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 32)
                 }
             }
         }

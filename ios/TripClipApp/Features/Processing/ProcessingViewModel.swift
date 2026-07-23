@@ -79,7 +79,8 @@ final class ProcessingViewModel: ObservableObject {
 
     private var pollingTask: Task<Void, Never>?
     private var elapsedTask: Task<Void, Never>?
-    private let startedAt = Date()
+    // retry() sonrası yeni bir 5dk sabır penceresi için resetlenebilmeli — bu yüzden var.
+    private var startedAt = Date()
 
     init(videoID: Int, apiClient: APIClient, token: String) {
         self.videoID   = videoID
@@ -97,6 +98,18 @@ final class ProcessingViewModel: ObservableObject {
     func stopMonitoring() {
         pollingTask?.cancel()
         elapsedTask?.cancel()
+    }
+
+    /// Yalnızca `.timedOut` durumunda anlamlıdır — istemci 5dk'lık sabır süresini
+    /// aştı ama sunucudaki iş hâlâ sürüyor olabilir (bkz. `.failed` ise burası
+    /// çağrılmaz, çünkü sunucu zaten kalıcı olarak vazgeçmiştir). Eskiden bu
+    /// ekranda hiçbir aksiyon yoktu — kullanıcı çıkmaz sokakta kalıyordu.
+    func retryAfterTimeout() {
+        guard stage == .timedOut else { return }
+        stage = .queued
+        startedAt = Date()
+        elapsedSeconds = 0
+        startMonitoring()
     }
 
     // MARK: - Elapsed Timer (LOCAL — not from server timestamp)

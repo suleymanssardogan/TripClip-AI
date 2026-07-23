@@ -12,6 +12,7 @@
 ///     handleEventsForBackgroundURLSession metodu çağrılır.
 
 import Foundation
+import UserNotifications
 
 // MARK: - BackgroundUploader
 
@@ -40,6 +41,12 @@ final class BackgroundUploader: NSObject, @unchecked Sendable {
         static let pendingURL     = "pendingURL"          // Gönderilmek üzere bekleyen URL
         static let pendingVideoID = "pendingVideoID"      // API'den dönen video ID'si
         static let lastUploadDate = "lastUploadDate"
+        // Upload başarısız olduğunda (ağ hatası veya sunucu hata status'u) yazılır.
+        // Eskiden başarısızlık sadece print() ile logluyordu — extension process
+        // zaten kapanmak üzereyken kimse bu logu görmüyordu ve ana uygulamanın
+        // başarısızlığı fark etmesinin HİÇBİR yolu yoktu (kullanıcı videoyu
+        // paylaşır, hiçbir şey olmaz, sessizce kaybolur).
+        static let pendingUploadError = "pendingUploadError"
     }
 
     // MARK: App Group UserDefaults
@@ -83,6 +90,22 @@ final class BackgroundUploader: NSObject, @unchecked Sendable {
         sharedDefaults.removeObject(forKey: Keys.pendingVideoID)
         sharedDefaults.removeObject(forKey: Keys.pendingURL)
         return id
+    }
+
+    /// Upload başarısız olduysa hata mesajını yazar — ana uygulama bunu okuyup
+    /// kullanıcıya gösterebilir (bkz. AppDelegate+BackgroundSession.swift).
+    func storePendingUploadError(_ message: String) {
+        sharedDefaults.set(message, forKey: Keys.pendingUploadError)
+    }
+
+    /// Ana uygulama açıldığında/uyandığında çağırmalı — bekleyen bir upload
+    /// hatası varsa mesajı döner ve kaydı temizler (tek seferlik tüketim,
+    /// consumePendingVideoID ile aynı desen).
+    func consumePendingUploadError() -> String? {
+        guard let message = sharedDefaults.string(forKey: Keys.pendingUploadError) else { return nil }
+        sharedDefaults.removeObject(forKey: Keys.pendingUploadError)
+        sharedDefaults.removeObject(forKey: Keys.pendingURL)
+        return message
     }
 
     // MARK: - Background URLSession
@@ -222,12 +245,39 @@ extension BackgroundUploader: URLSessionDataDelegate {
     func urlSession(_ session: URLSession,
                     task: URLSessionTask,
                     didCompleteWithError error: Error?) {
-        if let error = error {
-            // Hata — URL App Group'ta duruyor, ana uygulama retry yapabilir
-            print("[BackgroundUploader] Upload başarısız: \(error.localizedDescription)")
+        // Ağ hatası (error != nil) VEYA sunucu hata status'u (401/429/500 vb.) —
+        // ikisi de kullanıcının videosunun kuyruğa alınamadığı anlamına gelir.
+        // Eskiden yalnızca error != nil kontrol ediliyordu; bir 4xx/5xx yanıtı
+        // (task tamamlanır, error nil) sessizce hiçbir iz bırakmadan kaybolurdu.
+        let httpStatus = (task.response as? HTTPURLResponse)?.statusCode
+        let failed = error != nil || !(200...299).contains(httpStatus ?? 200)
+
+        if failed {
+            let message = error?.localizedDescription
+                ?? "Sunucu hatası (\(httpStatus.map(String.init) ?? "bilinmeyen"))"
+            print("[BackgroundUploader] Upload başarısız: \(message)")
+            storePendingUploadError(message)
+            notifyUploadFailed(message: message)
         }
         // Temp dosyaları temizle
         cleanupTempFiles()
+    }
+
+    /// Best-effort local bildirim — kullanıcı uygulamayı hiç açmasa bile
+    /// paylaşımın başarısız olduğunu fark etsin diye. Bildirim izni yoksa
+    /// (kullanıcı reddetmiş) sessizce hiçbir şey olmaz.
+    private func notifyUploadFailed(message: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Video paylaşılamadı"
+        content.body  = message
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "tripclip-upload-failed-\(UUID().uuidString)",
+            content: content,
+            trigger: nil   // hemen göster
+        )
+        UNUserNotificationCenter.current().add(request)
     }
 
     /// iOS, arka plan session'ı tamamladığında ana uygulamada

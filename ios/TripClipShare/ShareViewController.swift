@@ -248,12 +248,22 @@ final class ShareViewController: UIViewController {
     @objc private func postTapped() {
         guard case .ready(let url) = state else { return }
 
+        // Kullanıcı ID'sini App Group'tan oku (ana uygulama login sırasında yazmış olmalı).
+        // Eskiden bulunamazsa 0'a düşüyordu — bu, giriş yapmamış/App Group'u
+        // henüz senkronize etmemiş bir kullanıcının videosunun sunucuda user_id=0
+        // olarak (geçersiz bir hesaba) yüklenmesi anlamına geliyordu. Şimdi
+        // bunun yerine net bir hata gösterip yüklemeyi engelliyoruz.
+        guard
+            let userID = UserDefaults(suiteName: BackgroundUploader.Config.appGroupID)?
+                .integer(forKey: "currentUserID"),
+            userID > 0
+        else {
+            state = .error("Önce TripClip uygulamasına giriş yapın.")
+            return
+        }
+
         // Butonu devre dışı bırak — double-tap önlemi
         postButton.isEnabled = false
-
-        // Kullanıcı ID'sini App Group'tan oku (ana uygulama login sırasında yazmış olmalı)
-        let userID = UserDefaults(suiteName: BackgroundUploader.Config.appGroupID)?
-            .integer(forKey: "currentUserID") ?? 0
 
         // ─── KRİTİK: completeRequest SONRA background upload ───────────────────
         // completionHandler, extension process suspend edilmeden hemen önce çalışır.
