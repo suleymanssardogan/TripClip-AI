@@ -39,31 +39,41 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
-async def _forward(path: str, body: dict, rid: str) -> dict:
+async def _forward(path: str, body: dict, rid: str, client_ip: str | None = None) -> dict:
     async with mobile_error_wrapper(request_id=rid):
         async with internal_client(15.0) as client:
-            resp = await client.post(f"{CORE_API_URL}{path}", json=body)
+            headers = {"x-forwarded-for": client_ip} if client_ip else {}
+            resp = await client.post(f"{CORE_API_URL}{path}", json=body, headers=headers)
         if resp.status_code >= 400:
             raise_from_response(resp, request_id=rid)
         return resp.json()
 
 
+# NOT: get_remote_address, uvicorn --proxy-headers ile nginx'in ilettiği
+# X-Forwarded-For/X-Real-IP'yi request.client.host olarak çözer (bkz. Dockerfile
+# CMD) — bu yüzden burada gerçek son kullanıcı IP'sini yansıtır, BFF container
+# adresini değil. Bu IP hem burada rate-limit anahtarı olarak, hem de core-api'ye
+# iletilerek core-api'nin kendi login rate-limit'inin tüm kullanıcılar arasında
+# paylaşılan tek bir kotaya düşmesini önlemek için kullanılır.
 @router.post("/register")
-async def register(body: RegisterRequest):
+@limiter.limit("10/minute")
+async def register(request: Request, body: RegisterRequest):
     rid = str(uuid.uuid4())[:8]
-    return await _forward("/internal/auth/register", body.model_dump(), rid)
+    return await _forward("/internal/auth/register", body.model_dump(), rid, get_remote_address(request))
 
 
 @router.post("/login")
-async def login(body: LoginRequest):
+@limiter.limit("5/minute")
+async def login(request: Request, body: LoginRequest):
     rid = str(uuid.uuid4())[:8]
-    return await _forward("/internal/auth/login", body.model_dump(), rid)
+    return await _forward("/internal/auth/login", body.model_dump(), rid, get_remote_address(request))
 
 
 @router.post("/apple")
-async def apple_sign_in(body: AppleSignInRequest):
+@limiter.limit("5/minute")
+async def apple_sign_in(request: Request, body: AppleSignInRequest):
     rid = str(uuid.uuid4())[:8]
-    return await _forward("/internal/auth/apple", body.model_dump(), rid)
+    return await _forward("/internal/auth/apple", body.model_dump(), rid, get_remote_address(request))
 
 
 @router.post("/refresh")

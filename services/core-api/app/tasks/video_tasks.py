@@ -27,6 +27,42 @@ from app.core.celery_app import celery_app as _celery_app  # noqa: F401
 
 logger = logging.getLogger("tripclip.tasks.video")
 
+
+class PermanentDownloadError(Exception):
+    """
+    yt-dlp indirmesi, tekrar denense de asla başarılı olmayacak bir sebeple
+    başarısız oldu (video silinmiş/özel/coğrafi kısıtlı/desteklenmeyen URL).
+    process_url_task bu tipi autoretry_for=(Exception,) yakalamadan ÖNCE
+    ayrıca yakalar ve retry etmeden hemen "failed" işaretler — aksi halde
+    Instagram'ın kalıcı olarak reddettiği bir bağlantı için worker ~10 dakika
+    boyunca (3 deneme, üstel backoff) anlamsız yeniden denemeler yapardı.
+    """
+
+
+# Instagram/yt-dlp'nin kalıcı (retry ile düzelmeyecek) hatalarda verdiği
+# tipik mesaj kalıpları — küçük harfe çevrilmiş metinde aranır. Bilerek
+# yalın "unavailable" gibi tek kelimeler DEĞİL, daha spesifik ifadeler
+# kullanılır — aksi halde geçici "HTTP 503 Service Unavailable" gibi ağ
+# hataları da (yanlışlıkla) kalıcı sayılıp retry'siz bırakılırdı.
+_PERMANENT_YT_DLP_MARKERS = (
+    "video unavailable",
+    "not available",
+    "no longer available",
+    "this account is private",
+    "has been removed",
+    "does not exist",
+    "unsupported url",
+    "login required",
+    "requires authentication",
+    "content isn't available",
+    "geo-restricted",
+)
+
+
+def _is_permanent_yt_dlp_failure(message: str) -> bool:
+    lowered = (message or "").lower()
+    return any(marker in lowered for marker in _PERMANENT_YT_DLP_MARKERS)
+
 # ── Paylaşılan VideoProcessingService instance'ı ──────────────────────────────
 #
 # VideoProcessingService.__init__ YOLO/BERT NER/Whisper/SentenceTransformer gibi
@@ -185,6 +221,17 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
         set_progress(video_id, "failed", 0)
         raise
 
+    except PermanentDownloadError as exc:
+        # Retry ile düzelmeyecek bir hata (video silinmiş/özel/desteklenmeyen
+        # URL) — autoretry_for=(Exception,) tetiklenmeden burada hemen
+        # "failed" işaretlenir ve exception YUTULUR (raise edilmez), böylece
+        # Celery bunu retry etmez. ~10 dakikalık anlamsız bekleme önlenir.
+        logger.error("🚫 Kalıcı indirme hatası (retry edilmeyecek) | video_id=%s | %s",
+                     video_id, exc)
+        repo.mark_failed(video_id)
+        set_progress(video_id, "failed", 0)
+        return {"status": "failed", "video_id": video_id, "reason": "permanent_download_error"}
+
     except Exception as exc:
         attempt = self.request.retries + 1
         logger.error(
@@ -234,9 +281,14 @@ def _download_url(url: str, video_id: int) -> str:
            if "YT_DLP_COOKIES" in os.environ else {}),
     }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+    except yt_dlp.utils.DownloadError as exc:
+        if _is_permanent_yt_dlp_failure(str(exc)):
+            raise PermanentDownloadError(str(exc)) from exc
+        raise   # geçici hata (ağ vb.) — autoretry_for yeniden denesin
 
     if not os.path.exists(filename):
         raise FileNotFoundError(f"yt-dlp indirdi ama dosya yok: {filename}")

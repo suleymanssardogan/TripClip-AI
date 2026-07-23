@@ -25,6 +25,16 @@ def client():
         yield c
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limiters():
+    """Her testten önce rate limiter sayaçlarını sıfırla (core-api/mobile-bff conftest ile aynı desen)."""
+    from app.main import limiter as main_limiter
+    from app.routes.auth import limiter as auth_limiter
+    main_limiter.reset()
+    auth_limiter.reset()
+    yield
+
+
 def _make_token(user_id: int) -> str:
     return jwt.encode({"sub": str(user_id)}, SECRET_KEY, algorithm=ALGORITHM)
 

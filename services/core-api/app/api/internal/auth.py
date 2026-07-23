@@ -21,8 +21,26 @@ from app.application.services.auth_service import AuthService
 from app.infrastructure.repositories.sql_user_repository import SqlUserRepository
 from app.infrastructure.repositories.sql_refresh_token_repository import SqlRefreshTokenRepository
 
+
+def _rate_limit_key(request: Request) -> str:
+    """
+    core-api yalnızca BFF'lerden (Docker internal network + INTERNAL_API_SECRET)
+    çağrılır — gerçek istemci hiçbir zaman doğrudan buraya bağlanmaz. Bu yüzden
+    request.client.host her zaman BFF container'ının adresidir: get_remote_address
+    kullanılsaydı TÜM son kullanıcılar tek bir paylaşımlı kotayı tüketirdi (bir
+    kullanıcının çok sayıda hatalı denemesi, aynı anda giriş yapan herkesi kilitler).
+    BFF, gerçek istemci IP'sini X-Forwarded-For header'ı ile iletir (bkz.
+    web-bff/mobile-bff routes/auth.py `_forward`) — varsa onu kullan, yoksa
+    (örn. core-api'ye doğrudan istek atılan local geliştirme/test) eski davranışa düş.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return get_remote_address(request)
+
+
 router  = APIRouter(prefix="/internal/auth", tags=["auth"])
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=_rate_limit_key)
 
 
 # ── Dependency Factory ────────────────────────────────────────────────────────

@@ -155,7 +155,14 @@ services:
 
   # ── Core API ──────────────────────────────────────────────────────────────────
   core-api:
-    build: ./services/core-api
+    build:
+      context: ./services/core-api
+      # Build-time'da gömülen Whisper modelinin, runtime'daki WHISPER_MODEL
+      # env değeriyle uyuşmasını sağlar — .env'de değiştirdiğinizde
+      # `docker compose build` bunu otomatik kullanır, elle senkronize
+      # etmenize gerek kalmaz.
+      args:
+        WHISPER_MODEL: ${WHISPER_MODEL:-small}
     container_name: tripclip-core-api
     restart: always
     # VPS kapasitesine göre ayarlayın — amaç, bu servisin bellek sızıntısı/
@@ -182,6 +189,7 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      DAILY_UPLOAD_QUOTA_PER_USER: ${DAILY_UPLOAD_QUOTA_PER_USER:-20}
     volumes:
       - uploads_data:/app/uploads
     networks:
@@ -200,7 +208,10 @@ services:
 
   # ── Celery Worker ─────────────────────────────────────────────────────────────
   celery-worker:
-    build: ./services/core-api
+    build:
+      context: ./services/core-api
+      args:
+        WHISPER_MODEL: ${WHISPER_MODEL:-small}
     container_name: tripclip-celery-worker
     restart: always
     # ML modelleri (YOLO + BERT NER + Whisper + SentenceTransformer) HER

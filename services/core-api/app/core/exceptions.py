@@ -98,8 +98,18 @@ class FileTooLargeException(TripClipException):
         super().__init__(
             f"Dosya çok büyük ({size_mb:.1f} MB). Maksimum: {max_mb} MB",
             code="FILE_TOO_LARGE",
-            status_code=400,
+            status_code=413,
             details={"size_mb": size_mb, "max_mb": max_mb},
+        )
+
+
+class DailyQuotaExceededException(TripClipException):
+    def __init__(self, user_id: int, limit: int):
+        super().__init__(
+            f"Günlük video işleme limitine ulaştınız (maks. {limit}/gün). Lütfen yarın tekrar deneyin.",
+            code="DAILY_QUOTA_EXCEEDED",
+            status_code=429,
+            details={"user_id": user_id, "limit": limit},
         )
 
 

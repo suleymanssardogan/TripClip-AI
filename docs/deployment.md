@@ -191,6 +191,7 @@ Checks: HTTP→HTTPS redirect, web app loads, web-bff and mobile-bff health endp
 | `WHISPER_MODEL` | No | Whisper model size. Default: `base`. |
 | `USE_GEMINI` | No | Enable Gemini pipeline. Default: `true`. |
 | `USE_GOOGLE_VISION` | No | Enable Google Vision API. Default: `false`. |
+| `DAILY_UPLOAD_QUOTA_PER_USER` | No | Max videos a single user can queue per day (cost control — each video costs ≥2 Gemini calls when `USE_GEMINI=true`). Default: `20`. Fails open (no limit enforced) if Redis is unreachable. |
 | `SENTRY_DSN` | No | Sentry DSN for error tracking. |
 | `ALLOWED_ORIGINS` | No | Comma-separated CORS origins. Leave empty for defaults. |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Only if `USE_GOOGLE_VISION=true` | Path inside the container to a GCP service account JSON file. Mount the file as a read-only volume; never COPY it into the image. |

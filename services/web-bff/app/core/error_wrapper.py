@@ -26,6 +26,7 @@ _WEB_MESSAGES: dict[str, str] = {
     "UNAUTHORIZED":              "Bu sayfayı görüntülemek için giriş yapmalısınız.",
     "PERMISSION_DENIED":         "Bu içeriğe erişim izniniz bulunmuyor.",
     "RATE_LIMIT_EXCEEDED":       "Çok fazla istek gönderildi. Lütfen bir süre bekleyip tekrar deneyin.",
+    "DAILY_QUOTA_EXCEEDED":      "Günlük video işleme limitine ulaştınız. Lütfen yarın tekrar deneyin.",
     "VALIDATION_ERROR":          "Lütfen formdaki hataları düzeltin ve tekrar gönderin.",
     "ML_SERVICE_UNAVAILABLE":    "Yapay zeka analiz servisi geçici olarak meşgul. Birkaç dakika sonra tekrar deneyin.",
     "DATABASE_ERROR":            "Sunucu veritabanına ulaşamıyor. Ekibimiz bilgilendirildi.",
@@ -47,7 +48,7 @@ def _parse_core_error(data: dict) -> tuple[str, str, int]:
         status = 403
     elif code == "VIDEO_NOT_FOUND":
         status = 404
-    elif code == "RATE_LIMIT_EXCEEDED":
+    elif code in {"RATE_LIMIT_EXCEEDED", "DAILY_QUOTA_EXCEEDED"}:
         status = 429
     elif code in {"DATABASE_ERROR", "ML_SERVICE_UNAVAILABLE", "SERVICE_UNAVAILABLE", "INTERNAL_SERVER_ERROR"}:
         status = 503

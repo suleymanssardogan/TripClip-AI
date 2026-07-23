@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { useParams, useRouter } from "next/navigation";
-import { getPlan, type VideoDetail } from "@/lib/api";
+import { getPlan, updatePlanOrder, type VideoDetail } from "@/lib/api";
 
 interface Event {
   id: number;
@@ -70,6 +70,8 @@ export default function EditorPage() {
   const [dayEvents, setDayEvents]     = useState<Event[][]>([]);
   const [dirty, setDirty]             = useState(false);
   const [savedToast, setSavedToast]   = useState(false);
+  const [saving, setSaving]           = useState(false);
+  const [saveError, setSaveError]     = useState("");
   const dragIndex   = useRef<number | null>(null);
   const [overIndex, setOverIndex]     = useState<number | null>(null);
 
@@ -97,7 +99,9 @@ export default function EditorPage() {
       });
   }, [params.id]);
 
-  // Video geldiğinde, dayEvents'i baştan kur (veya localStorage'dan oku)
+  // Video geldiğinde, dayEvents'i baştan kur.
+  // Sıra önceliği: sunucudaki kayıtlı stop_order (kalıcı) > localStorage (henüz
+  // senkronize edilmemiş offline taslak) > AI'nin varsayılan sırası.
   useEffect(() => {
     if (!video) return;
     const ai = video.ai_results;
@@ -105,24 +109,26 @@ export default function EditorPage() {
     const tips      = ai?.rag?.travel_tips?.tips ?? [];
     const built     = buildDays(locations, tips).map(d => d.events);
 
-    // localStorage'da kullanıcının önceki sıralaması varsa onu yükle
+    function applyOrder(ids: number[][]): boolean {
+      const flat = built.flat();
+      const reordered = ids.map(dayIds =>
+        dayIds.map(id => flat.find(e => e.id === id)).filter(Boolean) as Event[]
+      );
+      if (reordered.flat().length !== flat.length) return false;
+      setTimeout(() => setDayEvents(reordered), 0);
+      return true;
+    }
+
+    if (video.stop_order && applyOrder(video.stop_order)) {
+      return;
+    }
+
     const saved = typeof window !== "undefined"
       ? localStorage.getItem(`editor-order-${video.id}`)
       : null;
     if (saved) {
       try {
-        const parsed: number[][] = JSON.parse(saved);
-        // ID listelerine göre yeniden sırala
-        const flat = built.flat();
-        const reordered = parsed.map(ids =>
-          ids.map(id => flat.find(e => e.id === id)).filter(Boolean) as Event[]
-        );
-        if (reordered.flat().length === flat.length) {
-          setTimeout(() => {
-            setDayEvents(reordered);
-          }, 0);
-          return;
-        }
+        if (applyOrder(JSON.parse(saved))) return;
       } catch { /* parse hatası — varsayılan kullan */ }
     }
     setTimeout(() => {
@@ -160,14 +166,25 @@ export default function EditorPage() {
     dragIndex.current = null;
   }
 
-  // Sıralamayı kaydet
-  function persistOrder() {
+  // Sıralamayı backend'e kaydet — localStorage yalnızca istek tamamlanana
+  // kadar / offline durumda bir yedek, tek kaynak değil.
+  async function persistOrder() {
     if (!video) return;
     const ids = dayEvents.map(arr => arr.map(e => e.id));
-    localStorage.setItem(`editor-order-${video.id}`, JSON.stringify(ids));
-    setDirty(false);
-    setSavedToast(true);
-    setTimeout(() => setSavedToast(false), 2200);
+    setSaving(true);
+    setSaveError("");
+    try {
+      await updatePlanOrder(video.id, ids);
+      localStorage.setItem(`editor-order-${video.id}`, JSON.stringify(ids));
+      setDirty(false);
+      setSavedToast(true);
+      setTimeout(() => setSavedToast(false), 2200);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Sıralama kaydedilemedi.");
+      setTimeout(() => setSaveError(""), 4000);
+    } finally {
+      setSaving(false);
+    }
   }
 
   function resetOrder() {
@@ -311,14 +328,14 @@ export default function EditorPage() {
               )}
               <button
                 onClick={persistOrder}
-                disabled={!dirty}
+                disabled={!dirty || saving}
                 className={`flex items-center gap-2 px-6 py-3 rounded-full text-[10px] font-black uppercase tracking-[0.2em] transition-all ${
-                  dirty
+                  dirty && !saving
                     ? "bg-accent text-on-accent hover:bg-accent-hover"
                     : "bg-surface2 text-text-tertiary cursor-not-allowed"
                 }`}
               >
-                <Save className="w-3.5 h-3.5" /> Kaydet
+                <Save className="w-3.5 h-3.5" /> {saving ? "Kaydediliyor..." : "Kaydet"}
               </button>
             </div>
             <AnimatePresence>
@@ -330,6 +347,16 @@ export default function EditorPage() {
                   className="fixed top-20 right-6 z-50 flex items-center gap-2 bg-success text-bg px-5 py-3 rounded-full text-[10px] font-black uppercase tracking-widest"
                 >
                   <Check className="w-3.5 h-3.5" /> Sıralama kaydedildi
+                </motion.div>
+              )}
+              {saveError && (
+                <motion.div
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  className="fixed top-20 right-6 z-50 flex items-center gap-2 bg-destructive text-bg px-5 py-3 rounded-full text-[10px] font-black uppercase tracking-widest"
+                >
+                  {saveError}
                 </motion.div>
               )}
             </AnimatePresence>

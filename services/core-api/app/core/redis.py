@@ -96,6 +96,42 @@ def get_progress(video_id: int) -> dict | None:
         return None
 
 
+# ── Kullanıcı başına günlük işleme kotası ─────────────────────────────────────
+#
+# USE_GEMINI=true olduğunda her video işlenirken en az 2 Gemini API çağrısı
+# yapılır (extract_locations + generate_travel_tips) — GeminiService kendi
+# içinde tek çağrı başına maliyeti sınırlar (frame/token capleri) ama
+# script'lenmiş bir hesabın çok sayıda video yükleyip toplam maliyeti sınırsız
+# şekilde büyütmesine karşı bir üst sınır yoktu. Bu sayaç, kullanıcı başına
+# günlük video işleme sayısını (dolayısıyla Gemini çağrı sayısını) sınırlar.
+
+def check_and_increment_daily_quota(user_id: int, limit: int) -> tuple[bool, int]:
+    """
+    Kullanıcının günlük video işleme sayacını atomik olarak arttırır.
+
+    Redis erişilemezse (bkz. get_redis) kota uygulanamaz — bu kodun geri
+    kalanındaki her yerde kullanılan "graceful degradation" felsefesiyle
+    tutarlı şekilde fail-open davranır: upload engellenmez, sadece kota
+    özelliği o an devre dışı kalır.
+
+    Returns:
+        (izin_verildi_mi, bugünkü_güncel_sayaç)
+    """
+    r = get_redis()
+    if not r:
+        return True, 0
+    try:
+        from datetime import datetime, timezone
+        key = f"quota:daily_uploads:{user_id}:{datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+        count = r.incr(key)
+        if count == 1:
+            r.expire(key, 26 * 3600)  # gün dönümü + tampon
+        return count <= limit, count
+    except Exception as exc:
+        logger.warning("Günlük kota kontrolü başarısız — fail-open: %s", exc)
+        return True, 0
+
+
 # ── Prometheus queue-depth gauge'u ────────────────────────────────────────────
 
 def update_queue_depth_metric() -> None:

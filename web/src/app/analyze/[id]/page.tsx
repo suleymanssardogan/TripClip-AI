@@ -282,6 +282,19 @@ export default function AnalysisResultPage() {
           </div>
         </div>
 
+        {/* Degradation uyarısı — bazı AI aşamaları fallback'e düştüyse sonuç eksik/tahmini olabilir */}
+        {video.degradation && video.degradation.successful < video.degradation.total_services && (
+          <div className="mb-8 flex items-start gap-3 px-5 py-4 bg-warning/10 border border-warning/30 rounded-lg">
+            <AlertTriangle className="w-4 h-4 text-warning flex-shrink-0 mt-0.5" />
+            <p className="text-xs text-text-secondary leading-relaxed">
+              <span className="font-black text-warning uppercase tracking-wide">Kısmi sonuç: </span>
+              {video.degradation.total_services - video.degradation.successful} / {video.degradation.total_services} AI
+              aşaması ({video.degradation.failed_services.join(", ")}) beklenen sonucu üretemedi, yedek değerler kullanıldı.
+              Aşağıdaki bulgular eksik veya tahmini olabilir.
+            </p>
+          </div>
+        )}
+
         {/* AI Pipeline İstatistikleri */}
         {ai && (
           <AIStatsCard

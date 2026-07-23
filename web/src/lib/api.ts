@@ -271,6 +271,14 @@ export async function getPlan(id: number) {
   return request<VideoDetail>(`/plans/${id}`);
 }
 
+/** Editor'de sürükle-bırak ile belirlenen durak sırasını kalıcı olarak kaydeder (gün başına ID listesi). */
+export async function updatePlanOrder(id: number, order: number[][]) {
+  return request<{ success: boolean }>(`/plans/${id}/order`, {
+    method: "PATCH",
+    body: JSON.stringify({ order }),
+  });
+}
+
 export async function getUserPlans(userId: number) {
   return request<{ plans: Plan[]; total: number }>(`/plans/user/${userId}`);
 }
@@ -321,6 +329,12 @@ export interface VideoDetail {
     rag: { travel_tips: { tips: any[]; summary: string } };
     ocr_pois: string[] | null;
   } | null;
+  degradation: {
+    total_services: number;
+    successful: number;
+    failed_services: string[];
+  } | null;
+  stop_order: number[][] | null;
 }
 
 export interface PlatformStats {

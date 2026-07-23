@@ -46,3 +46,8 @@ class AbstractVideoRepository(ABC):
     def mark_failed(self, video_id: int) -> None:
         """Video durumunu FAILED olarak güncelle."""
         ...
+
+    @abstractmethod
+    def update_stop_order(self, video_id: int, user_id: int, order: List[List[int]]):
+        """Kullanıcının editor'de belirlediği durak sırasını kaydeder. Video yoksa/sahibi değilse None döner."""
+        ...

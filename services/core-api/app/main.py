@@ -43,26 +43,11 @@ logging.basicConfig(
     ]
 )
 
-_startup_logger = logging.getLogger("alembic.startup")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: Alembic migration'larını otomatik uygula."""
-    try:
-        from alembic.config import Config as AlembicConfig
-        from alembic import command as alembic_cmd
-        from pathlib import Path
-
-        alembic_cfg = AlembicConfig(str(Path(__file__).parent.parent / "alembic.ini"))
-        alembic_cfg.set_main_option(
-            "script_location",
-            str(Path(__file__).parent.parent / "alembic")
-        )
-        alembic_cmd.upgrade(alembic_cfg, "head")
-        _startup_logger.info("✅ Alembic migration tamamlandı")
-    except Exception as e:
-        _startup_logger.warning(f"⚠️ Alembic migration atlandı: {e}")
+    """Startup: Alembic migration'larını otomatik uygula (bkz. app.core.migrations)."""
+    from app.core.migrations import run_migrations
+    run_migrations()
 
     # ── Queue-depth metriği — 15s'de bir Redis'ten oku, Prometheus gauge'unu güncelle ──
     import asyncio

@@ -19,6 +19,7 @@ from app.application.dto.video_dto import (
     PlanSummary,
 )
 from app.models.video import VideoStatus
+from app.core.exceptions import VideoNotFoundException, PermissionDeniedException
 
 logger = logging.getLogger(__name__)
 
@@ -206,4 +207,17 @@ class VideoService:
                 "rag":      {"travel_tips": video.travel_tips},
                 "ocr_pois": video.ocr_pois,
             },
+            degradation=video.degradation,
+            stop_order=video.stop_order,
         )
+
+    # ── Editor ────────────────────────────────────────────────────────────────
+
+    def update_stop_order(self, video_id: int, user_id: int, order: list[list[int]]) -> None:
+        """Editor'de kullanıcının belirlediği durak sırasını kaydeder. Sahiplik repo katmanında doğrulanır."""
+        video = self._repo.update_stop_order(video_id, user_id, order)
+        if video is None:
+            existing = self._repo.get_by_id(video_id)
+            if existing is None:
+                raise VideoNotFoundException(video_id)
+            raise PermissionDeniedException("Bu videoyu düzenleme yetkiniz yok.")

@@ -139,12 +139,31 @@ class VideoProcessingService:
     pipeline tamamlanmaya devam eder.
     """
 
+    @staticmethod
+    def _try_init(label: str, factory: Callable[[], Any]) -> Any:
+        """
+        Bir ML servisini başlatır; başarısız olursa (örn. model ağırlığı
+        indirilemedi, ağ hatası, disk dolu) None döner ve SADECE o servisi
+        etkiler. Eskiden tüm __init__ tek bir try/except ImportError içindeydi
+        — bir servisin kurulum hatası (ImportError DIŞINDA herhangi bir istisna)
+        yakalanmadan dışarı sızıp VideoProcessingService'in tamamen
+        oluşturulamamasına, dolayısıyla pipeline'ın "graceful degradation"
+        yerine tümden çökmesine yol açıyordu.
+        """
+        try:
+            return factory()
+        except Exception as exc:
+            logger.warning("⚠️  %s başlatılamadı — bu aşama fallback ile devam edecek: %s", label, exc)
+            return None
+
     def __init__(self):
         self.frames_dir = Path("/app/uploads/frames")
         self.frames_dir.mkdir(parents=True, exist_ok=True)
         self.base_fps = 0.25
 
-        # ML servisleri — lazy import (test ortamında kurulu olmayabilir)
+        # Modül importları — test ortamında (torch/ultralytics vb. kurulu değilse)
+        # ImportError fırlatır; bu durumda ML pipeline'ın TAMAMI kullanılamaz
+        # (process_video en başta RuntimeError fırlatır, bkz. aşağı).
         try:
             import ffmpeg as _ffmpeg_module  # noqa: F401
             from app.ml.computer_vision import ObjectDetectionService, LandmarkDetectionService
@@ -156,40 +175,46 @@ class VideoProcessingService:
             from app.ml.qdrant_service import QdrantService
             from app.ml.route_optimizer import RouteOptimizer
             from app.ml.rag_service import RAGService
-
-            self.detector        = ObjectDetectionService()
-            self.vision_detector = LandmarkDetectionService()
-            self.ocr             = OCRService()
-            self.audio_processor = AudioProcessingService()
-            self.ner             = NERService()
-            self.places          = PlacesService()
-            self.deduplicator    = LocationDeduplicator(distance_threshold_km=2.0)
-            self.qdrant          = QdrantService()
-            self.route_optimizer = RouteOptimizer()
-            self.rag             = RAGService()
-            self._ml_available   = True
-
-            # ── Gemini / Hibrit modu (opsiyonel) ──────────────────────────────
-            # USE_GEMINI=true  → Sadece Gemini (NER + Vision + RAG yerine tek API)
-            # USE_HYBRID=true  → Gemini + klasik BERT NER paralel, sonuçlar birleştirilir
-            # Her ikisi false → Tamamen klasik ML pipeline (BERT, YOLO, Whisper, RAG)
-            # Nominatim geocoding + outlier filter + TSP her durumda çalışır
-            self._use_hybrid = os.getenv("USE_HYBRID", "false").lower() == "true"
-            self._use_gemini = self._use_hybrid or os.getenv("USE_GEMINI", "false").lower() == "true"
-
-            if self._use_gemini:
-                from app.ml.gemini_service import GeminiService
-                self.gemini = GeminiService()
-                mode = "🔀 HİBRİT" if self._use_hybrid else "🤖 GEMINI"
-                logger.info("%s modu AKTİF (model=%s)",
-                            mode, os.getenv("GEMINI_MODEL", "gemini-2.0-flash"))
-            else:
-                self.gemini = None
-                logger.info("🔧 Klasik pipeline modu (Gemini devre dışı)")
-
         except ImportError as e:
             logger.warning("ML servisleri yüklenemedi (test modu?): %s", e)
             self._ml_available = False
+            return
+
+        # Her servis bağımsız başlatılır — biri (örn. YOLO ağırlığı indirilemedi)
+        # başarısız olsa bile diğerleri kurulmaya devam eder. Pipeline
+        # çalışırken bu servisin sonucu None üzerinden fallback'e düşer
+        # (bkz. _safe_run çağrıları), tüm işlem çökmez.
+        self.detector        = self._try_init("YOLO/ObjectDetection", ObjectDetectionService)
+        self.vision_detector = self._try_init("Landmark/Vision",      LandmarkDetectionService)
+        self.ocr             = self._try_init("OCR",                  OCRService)
+        self.audio_processor = self._try_init("Whisper",               AudioProcessingService)
+        self.ner              = self._try_init("NER",                  NERService)
+        self.places           = self._try_init("Places/Nominatim",     PlacesService)
+        self.deduplicator     = self._try_init(
+            "LocationDeduplicator", lambda: LocationDeduplicator(distance_threshold_km=2.0)
+        )
+        self.qdrant           = self._try_init("Qdrant",        QdrantService)
+        self.route_optimizer  = self._try_init("RouteOptimizer", RouteOptimizer)
+        self.rag              = self._try_init("RAG",           RAGService)
+        self._ml_available    = True
+
+        # ── Gemini / Hibrit modu (opsiyonel) ──────────────────────────────
+        # USE_GEMINI=true  → Sadece Gemini (NER + Vision + RAG yerine tek API)
+        # USE_HYBRID=true  → Gemini + klasik BERT NER paralel, sonuçlar birleştirilir
+        # Her ikisi false → Tamamen klasik ML pipeline (BERT, YOLO, Whisper, RAG)
+        # Nominatim geocoding + outlier filter + TSP her durumda çalışır
+        self._use_hybrid = os.getenv("USE_HYBRID", "false").lower() == "true"
+        self._use_gemini = self._use_hybrid or os.getenv("USE_GEMINI", "false").lower() == "true"
+
+        if self._use_gemini:
+            from app.ml.gemini_service import GeminiService
+            self.gemini = self._try_init("Gemini", GeminiService)
+            mode = "🔀 HİBRİT" if self._use_hybrid else "🤖 GEMINI"
+            logger.info("%s modu AKTİF (model=%s)",
+                        mode, os.getenv("GEMINI_MODEL", "gemini-2.0-flash"))
+        else:
+            self.gemini = None
+            logger.info("🔧 Klasik pipeline modu (Gemini devre dışı)")
 
     # ─────────────────────────────────────────────────────────────────────────
     # Ana pipeline
@@ -255,12 +280,18 @@ class VideoProcessingService:
         else:
             logger.info("🚀 Paralel AI başlıyor (YOLO + Vision + OCR + Whisper) — Klasik mod")
 
+        # NOT: self.detector/vision_detector/ocr/audio_processor init sırasında
+        # başarısız olduysa None olabilir (bkz. _try_init). Çağrıyı lambda içine
+        # sarmak, None.<method> AttributeError'ının submit() anında (thread pool
+        # dışında, yakalanmadan) değil; future çalışırken (future.result() →
+        # _safe_run'ın except'i tarafından) fırlatılmasını sağlar — tek bir
+        # servisin başlatma hatası tüm pipeline'ı çökertmez.
         with ThreadPoolExecutor(max_workers=4) as pool:
-            f_yolo    = pool.submit(self.detector.detect_objects_in_frames,          frames)
-            f_vision  = pool.submit(self.vision_detector.detect_landmarks_in_frames, frames[:5])
-            f_ocr     = pool.submit(self.ocr.extract_text_from_frames,               frames)
+            f_yolo    = pool.submit(lambda: self.detector.detect_objects_in_frames(frames))
+            f_vision  = pool.submit(lambda: self.vision_detector.detect_landmarks_in_frames(frames[:5]))
+            f_ocr     = pool.submit(lambda: self.ocr.extract_text_from_frames(frames))
             if run_whisper:
-                f_whisper = pool.submit(self.audio_processor.process_video_audio,    video_path, video_id)
+                f_whisper = pool.submit(lambda: self.audio_processor.process_video_audio(video_path, video_id))
 
             # Her future bağımsız — biri exception fırlatsa diğerleri toplanır
             r_yolo    = _safe_run("YOLO",    None, fallback=[],   future=f_yolo,    timeout=180)
@@ -509,9 +540,18 @@ class VideoProcessingService:
         # yeniden sorgulanır.
         # Örnek: 7× Antalya, 1× Amasya (Kaleköy) → Kaleköy'ü Antalya'da yeniden ara
         # ─────────────────────────────────────────────────────────────────────
-        enriched_locations = self._fix_geographic_outliers(
-            enriched_locations, degradation_log
+        # _fix_geographic_outliers self.places'i doğrudan çağırır (_safe_run
+        # dışında) — places init'te başarısız olduysa (None) veya outlier
+        # yeniden sorgusu sırasında ağ hatası olursa, bu tek adımın tüm
+        # pipeline'ı çökertmemesi için burada sarmalanır; başarısızlıkta
+        # orijinal (düzeltilmemiş) liste ile devam edilir.
+        r_geo_fix = _safe_run(
+            "GeoOutlierFix",
+            lambda: self._fix_geographic_outliers(enriched_locations, degradation_log),
+            fallback=enriched_locations,
         )
+        enriched_locations = r_geo_fix.data
+        degradation_log.append(r_geo_fix)
 
         # ─────────────────────────────────────────────────────────────────────
         # ── 7. Deduplication ─────────────────────────────────────────────────

@@ -37,35 +37,61 @@ class SqlVideoRepository(AbstractVideoRepository):
             .all()
         )
 
+    # Public feed'de tek bir istekte ne kadar veri döneceğimizin üst sınırı —
+    # istemci limit=999999 gibi bir değer gönderse bile amplification'ı önler.
+    _MAX_PUBLIC_PAGE_SIZE = 50
+    # Şehir filtresi JSON içerik araması gerektirir (deduplicated_locations bir
+    # JSON listesi) ve SQL'e taşınamaz — bu yüzden o dal Python'da filtreler.
+    # Taranacak satır sayısına yine de bir üst sınır konur.
+    _CITY_FILTER_SCAN_CAP = 2000
+
+    @staticmethod
+    def _to_plan_dict(v: Video) -> Dict[str, Any]:
+        locs = v.deduplicated_locations or []
+        return {
+            "id": v.id,
+            "filename": v.filename,
+            "duration": v.duration,
+            "created_at": v.created_at.isoformat() if v.created_at else None,
+            "locations_count": len(locs),
+            "top_location": locs[0]["original_name"] if locs else None,
+            "ocr_preview": (v.extracted_texts or [])[:3],
+            "processing_time": v.processing_time,
+        }
+
     def get_completed(
         self,
         city: Optional[str] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> Dict[str, Any]:
-        all_videos = (
-            self._db.query(Video)
-            .filter(Video.status == VideoStatus.COMPLETED)
-            .order_by(Video.created_at.desc())
+        limit  = max(1, min(limit, self._MAX_PUBLIC_PAGE_SIZE))
+        offset = max(0, offset)
+
+        base_query = self._db.query(Video).filter(Video.status == VideoStatus.COMPLETED)
+
+        if not city:
+            # Şehir filtresi yoksa (en sık kullanılan yol) sayfalama tamamen
+            # SQL'de yapılır — tüm tamamlanan videoları belleğe yüklemeden.
+            total = base_query.with_entities(func.count(Video.id)).scalar()
+            videos = (
+                base_query.order_by(Video.created_at.desc())
+                .offset(offset).limit(limit)
+                .all()
+            )
+            return {"plans": [self._to_plan_dict(v) for v in videos], "total": total}
+
+        candidates = (
+            base_query.order_by(Video.created_at.desc())
+            .limit(self._CITY_FILTER_SCAN_CAP)
             .all()
         )
         plans = []
-        for v in all_videos:
+        for v in candidates:
             locs = v.deduplicated_locations or []
-            if city:
-                names = [loc.get("original_name", "").lower() for loc in locs]
-                if not any(city.lower() in n for n in names):
-                    continue
-            plans.append({
-                "id": v.id,
-                "filename": v.filename,
-                "duration": v.duration,
-                "created_at": v.created_at.isoformat() if v.created_at else None,
-                "locations_count": len(locs),
-                "top_location": locs[0]["original_name"] if locs else None,
-                "ocr_preview": (v.extracted_texts or [])[:3],
-                "processing_time": v.processing_time,
-            })
+            names = [loc.get("original_name", "").lower() for loc in locs]
+            if any(city.lower() in n for n in names):
+                plans.append(self._to_plan_dict(v))
         return {"plans": plans[offset: offset + limit], "total": len(plans)}
 
     def get_stats(self) -> Dict[str, int]:
@@ -121,6 +147,7 @@ class SqlVideoRepository(AbstractVideoRepository):
         video.optimized_route   = results.get("optimized_route")
         video.travel_tips       = results.get("travel_tips")
         video.ocr_pois          = results.get("ocr_pois")
+        video.degradation       = results.get("degradation")
         video.status            = VideoStatus.COMPLETED
         self._db.commit()
 
@@ -129,3 +156,16 @@ class SqlVideoRepository(AbstractVideoRepository):
         if video:
             video.status = VideoStatus.FAILED
             self._db.commit()
+
+    def update_stop_order(self, video_id: int, user_id: int, order: List[List[int]]) -> Optional[Video]:
+        """
+        Editor'de kullanıcının belirlediği durak sırasını kaydeder.
+        Video bulunamazsa veya user_id sahibi değilse None döner (route 404/403 çevirir).
+        """
+        video = self.get_by_id(video_id)
+        if not video or video.user_id != user_id:
+            return None
+        video.stop_order = order
+        self._db.commit()
+        self._db.refresh(video)
+        return video

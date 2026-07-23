@@ -124,10 +124,6 @@ class AuthService:
         # Case-insensitive + trim — iOS otomatik düzeltme/büyük harf kaynaklı
         # mismatch'leri önler. Production-grade auth pattern.
         normalized = (email or "").strip().lower()
-        import logging
-        logging.getLogger("auth").info(
-            f"🔐 LOGIN attempt: raw='{email}' normalized='{normalized}' password_len={len(password or '')}"
-        )
 
         user = self._repo.get_by_email(normalized)
         if not user:
@@ -135,9 +131,11 @@ class AuthService:
             user = self._repo.get_by_email(email)
 
         if not user or not user.hashed_password or not verify_password(password, user.hashed_password):
-            logging.getLogger("auth").warning(
-                f"❌ LOGIN failed: email='{normalized}' user_found={user is not None}"
-            )
+            # E-posta/şifre ve "kullanıcı bulundu mu" bilgisi kasıtlı olarak
+            # loglanmıyor — loglar sızarsa hem PII ifşası hem de kullanıcı
+            # numaralandırma (user enumeration) saldırı yüzeyi olurdu.
+            import logging
+            logging.getLogger("auth").warning("❌ LOGIN failed")
             raise AuthException("E-posta adresi veya şifre hatalı")
 
         return self._issue_tokens(user)

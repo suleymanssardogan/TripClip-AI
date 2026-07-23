@@ -22,6 +22,13 @@ def test_register_success(client):
     assert data["token_type"] == "bearer"
 
 
+def test_register_weak_password_rejected(client):
+    """8 karakterden kısa şifre → 422"""
+    email = f"weak_{uuid.uuid4().hex[:8]}@test.com"
+    resp = client.post("/internal/auth/register", json={"email": email, "password": "short1"})
+    assert resp.status_code == 422
+
+
 def test_register_duplicate_email(client):
     """Aynı e-posta ile iki kez kayıt → 400"""
     email = f"dup_{uuid.uuid4().hex[:8]}@test.com"
@@ -43,10 +50,10 @@ def test_register_duplicate_username(client):
     e1 = f"a_{uuid.uuid4().hex[:6]}@test.com"
     e2 = f"b_{uuid.uuid4().hex[:6]}@test.com"
 
-    r1 = client.post("/internal/auth/register", json={"email": e1, "password": "P1!", "username": username})
+    r1 = client.post("/internal/auth/register", json={"email": e1, "password": "P1_test!", "username": username})
     assert r1.status_code == 200
 
-    r2 = client.post("/internal/auth/register", json={"email": e2, "password": "P2!", "username": username})
+    r2 = client.post("/internal/auth/register", json={"email": e2, "password": "P2_test!", "username": username})
     assert r2.status_code == 400
 
 
@@ -116,12 +123,12 @@ def test_register_rate_limit(client):
     for i in range(10):
         client.post("/internal/auth/register", json={
             "email": f"rl_{i}_{uuid.uuid4().hex[:4]}@test.com",
-            "password": "P1!",
+            "password": "P1_test!",
         })
 
     resp = client.post("/internal/auth/register", json={
         "email": f"rl_over_{uuid.uuid4().hex[:4]}@test.com",
-        "password": "P1!",
+        "password": "P1_test!",
     })
     assert resp.status_code == 429, f"11. istekte 429 beklendi, {resp.status_code} geldi"
 

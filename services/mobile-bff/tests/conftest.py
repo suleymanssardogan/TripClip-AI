@@ -83,6 +83,8 @@ def reset_rate_limiters():
     """Her testten önce rate limiter sayaçlarını sıfırla (core-api conftest ile aynı desen)."""
     from app.main import limiter as main_limiter
     from app.routes.videos import limiter as videos_limiter
+    from app.routes.auth import limiter as auth_limiter
     main_limiter.reset()
     videos_limiter.reset()
+    auth_limiter.reset()
     yield
