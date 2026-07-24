@@ -34,8 +34,27 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     ) {
         let token = deviceToken.map { String(format: "%02x", $0) }.joined()
         Logger.upload.info("APNs token: \(token)")
-        // TODO: M6 — send token to backend for push delivery
         UserDefaults.standard.set(token, forKey: "apns_device_token")
+        sendDeviceTokenToBackend(token)
+    }
+
+    // Girişli kullanıcı yoksa (KeychainStore.load() nil) gönderim atlanır —
+    // login sonrası AuthEnvironment burayı tekrar tetiklemez, ama token zaten
+    // UserDefaults'ta saklı; bir sonraki app-relaunch + APNs re-registration'da
+    // (veya bu metod login akışından da çağrılırsa) gönderilir.
+    private func sendDeviceTokenToBackend(_ token: String) {
+        guard let accessToken = KeychainStore.load() else { return }
+        Task {
+            do {
+                let _: StatusResponse = try await APIClient().send(
+                    .registerDeviceToken(token: token),
+                    token: accessToken
+                )
+                Logger.upload.info("APNs token registered with backend")
+            } catch {
+                Logger.upload.warning("APNs token registration failed: \(error.localizedDescription)")
+            }
+        }
     }
 
     func application(
@@ -54,6 +73,18 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     ) {
         Logger.upload.info("Background session event: \(identifier)")
         handleBackgroundSession(identifier: identifier, completionHandler: completionHandler)
+    }
+
+    // Soğuk başlatma ve arka plandan öne dönüş — ikisini de kapsar. Share
+    // Extension bir video/hata bıraktığında ana uygulama her zaman
+    // handleEventsForBackgroundURLSession ile uyanmıyor (örn. kullanıcı
+    // extension'dan sonra uygulamayı elle açarsa); bu yüzden aynı tüketim
+    // burada da tetiklenir. didFinishLaunching'te değil burada yapılıyor —
+    // SwiftUI view hiyerarşisi (HomeView'ın .onReceive'ı) bu noktada zaten
+    // kurulu, aksi halde post edilen bildirim kaybolurdu.
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        handlePendingVideoIfNeeded()
+        handlePendingUploadErrorIfNeeded()
     }
 }
 

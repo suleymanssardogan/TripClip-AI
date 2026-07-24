@@ -3,10 +3,11 @@ Presentation katmanı — Auth route handler'ları.
 Sadece: input al → service çağır → response döndür.
 İş mantığı, DB sorguları, şifre hash'leme burada YOK.
 """
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Header, HTTPException
 from sqlalchemy.orm import Session
 from slowapi import Limiter
 from slowapi.util import get_remote_address
+from typing import Optional
 
 from app.core.database import get_db
 from app.application.dto.auth_dto import (
@@ -15,6 +16,7 @@ from app.application.dto.auth_dto import (
     AppleSignInRequest,
     RefreshRequest,
     LogoutRequest,
+    DeviceTokenRequest,
     AuthResponse,
 )
 from app.application.services.auth_service import AuthService
@@ -108,4 +110,20 @@ def logout(
     service: AuthService = Depends(get_auth_service),
 ):
     service.logout(body.refresh_token)
+    return {"status": "ok"}
+
+
+@router.put("/device-token")
+def register_device_token(
+    body: DeviceTokenRequest,
+    service: AuthService = Depends(get_auth_service),
+    x_user_id: Optional[int] = Header(default=None),
+):
+    """BFF, kendi doğruladığı JWT'den çözdüğü user_id'yi x-user-id header'ı ile iletir."""
+    if x_user_id is None:
+        raise HTTPException(
+            status_code=401,
+            detail={"code": "UNAUTHORIZED", "message": "Kimlik doğrulama gerekli."},
+        )
+    service.register_device_token(x_user_id, body.token)
     return {"status": "ok"}

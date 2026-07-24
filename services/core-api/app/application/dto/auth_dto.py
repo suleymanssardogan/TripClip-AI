@@ -41,6 +41,10 @@ class LogoutRequest(BaseModel):
     refresh_token: str
 
 
+class DeviceTokenRequest(BaseModel):
+    token: str
+
+
 # ── Response DTO'ları ─────────────────────────────────────────────────────────
 
 class AuthResponse(BaseModel):

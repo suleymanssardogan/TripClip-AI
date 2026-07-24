@@ -105,3 +105,47 @@ def test_login_core_api_unreachable(client, mock_core_api):
 
     assert resp.status_code == 503
     assert resp.json()["code"] == "SERVICE_UNAVAILABLE"
+
+
+# ─── Device Token (Push Notifications) ───────────────────────────────────────
+
+def test_device_token_happy_path(client, mock_core_api, make_response, auth_headers):
+    mock_core_api.put.return_value = make_response(200, {"status": "ok"})
+
+    resp = client.put(
+        "/api/mobile/auth/device-token",
+        json={"token": "abc123"},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+    mock_core_api.put.assert_awaited_once()
+    # user_id JWT'den çözülüp core-api'ye x-user-id header'ı olarak iletilmeli
+    _, kwargs = mock_core_api.put.call_args
+    assert kwargs["headers"]["x-user-id"] == "1"
+    assert kwargs["json"] == {"token": "abc123"}
+
+
+def test_device_token_without_auth_returns_403(client, mock_core_api):
+    """Authorization header'ı yoksa core-api'ye hiç gidilmeden reddedilmeli
+    (HTTPBearer, eksik header için FastAPI varsayılanı olarak 403 döner —
+    401 yalnızca geçersiz/süresi dolmuş bir token için kullanılır)."""
+    resp = client.put("/api/mobile/auth/device-token", json={"token": "abc123"})
+    assert resp.status_code == 403
+    mock_core_api.put.assert_not_awaited()
+
+
+def test_device_token_core_api_error_passthrough(client, mock_core_api, make_response, auth_headers):
+    mock_core_api.put.return_value = make_response(401, {
+        "error": {"code": "UNAUTHORIZED", "message": "Kimlik doğrulama gerekli."},
+    })
+
+    resp = client.put(
+        "/api/mobile/auth/device-token",
+        json={"token": "abc123"},
+        headers=auth_headers,
+    )
+
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "UNAUTHORIZED"

@@ -168,6 +168,11 @@ class AuthService:
 
         return self._issue_tokens(user)
 
+    # ── Push Notifications ────────────────────────────────────────────────────
+
+    def register_device_token(self, user_id: int, token: str) -> None:
+        self._repo.update_apns_token(user_id, token)
+
     @staticmethod
     def _verify_apple_token(identity_token: str) -> tuple[str, str | None]:
         try:

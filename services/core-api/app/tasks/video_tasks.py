@@ -18,12 +18,20 @@ Retry politikası:
 import logging
 import os
 
-from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 
-# celery_app burada import edilir → shared_task dekoratörü hangi app'e
-# bağlanacağını bilir. Bu import olmadan shared_task localhost'a düşer.
-from app.core.celery_app import celery_app as _celery_app  # noqa: F401
+# @_celery_app.task (shared_task DEĞİL) kasıtlı: shared_task, task.app'i
+# celery.current_app (thread-local) proxy'si üzerinden çözer. FastAPI'nin sync
+# route handler'ları (bu task'ları .delay() ile çağıran /process, /queue-url)
+# Starlette tarafından bir threadpool worker thread'inde çalıştırılır — o
+# thread'in current_app'i ana thread'deki ile AYNI DEĞİLDİR, boş bir thread-local
+# stack'e düşer ve celery sıfır konfigürasyonlu (broker=None) bir varsayılan
+# Celery() app'i icat eder. Sonuç: .delay() sessizce AMQP/localhost'a bağlanmaya
+# çalışıp ConnectionRefusedError ile patlar, çağıran taraftaki geniş except
+# bloğu bunu yutar — video "kuyruğa alındı" der ama asla işlenmez.
+# @_celery_app.task, task.app'i current_app'ten BAĞIMSIZ olarak kalıcı şekilde
+# bu app'e bağlar; hangi thread'den çağrılırsa çağrılsın doğru broker kullanılır.
+from app.core.celery_app import celery_app as _celery_app
 
 logger = logging.getLogger("tripclip.tasks.video")
 
@@ -82,7 +90,7 @@ def _get_processor():
     return _processor
 
 
-@shared_task(
+@_celery_app.task(
     name="app.tasks.video_tasks.process_video_task",
     queue="video_processing",
     bind=True,                    # self → retry için gerekli
@@ -155,7 +163,7 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
 
 # ── URL Download + Process Task ───────────────────────────────────────────────
 
-@shared_task(
+@_celery_app.task(
     name="app.tasks.video_tasks.process_url_task",
     queue="video_processing",
     bind=True,

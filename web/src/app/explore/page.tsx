@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, MapPin, Clock, ArrowRight, Filter, RotateCcw } from "lucide-react";
+import { Search, MapPin, Clock, ArrowRight, Filter, RotateCcw, AlertTriangle } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Link from "next/link";
 import { getPlans, getStats, Plan, PlatformStats } from "@/lib/api";
@@ -123,6 +123,7 @@ export default function ExplorePage() {
   const [plans, setPlans]     = useState<Plan[]>([]);
   const [stats, setStats]     = useState<PlatformStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState(false);
   const [search, setSearch]   = useState("");
   const [city, setCity]       = useState("Tümü");
   const [offset, setOffset]   = useState(0);
@@ -137,7 +138,11 @@ export default function ExplorePage() {
       const res = await getPlans(params);
       setPlans(res.plans);
       setTotal(res.total);
-    } catch { setPlans([]); }
+      setError(false);
+    } catch {
+      setError(true);
+      setPlans([]);
+    }
     finally { setLoading(false); }
   }, []);
 
@@ -252,6 +257,17 @@ export default function ExplorePage() {
         {loading ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
             {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} />)}
+          </div>
+        ) : error ? (
+          <div className="text-center py-32">
+            <AlertTriangle className="w-10 h-10 text-destructive mx-auto mb-4" />
+            <h3 className="font-display font-bold text-text text-xl mb-2">Geziler yüklenemedi</h3>
+            <p className="text-text-secondary text-sm mb-8">Sunucuya ulaşılamadı. İnternet bağlantınızı kontrol edip tekrar deneyin.</p>
+            <button
+              onClick={() => fetchPlans(city, offset)}
+              className="flex items-center gap-2 mx-auto text-xs px-5 py-2.5 rounded-md bg-route/10 border border-route/25 text-route hover:bg-route/20 transition-colors">
+              <RotateCcw className="w-3 h-3" /> Tekrar Dene
+            </button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-32">

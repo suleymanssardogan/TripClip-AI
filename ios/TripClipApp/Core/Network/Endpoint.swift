@@ -3,6 +3,7 @@ import Foundation
 enum HTTPMethod: String {
     case get    = "GET"
     case post   = "POST"
+    case put    = "PUT"
     case delete = "DELETE"
 }
 
@@ -14,6 +15,7 @@ enum Endpoint {
     case appleSignIn(identityToken: String, fullName: String?)
     case refresh(refreshToken: String)
     case logout(refreshToken: String)
+    case registerDeviceToken(token: String)
 
     // Videos
     case userVideos(userID: Int)
@@ -35,6 +37,7 @@ extension Endpoint {
         case .appleSignIn:                  return "/api/mobile/auth/apple"
         case .refresh:                      return "/api/mobile/auth/refresh"
         case .logout:                       return "/api/mobile/auth/logout"
+        case .registerDeviceToken:          return "/api/mobile/auth/device-token"
         case .userVideos:                   return "/api/mobile/videos"
         case .videoDetail(let id):          return "/api/mobile/videos/\(id)"
         case .videoProgress(let id):        return "/api/mobile/videos/\(id)/progress"
@@ -47,6 +50,7 @@ extension Endpoint {
     var method: HTTPMethod {
         switch self {
         case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl: return .post
+        case .registerDeviceToken: return .put
         default: return .get
         }
     }
@@ -71,6 +75,9 @@ extension Endpoint {
 
         case .refresh(let refreshToken), .logout(let refreshToken):
             return ["refresh_token": refreshToken]
+
+        case .registerDeviceToken(let token):
+            return ["token": token]
 
         default:
             return nil

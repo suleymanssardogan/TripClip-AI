@@ -315,3 +315,48 @@ def test_revoke_if_active_is_race_safe(client):
         assert second_claim is False
     finally:
         db.close()
+
+
+# ─── Device Token (Push Notifications) ───────────────────────────────────────
+
+def test_register_device_token_success(client, registered_user, bff_headers):
+    """Geçerli x-user-id ile token gönderilirse kaydedilmeli."""
+    resp = client.put(
+        "/internal/auth/device-token",
+        json={"token": "abc123deadbeef"},
+        headers=bff_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
+    from app.core.database import SessionLocal
+    from app.models.user import User
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == registered_user["user_id"]).first()
+        assert user.apns_token == "abc123deadbeef"
+    finally:
+        db.close()
+
+
+def test_register_device_token_overwrites_previous(client, registered_user, bff_headers):
+    """Aynı kullanıcı yeni bir token gönderirse eskisinin üzerine yazılmalı."""
+    client.put("/internal/auth/device-token", json={"token": "old-token"}, headers=bff_headers)
+    resp = client.put("/internal/auth/device-token", json={"token": "new-token"}, headers=bff_headers)
+    assert resp.status_code == 200
+
+    from app.core.database import SessionLocal
+    from app.models.user import User
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == registered_user["user_id"]).first()
+        assert user.apns_token == "new-token"
+    finally:
+        db.close()
+
+
+def test_register_device_token_without_user_id_returns_401(client):
+    """x-user-id header'ı yoksa (BFF'i atlayan doğrudan bir çağrı) 401 dönmeli."""
+    resp = client.put("/internal/auth/device-token", json={"token": "abc123"})
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "UNAUTHORIZED"

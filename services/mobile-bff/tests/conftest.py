@@ -71,10 +71,12 @@ def mock_core_api():
         mock_core_api.post.assert_called_once()
     """
     with mock.patch("httpx.AsyncClient.post", new_callable=mock.AsyncMock) as mock_post, \
-         mock.patch("httpx.AsyncClient.get", new_callable=mock.AsyncMock) as mock_get:
+         mock.patch("httpx.AsyncClient.get", new_callable=mock.AsyncMock) as mock_get, \
+         mock.patch("httpx.AsyncClient.put", new_callable=mock.AsyncMock) as mock_put:
         holder = mock.Mock()
         holder.post = mock_post
         holder.get = mock_get
+        holder.put = mock_put
         yield holder
 
 

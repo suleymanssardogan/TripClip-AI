@@ -2,7 +2,7 @@
 Mobile BFF — Auth route handler'ları.
 Tüm Core API hataları mobile_error_wrapper aracılığıyla iOS dostu mesajlara çevrilir.
 """
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Depends
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -11,6 +11,7 @@ from app.core.internal_client import internal_client
 import os
 import uuid
 
+from app.core.auth import get_current_user_id
 from app.core.error_wrapper import mobile_error_wrapper, raise_from_response
 
 router  = APIRouter(prefix="/auth", tags=["auth"])
@@ -37,6 +38,10 @@ class AppleSignInRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class DeviceTokenRequest(BaseModel):
+    token: str
 
 
 async def _forward(path: str, body: dict, rid: str, client_ip: str | None = None) -> dict:
@@ -88,3 +93,23 @@ async def refresh(request: Request, body: RefreshRequest):
 async def logout(request: Request, body: RefreshRequest):
     rid = str(uuid.uuid4())[:8]
     return await _forward("/internal/auth/logout", body.model_dump(), rid)
+
+
+@router.put("/device-token")
+async def register_device_token(
+    request: Request,
+    body: DeviceTokenRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """APNs device token'ını kaydeder — push bildirim gönderiminde kullanılacak."""
+    rid = str(uuid.uuid4())[:8]
+    async with mobile_error_wrapper(request_id=rid):
+        async with internal_client(10.0) as client:
+            resp = await client.put(
+                f"{CORE_API_URL}/internal/auth/device-token",
+                json={"token": body.token},
+                headers={"x-user-id": str(user_id)},
+            )
+        if resp.status_code >= 400:
+            raise_from_response(resp, request_id=rid)
+    return {"status": "ok"}
