@@ -344,8 +344,15 @@ class GeminiService:
             return [{"name": n, "lat": None, "lng": None, "type": "place"}
                     for n in self._line_fallback(raw_text)]
         except Exception as e:
+            # Burada []  döndürülüp yutulursa video_processor._safe_run bunu
+            # "başarılı, 0 lokasyon" ile ayırt edemez ve degradation raporu
+            # yanlış şekilde ✅ OK gösterir (bkz. 2026-07-26 DNS kesintisi
+            # olayı). Fırlatarak _safe_run'ın kendi fallback/degradation
+            # mekanizmasına devrediyoruz — döndürülen veri yine boş liste
+            # olur, tek fark artık doğru şekilde "fallback kullanıldı" olarak
+            # işaretlenmesi.
             logger.error("Gemini extract_locations hatası: %s", e)
-            return []
+            raise
 
     @staticmethod
     def _line_fallback(text: str) -> List[str]:
@@ -408,5 +415,8 @@ class GeminiService:
                 self._cache_set(cache_key, result)
             return result
         except Exception as e:
+            # extract_locations'daki aynı gerekçe: sessizce boş dönmek yerine
+            # fırlatarak _safe_run'ın degradation raporunu doğru işaretlemesini
+            # sağlıyoruz.
             logger.error("Gemini travel tips hatası: %s", e)
-            return {"tips": [], "summary": ""}
+            raise

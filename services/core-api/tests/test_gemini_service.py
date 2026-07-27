@@ -97,3 +97,26 @@ def test_extract_locations_filters_invalid_names_and_coerces_coords(service):
     assert bisirici["lat"] is None  # parse edilemeyen koordinat → None'a düşmeli, hata fırlatmamalı
 
     mock_cache_set.assert_called_once()
+
+
+# ─── Ağ hatalarında sessizce boş dönmek yerine fırlatma ────────────────────────
+#
+# Kök neden (2026-07-25): Gemini'ye DNS çözümlemesi başarısız olduğunda
+# extract_locations/generate_travel_tips hatayı yutup [] / {"tips": [], ...}
+# döndürüyordu. video_processor._safe_run bunu "başarılı, 0 sonuç" ile ayırt
+# edemiyor ve degradation raporu (dolayısıyla kullanıcıya gösterilen "kısmi
+# sonuç" uyarısı) yanlış şekilde ✅ OK gösteriyordu. Servisler artık fırlatıyor;
+# _safe_run bunu yakalayıp fallback_used=True olarak doğru işaretliyor.
+
+def test_extract_locations_raises_on_network_error(service):
+    with mock.patch.object(service, "_call", side_effect=ConnectionError("DNS çözümlenemedi")), \
+         mock.patch.object(service, "_cache_get", return_value=None):
+        with pytest.raises(ConnectionError):
+            service.extract_locations(frames=[], transcript="", video_id=1)
+
+
+def test_generate_travel_tips_raises_on_network_error(service):
+    with mock.patch.object(service, "_call", side_effect=ConnectionError("DNS çözümlenemedi")), \
+         mock.patch.object(service, "_cache_get", return_value=None):
+        with pytest.raises(ConnectionError):
+            service.generate_travel_tips(["Gaziantep"], video_id=1)

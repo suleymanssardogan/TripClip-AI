@@ -21,6 +21,23 @@ def test_whisper_service_configured_model():
         service = AudioProcessingService()
         assert service.model_name == "base"
 
+def test_transcribe_audio_raises_on_model_error():
+    """
+    Kök neden (2026-07-26): transcribe_audio hatayı yutup boş transkript
+    döndürüyordu; video_processor._safe_run bunu "başarılı, konuşma yok" ile
+    ayırt edemiyor ve degradation raporu yanlış şekilde ✅ OK gösteriyordu.
+    Artık fırlatıyor — _safe_run fallback'e düşüp doğru şekilde işaretliyor.
+    """
+    from app.ml.speech_to_text import AudioProcessingService
+
+    service = AudioProcessingService()
+    service.model = mock.MagicMock()
+    service.model.transcribe.side_effect = RuntimeError("model çöktü")
+
+    with pytest.raises(RuntimeError):
+        service.transcribe_audio("fake_audio.wav")
+
+
 def test_landmark_service_disabled_by_default():
     """Test that LandmarkDetectionService remains disabled when USE_GOOGLE_VISION is false."""
     with mock.patch.dict(os.environ, {"USE_GOOGLE_VISION": "false"}):

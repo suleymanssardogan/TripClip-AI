@@ -27,10 +27,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # geçirilir (bkz. docker-compose.prod.yml `build.args`).
 ENV HOME=/app
 ARG WHISPER_MODEL=small
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')" \
- && python -c "import whisper; whisper.load_model('${WHISPER_MODEL}')" \
- && python -c "from transformers import pipeline; pipeline('ner', model='savasy/bert-base-turkish-ner-cased', aggregation_strategy='simple')" \
- && python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+ARG BAKE_FALLBACK_MODELS=true
+RUN if [ "$BAKE_FALLBACK_MODELS" = "true" ]; then \
+      python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')" \
+   && python -c "import whisper; whisper.load_model('${WHISPER_MODEL}')" \
+   && python -c "from transformers import pipeline; pipeline('ner', model='savasy/bert-base-turkish-ner-cased', aggregation_strategy='simple')" \
+   && python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')" ; \
+    fi
 
 COPY . .
 
