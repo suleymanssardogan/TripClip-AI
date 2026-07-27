@@ -152,7 +152,7 @@ export default function ExplorePage() {
   useEffect(() => {
     setTimeout(() => {
       fetchPlans(city, 0);
-      getStats().then(setStats).catch(() => {});
+      getStats().then(setStats).catch(err => console.error("getStats failed:", err));
     }, 0);
   }, [city, fetchPlans]);
 

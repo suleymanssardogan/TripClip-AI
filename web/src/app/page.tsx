@@ -51,7 +51,7 @@ export default function LandingPage() {
   const heroY       = useTransform(scrollYProgress, [0, 1], [0, 80]);
   const heroOpacity = useTransform(scrollYProgress, [0, 0.75], [1, 0]);
 
-  useEffect(() => { getStats().then(setStats).catch(() => {}); }, []);
+  useEffect(() => { getStats().then(setStats).catch(err => console.error("getStats failed:", err)); }, []);
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-bg">
