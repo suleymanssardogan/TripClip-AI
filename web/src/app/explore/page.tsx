@@ -6,6 +6,9 @@ import { Search, MapPin, Clock, ArrowRight, Filter, RotateCcw, AlertTriangle } f
 import Navbar from "@/components/Navbar";
 import Link from "next/link";
 import { getPlans, getStats, Plan, PlatformStats } from "@/lib/api";
+import { Card } from "@/components/ui/Card";
+import { Button, buttonVariants } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 
 /* ─── Yardımcı ───────────────────────────────────────────── */
 const UUID_RE = /^[0-9a-f-]{8,}$/i;
@@ -51,7 +54,7 @@ function PlanCard({ plan, index }: { plan: Plan; index: number }) {
       transition={{ delay: index * 0.05, duration: 0.5, ease: "easeOut" }}
     >
       <Link href={`/analyze/${plan.id}`} className="block group">
-        <div className="bg-surface border border-border rounded-lg overflow-hidden hover:border-border-strong hover:-translate-y-0.5 transition-all">
+        <Card hover>
 
           {/* Görsel alanı */}
           <div className="relative overflow-hidden bg-surface2" style={{ height: "160px" }}>
@@ -98,7 +101,7 @@ function PlanCard({ plan, index }: { plan: Plan; index: number }) {
               </span>
             </div>
           </div>
-        </div>
+        </Card>
       </Link>
     </motion.div>
   );
@@ -165,8 +168,13 @@ export default function ExplorePage() {
       <Navbar />
 
       {/* ── Hero ────────────────────────────────────────── */}
-      <section className="relative pt-36 pb-20 px-8">
-        <div className="max-w-7xl mx-auto">
+      <section className="relative pt-36 pb-20 px-8 overflow-hidden">
+        <div
+          aria-hidden
+          className="absolute -top-24 -right-24 w-[32rem] h-[32rem] rounded-full opacity-[0.12] blur-3xl pointer-events-none"
+          style={{ background: "radial-gradient(circle, rgb(var(--c-accent)) 0%, rgb(var(--c-route)) 70%, transparent 100%)" }}
+        />
+        <div className="max-w-7xl mx-auto relative">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
             className="flex flex-col md:flex-row md:items-end justify-between gap-8">
 
@@ -213,13 +221,11 @@ export default function ExplorePage() {
           {/* Arama */}
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
-            <input
+            <Input
               type="text" value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Şehir veya mekan ara..."
-              className="w-full bg-surface2 border border-border-strong rounded-md pl-9 pr-4 py-2.5
-                text-text placeholder:text-text-tertiary text-sm
-                focus:outline-none focus:border-accent-text transition-colors"
+              className="pl-9 py-2.5"
             />
           </div>
 
@@ -263,11 +269,9 @@ export default function ExplorePage() {
             <AlertTriangle className="w-10 h-10 text-destructive mx-auto mb-4" />
             <h3 className="font-display font-bold text-text text-xl mb-2">Geziler yüklenemedi</h3>
             <p className="text-text-secondary text-sm mb-8">Sunucuya ulaşılamadı. İnternet bağlantınızı kontrol edip tekrar deneyin.</p>
-            <button
-              onClick={() => fetchPlans(city, offset)}
-              className="flex items-center gap-2 mx-auto text-xs px-5 py-2.5 rounded-md bg-route/10 border border-route/25 text-route hover:bg-route/20 transition-colors">
+            <Button variant="subtle" size="sm" onClick={() => fetchPlans(city, offset)}>
               <RotateCcw className="w-3 h-3" /> Tekrar Dene
-            </button>
+            </Button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-32">
@@ -279,10 +283,9 @@ export default function ExplorePage() {
               {total === 0 ? "iOS uygulamasından ilk videoyu yükle!" : "Farklı bir arama dene"}
             </p>
             {search && (
-              <button onClick={() => setSearch("")}
-                className="flex items-center gap-2 mx-auto text-xs px-5 py-2.5 rounded-md bg-route/10 border border-route/25 text-route hover:bg-route/20 transition-colors">
+              <Button variant="subtle" size="sm" onClick={() => setSearch("")}>
                 <RotateCcw className="w-3 h-3" /> Aramayı Temizle
-              </button>
+              </Button>
             )}
           </div>
         ) : (
@@ -298,21 +301,21 @@ export default function ExplorePage() {
             {/* Sayfalama */}
             {total > LIMIT && (
               <div className="flex items-center justify-center gap-4 mt-16 pt-8 border-t border-border">
-                <button
+                <Button
+                  variant="subtle" size="sm"
                   onClick={() => { const o = Math.max(0, offset - LIMIT); setOffset(o); fetchPlans(city, o); }}
-                  disabled={offset === 0}
-                  className="text-xs py-2.5 px-6 rounded-md bg-route/10 border border-route/25 text-route hover:bg-route/20 transition-colors disabled:opacity-30">
+                  disabled={offset === 0}>
                   ← Önceki
-                </button>
+                </Button>
                 <span className="text-text-tertiary text-sm">
                   {Math.floor(offset / LIMIT) + 1} / {Math.ceil(total / LIMIT)}
                 </span>
-                <button
+                <Button
+                  size="sm"
                   onClick={() => { const o = offset + LIMIT; setOffset(o); fetchPlans(city, o); }}
-                  disabled={offset + LIMIT >= total}
-                  className="text-xs py-2.5 px-6 rounded-md bg-accent text-on-accent hover:bg-accent-hover transition-colors disabled:opacity-30">
+                  disabled={offset + LIMIT >= total}>
                   Sonraki →
-                </button>
+                </Button>
               </div>
             )}
           </>
@@ -332,8 +335,7 @@ export default function ExplorePage() {
             iOS uygulamasından gezi videonu yükle. AI otomatik olarak mekanları tespit eder,
             haritaya işler ve sana özel rota oluşturur.
           </p>
-          <Link href="/signup"
-            className="inline-flex items-center gap-2 px-8 py-3.5 rounded-md text-sm font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors">
+          <Link href="/signup" className={buttonVariants({ size: "lg" }) + " text-sm"}>
             Ücretsiz Başla <ArrowRight className="w-4 h-4" />
           </Link>
         </div>

@@ -13,6 +13,8 @@ import AIStatsCard from "@/components/AIStatsCard";
 import { useRouter, useParams } from "next/navigation";
 import { getPlan, getVideoProgress, type VideoDetail } from "@/lib/api";
 import dynamic from "next/dynamic";
+import { Card as UICard } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 const MapPreview = dynamic(() => import("@/components/MapPreview"), { ssr: false });
 
@@ -238,20 +240,22 @@ export default function AnalysisResultPage() {
 
       <main className="pt-24 pb-20 px-6 max-w-screen-xl mx-auto">
         <div className="flex items-center justify-between mb-8">
-          <button
+          <Button
+            variant="ghost" size="sm"
             onClick={() => router.back()}
-            className="flex items-center gap-2 text-text-tertiary hover:text-text transition-all group font-bold uppercase tracking-widest text-[10px]"
+            className="group font-bold uppercase tracking-widest text-[10px] px-0"
           >
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Geri
-          </button>
+          </Button>
           <div className="flex items-center gap-3 no-print">
-            <button
+            <Button
+              variant="ghost" size="sm"
               onClick={() => window.print()}
-              className="flex items-center gap-2 px-5 py-2.5 bg-surface2 border border-border-strong text-text rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-border transition-all"
+              className="rounded-full bg-surface2 border border-border-strong text-[10px] uppercase tracking-widest hover:bg-border"
               title="Tarayıcı yazdırma diyalogundan PDF olarak kaydet"
             >
               <Download className="w-3.5 h-3.5" /> PDF İndir
-            </button>
+            </Button>
             <Link
               href={`/editor/${params.id}`}
               className="flex items-center gap-2 px-5 py-2.5 bg-accent/10 border border-accent/30 text-accent-text rounded-full text-[10px] font-black uppercase tracking-widest hover:bg-accent/20 transition-all"
@@ -404,15 +408,13 @@ export default function AnalysisResultPage() {
 
 function Card({ title, icon: Icon, children }: { title: string; icon: React.ComponentType<{ className?: string }>; children: React.ReactNode }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="bg-surface border border-border rounded-lg p-6"
-    >
-      <h3 className="flex items-center gap-2 font-display font-bold text-sm mb-4 text-text">
-        <Icon className="w-4 h-4 text-text-tertiary" /> {title}
-      </h3>
-      {children}
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
+      <UICard className="p-6">
+        <h3 className="flex items-center gap-2 font-display font-bold text-sm mb-4 text-text">
+          <Icon className="w-4 h-4 text-text-tertiary" /> {title}
+        </h3>
+        {children}
+      </UICard>
     </motion.div>
   );
 }

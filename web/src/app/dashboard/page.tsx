@@ -10,6 +10,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import { getUserPlans, getStats, logout, type Plan, type PlatformStats } from "@/lib/api";
+import { Card } from "@/components/ui/Card";
+import { Badge } from "@/components/ui/Badge";
+import { Button, buttonVariants } from "@/components/ui/Button";
 
 /* ─── Yardımcı ─────────────────────────────────────────────────────────── */
 
@@ -70,41 +73,39 @@ function TripCard({ plan, index }: { plan: Plan; index: number }) {
   const title = planTitle(plan, index);
 
   return (
-    <motion.div
-      custom={index} variants={cardVariants} initial="hidden" animate="visible"
-      onClick={() => isCompleted && router.push(`/analyze/${plan.id}`)}
-      className={`group rounded-lg border overflow-hidden transition-all duration-200 ${
-        isCompleted
-          ? "border-border bg-surface hover:border-border-strong hover:-translate-y-0.5 cursor-pointer"
-          : "border-border bg-surface opacity-70"
-      }`}
-    >
-      <div className="h-20 flex items-center justify-center text-3xl bg-surface2">
-        {locationEmoji(plan.top_location ?? undefined)}
-      </div>
-      <div className="p-4">
-        <div className="flex items-start justify-between gap-2 mb-2">
-          <h3 className="font-display font-bold text-text text-sm leading-snug">{title}</h3>
-          {isCompleted
-            ? <span className="shrink-0 font-mono text-[9px] px-2 py-1 rounded-full bg-success/10 border border-success/25 text-success uppercase tracking-widest">Tamamlandı</span>
-            : <span className="shrink-0 font-mono text-[9px] px-2 py-1 rounded-full bg-warning/10 border border-warning/25 text-warning uppercase tracking-widest">İşleniyor</span>}
+    <motion.div custom={index} variants={cardVariants} initial="hidden" animate="visible">
+      <Card
+        hover={isCompleted}
+        onClick={() => isCompleted && router.push(`/analyze/${plan.id}`)}
+        className={`group ${isCompleted ? "cursor-pointer" : "opacity-70"}`}
+      >
+        <div className="h-20 flex items-center justify-center text-3xl bg-surface2">
+          {locationEmoji(plan.top_location ?? undefined)}
         </div>
-        <div className="flex items-center gap-3 text-xs text-text-tertiary">
-          <span className="flex items-center gap-1">
-            <MapPin className="w-3 h-3" />
-            {plan.locations_count ?? 0} mekan
-          </span>
-          <span className="flex items-center gap-1">
-            <Clock className="w-3 h-3" />
-            {plan.created_at ? new Date(plan.created_at).toLocaleDateString("tr-TR") : "—"}
-          </span>
-        </div>
-        {isCompleted && (
-          <div className="flex items-center gap-1 mt-3 text-xs text-text-secondary group-hover:text-text">
-            Detayları gör <ChevronRight className="w-3 h-3" />
+        <div className="p-4">
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <h3 className="font-display font-bold text-text text-sm leading-snug">{title}</h3>
+            {isCompleted
+              ? <Badge variant="success" className="shrink-0">Tamamlandı</Badge>
+              : <Badge variant="warning" className="shrink-0">İşleniyor</Badge>}
           </div>
-        )}
-      </div>
+          <div className="flex items-center gap-3 text-xs text-text-tertiary">
+            <span className="flex items-center gap-1">
+              <MapPin className="w-3 h-3" />
+              {plan.locations_count ?? 0} mekan
+            </span>
+            <span className="flex items-center gap-1">
+              <Clock className="w-3 h-3" />
+              {plan.created_at ? new Date(plan.created_at).toLocaleDateString("tr-TR") : "—"}
+            </span>
+          </div>
+          {isCompleted && (
+            <div className="flex items-center gap-1 mt-3 text-xs text-text-secondary group-hover:text-text">
+              Detayları gör <ChevronRight className="w-3 h-3" />
+            </div>
+          )}
+        </div>
+      </Card>
     </motion.div>
   );
 }
@@ -172,12 +173,9 @@ export default function DashboardPage() {
           <AlertTriangle className="w-10 h-10 text-destructive" />
           <h2 className="font-display text-2xl font-black tracking-tight text-text">Gezileriniz yüklenemedi</h2>
           <p className="text-text-secondary text-sm max-w-sm">Sunucuya ulaşılamadı. İnternet bağlantınızı kontrol edip tekrar deneyin.</p>
-          <button
-            onClick={retry}
-            className="flex items-center gap-2 px-6 py-3 rounded-md text-sm font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors"
-          >
+          <Button onClick={retry}>
             <RotateCcw className="w-4 h-4" /> Tekrar Dene
-          </button>
+          </Button>
         </div>
       </div>
     );
@@ -200,13 +198,14 @@ export default function DashboardPage() {
               Hoş geldin, <span className="text-accent-text">{username}</span>
             </h1>
           </div>
-          <button
+          <Button
+            variant="ghost" size="sm"
             onClick={logout}
-            className="flex items-center gap-2 text-sm text-text-secondary hover:text-destructive transition-colors"
+            className="hover:text-destructive font-medium"
           >
             <LogOut className="w-4 h-4" />
             <span className="hidden sm:block">Çıkış</span>
-          </button>
+          </Button>
         </motion.header>
 
         {/* ── Kendi istatistiklerim ─────────────────────────────────── */}
@@ -217,13 +216,14 @@ export default function DashboardPage() {
             { label: "Toplam Mekan", value: totalLocations, icon: MapPin },
             { label: "Platform Kullanıcı", value: stats?.total_users ?? "—", icon: Globe2 },
           ].map((s, i) => (
-            <motion.div key={i} custom={i} variants={cardVariants} initial="hidden" animate="visible"
-              className="bg-surface border border-border rounded-md p-4 flex items-center gap-3">
-              <s.icon className="w-5 h-5 text-text-tertiary shrink-0" />
-              <div>
-                <p className="font-mono text-xl font-semibold text-text tabular-nums">{s.value}</p>
-                <p className="text-[10px] text-text-tertiary uppercase tracking-wider">{s.label}</p>
-              </div>
+            <motion.div key={i} custom={i} variants={cardVariants} initial="hidden" animate="visible">
+              <Card className="rounded-md p-4 flex items-center gap-3">
+                <s.icon className="w-5 h-5 text-text-tertiary shrink-0" />
+                <div>
+                  <p className="font-mono text-xl font-semibold text-text tabular-nums">{s.value}</p>
+                  <p className="text-[10px] text-text-tertiary uppercase tracking-wider">{s.label}</p>
+                </div>
+              </Card>
             </motion.div>
           ))}
         </div>
@@ -240,10 +240,7 @@ export default function DashboardPage() {
               <div className="text-5xl mb-4">🗺️</div>
               <p className="text-text font-semibold mb-2">Henüz video analiz edilmedi</p>
               <p className="text-text-secondary text-sm mb-5">İlk gezini oluşturmak için bir video yükle.</p>
-              <Link
-                href="/upload"
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-md text-sm font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors"
-              >
+              <Link href="/upload" className={buttonVariants({ size: "md" })}>
                 Video Yükle
               </Link>
             </div>

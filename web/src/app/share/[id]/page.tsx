@@ -20,6 +20,8 @@ import Navbar from "@/components/Navbar";
 import QRShareCard from "@/components/QRShareCard";
 import { useParams, useRouter } from "next/navigation";
 import { getPlan, type VideoDetail } from "@/lib/api";
+import { Card } from "@/components/ui/Card";
+import { Button } from "@/components/ui/Button";
 
 function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -156,18 +158,18 @@ export default function SharePage() {
             </motion.div>
 
             <div className="flex flex-wrap gap-4 relative z-10">
-              <button
+              <Button
                 onClick={openMaps}
-                className="bg-accent text-on-accent px-8 py-4 rounded-full font-bold flex items-center gap-3 transition-transform hover:scale-105 active:scale-95"
+                className="rounded-full px-8 py-4 transition-transform hover:scale-105 active:scale-95"
               >
                 <MapIcon className="w-5 h-5" /> Google Maps&apos;te Aç
-              </button>
-              <button
-                onClick={handleShare}
-                className="bg-surface/80 backdrop-blur-xl border border-border-strong text-text px-8 py-4 rounded-full font-bold flex items-center gap-3 transition-colors hover:bg-surface2"
+              </Button>
+              <Button
+                variant="outline" onClick={handleShare}
+                className="rounded-full px-8 py-4 bg-surface/80 backdrop-blur-xl"
               >
                 <Share2 className="w-5 h-5" /> {copied ? "Kopyalandı ✓" : "Linki Paylaş"}
-              </button>
+              </Button>
             </div>
           </div>
         </section>
@@ -181,16 +183,16 @@ export default function SharePage() {
             {/* Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {stats.map((stat, i) => (
-                <div key={i} className="bg-surface border border-border p-6 rounded-lg flex flex-col items-center justify-center text-center">
+                <Card key={i} className="p-6 flex flex-col items-center justify-center text-center">
                   <span className="font-mono text-accent-text font-semibold text-3xl mb-1 tabular-nums">{stat.value}</span>
                   <span className="text-text-tertiary font-semibold text-[10px] uppercase tracking-widest">{stat.label}</span>
-                </div>
+                </Card>
               ))}
             </div>
 
             {/* Locations list */}
             {locations.length > 0 && (
-              <div className="bg-surface border border-border p-10 rounded-lg">
+              <Card className="p-10">
                 <h3 className="text-2xl font-black font-display mb-8 text-text flex items-center gap-3 tracking-tight">
                   <MapPin className="text-route w-6 h-6" /> Gezi Güzergahı
                 </h3>
@@ -208,14 +210,14 @@ export default function SharePage() {
                     </div>
                   ))}
                 </div>
-              </div>
+              </Card>
             )}
 
             {/* Route stats */}
             {(totalDist || video.duration) && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {totalDist && (
-                  <div className="bg-surface border border-border p-6 rounded-lg flex items-center gap-5">
+                  <Card className="p-6 flex items-center gap-5">
                     <div className="w-12 h-12 rounded-md bg-route/10 border border-route/20 flex items-center justify-center text-route">
                       <Navigation className="w-6 h-6" />
                     </div>
@@ -223,10 +225,10 @@ export default function SharePage() {
                       <p className="font-bold text-xl text-text">{Math.round(totalDist)} km</p>
                       <p className="text-text-tertiary text-xs uppercase tracking-widest">Toplam Rota</p>
                     </div>
-                  </div>
+                  </Card>
                 )}
                 {video.duration && (
-                  <div className="bg-surface border border-border p-6 rounded-lg flex items-center gap-5">
+                  <Card className="p-6 flex items-center gap-5">
                     <div className="w-12 h-12 rounded-md bg-accent/10 border border-accent/20 flex items-center justify-center text-accent-text">
                       <Clock className="w-6 h-6" />
                     </div>
@@ -234,7 +236,7 @@ export default function SharePage() {
                       <p className="font-bold text-xl text-text">{video.duration}s</p>
                       <p className="text-text-tertiary text-xs uppercase tracking-widest">Video Süresi</p>
                     </div>
-                  </div>
+                  </Card>
                 )}
               </div>
             )}
@@ -250,7 +252,7 @@ export default function SharePage() {
             />
 
             {/* AI insights card */}
-            <div className="bg-surface border border-border p-8 rounded-lg">
+            <Card className="p-8">
               <div className="flex items-center gap-3 mb-6">
                 <Sparkles className="text-accent-text w-6 h-6" />
                 <h3 className="text-sm font-black font-display uppercase tracking-[0.2em] text-accent-text">AI Seyahat İpuçları</h3>
@@ -273,10 +275,10 @@ export default function SharePage() {
               ) : (
                 <p className="text-text-tertiary text-sm">Bu video için AI seyahat ipucu oluşturuldu.</p>
               )}
-            </div>
+            </Card>
 
             {/* Map placeholder / share card */}
-            <div className="bg-surface border border-border rounded-lg overflow-hidden">
+            <Card>
               <div className="h-52 relative overflow-hidden bg-surface2">
                 {locations.slice(0, 4).map((loc, i) => (
                   <div
@@ -298,19 +300,19 @@ export default function SharePage() {
               <div className="p-6">
                 <h4 className="font-bold text-xl text-text mb-2 tracking-tight">{locations.length} Lokasyon</h4>
                 <p className="text-sm text-text-tertiary mb-6">AI tarafından optimize edilmiş rota.</p>
-                <button
-                  onClick={openMaps}
-                  className="w-full py-3.5 border border-route/25 text-route font-bold rounded-md hover:bg-route hover:text-bg transition-colors text-sm uppercase tracking-widest"
+                <Button
+                  variant="outline" onClick={openMaps}
+                  className="w-full py-3.5 border-route/25 text-route hover:bg-route hover:text-bg text-sm uppercase tracking-widest"
                 >
                   Haritada Gör
-                </button>
+                </Button>
               </div>
-            </div>
+            </Card>
 
             {/* Quick share tip */}
-            <div
+            <Card
               onClick={handleShare}
-              className="bg-surface border border-border p-6 rounded-lg flex items-center gap-4 cursor-pointer hover:border-border-strong transition-colors"
+              className="p-6 flex items-center gap-4 cursor-pointer hover:border-border-strong transition-colors"
             >
               <div className="w-12 h-12 rounded-md bg-accent/10 border border-accent/20 flex items-center justify-center text-accent-text">
                 <Lightbulb className="w-5 h-5" />
@@ -321,7 +323,7 @@ export default function SharePage() {
                   {copied ? "Panoya kopyalandı ✓" : "Arkadaşlarınla paylaş"}
                 </p>
               </div>
-            </div>
+            </Card>
           </aside>
         </div>
       </main>

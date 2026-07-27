@@ -14,6 +14,7 @@ import {
 import Navbar from "@/components/Navbar";
 import { useParams, useRouter } from "next/navigation";
 import { getPlan, updatePlanOrder, type VideoDetail } from "@/lib/api";
+import { Card } from "@/components/ui/Card";
 
 interface Event {
   id: number;
@@ -293,19 +294,17 @@ export default function EditorPage() {
           </div>
 
           {/* AI özet widget */}
-          <div className="bg-surface border border-border p-8 rounded-lg relative overflow-hidden">
-            <div className="relative z-10">
-              <h4 className="font-display font-black text-accent-text flex items-center gap-2 mb-4 tracking-tight">
-                <Sparkles className="w-5 h-5" />
-                AI Notu
-              </h4>
-              <p className="text-xs text-text-secondary leading-relaxed">
-                {tips.length > 0
-                  ? tips[0].tip
-                  : "Rota optimizasyonu tamamlandı. Lokasyonlar en verimli sırayla düzenlendi."}
-              </p>
-            </div>
-          </div>
+          <Card className="p-8 relative">
+            <h4 className="font-display font-black text-accent-text flex items-center gap-2 mb-4 tracking-tight">
+              <Sparkles className="w-5 h-5" />
+              AI Notu
+            </h4>
+            <p className="text-xs text-text-secondary leading-relaxed">
+              {tips.length > 0
+                ? tips[0].tip
+                : "Rota optimizasyonu tamamlandı. Lokasyonlar en verimli sırayla düzenlendi."}
+            </p>
+          </Card>
         </aside>
 
         {/* ── Timeline ── */}
@@ -381,10 +380,10 @@ export default function EditorPage() {
               >
                 <div className="absolute left-[14px] w-4 h-4 rounded-full border-4 border-bg bg-route z-10 hidden lg:block mt-8" />
 
-                <div
+                <Card
                   draggable
                   onDragStart={() => handleDragStart(i)}
-                  className="bg-surface border border-border rounded-lg overflow-hidden flex flex-col lg:flex-row w-full cursor-grab active:cursor-grabbing hover:border-border-strong transition-colors">
+                  className="flex flex-col lg:flex-row w-full cursor-grab active:cursor-grabbing hover:border-border-strong transition-colors">
 
                   {/* Konum ikonu (fotoğraf yerine) */}
                   <div className="w-full lg:w-52 h-40 lg:h-auto relative flex-shrink-0 bg-surface2 flex items-center justify-center">
@@ -408,7 +407,7 @@ export default function EditorPage() {
                       <div className="w-9 h-9 rounded-full bg-accent/10 border border-accent/25 text-accent-text flex items-center justify-center text-[10px] font-black">AI</div>
                     </div>
                   </div>
-                </div>
+                </Card>
               </motion.div>
             ))}
           </div>

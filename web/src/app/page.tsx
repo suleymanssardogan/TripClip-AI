@@ -6,6 +6,8 @@ import { ArrowRight, Play, Cpu, MapPin, Mic, Eye, ChevronDown, Sparkles } from "
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import { getStats, type PlatformStats } from "@/lib/api";
+import { buttonVariants } from "@/components/ui/Button";
+import { cn } from "@/lib/utils";
 
 const FEATURES = [
   { icon: Eye,    label: "Görsel Analiz",   desc: "YOLOv8 ve Google Vision ile kareler taranır, nesneler ve simge yapılar tanınır." },
@@ -57,7 +59,12 @@ export default function LandingPage() {
 
       {/* HERO */}
       <section ref={heroRef} className="relative pt-32 pb-24 px-6 overflow-hidden">
-        <div className="max-w-6xl mx-auto grid lg:grid-cols-[1.1fr_1fr] gap-12 items-center">
+        <div
+          aria-hidden
+          className="absolute -top-32 -left-32 w-[36rem] h-[36rem] rounded-full opacity-[0.1] blur-3xl pointer-events-none"
+          style={{ background: "radial-gradient(circle, rgb(var(--c-accent)) 0%, rgb(var(--c-route)) 70%, transparent 100%)" }}
+        />
+        <div className="max-w-6xl mx-auto grid lg:grid-cols-[1.1fr_1fr] gap-12 items-center relative">
           <motion.div style={{ y: heroY, opacity: heroOpacity }} className="relative z-10">
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
               className="inline-flex items-center gap-2.5 mb-8 px-4 py-1.5 rounded-full border border-border bg-surface2">
@@ -85,13 +92,11 @@ export default function LandingPage() {
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.35 }}
               className="flex flex-col sm:flex-row items-start gap-4">
-              <Link href="/login"
-                className="bg-accent text-on-accent hover:bg-accent-hover transition-all px-8 py-4 rounded-md text-base font-bold flex items-center gap-2 group">
+              <Link href="/login" className={cn(buttonVariants({ size: "lg" }), "group")}>
                 Hemen Başla
                 <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
               </Link>
-              <Link href="/explore"
-                className="border border-border-strong hover:border-route/40 hover:bg-route/5 transition-all px-8 py-4 rounded-md text-base font-bold flex items-center gap-2 text-text">
+              <Link href="/explore" className={buttonVariants({ variant: "outline", size: "lg" })}>
                 <Play className="w-4 h-4" /> Gezileri Keşfet
               </Link>
             </motion.div>
@@ -132,7 +137,7 @@ export default function LandingPage() {
         <div className="flex gap-14 whitespace-nowrap animate-ticker">
           {[...TICKER, ...TICKER, ...TICKER].map((item, i) => (
             <span key={i} className="text-sm font-mono text-text-tertiary flex items-center gap-4">
-              <span className="w-1 h-1 rounded-full bg-text-tertiary flex-shrink-0" />
+              <span className={`w-1 h-1 rounded-full flex-shrink-0 ${i % 2 === 0 ? "bg-route" : "bg-accent"}`} />
               {item}
             </span>
           ))}
@@ -237,13 +242,11 @@ export default function LandingPage() {
             web&apos;den keşfet ve paylaş.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link href="/login"
-              className="bg-accent text-on-accent hover:bg-accent-hover transition-all px-8 py-4 rounded-md font-bold flex items-center justify-center gap-2 group">
+            <Link href="/login" className={cn(buttonVariants({ size: "lg" }), "group")}>
               Ücretsiz Başla
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </Link>
-            <Link href="/explore"
-              className="border border-border-strong hover:border-route/40 transition-all px-8 py-4 rounded-md font-bold flex items-center justify-center gap-2 text-text">
+            <Link href="/explore" className={buttonVariants({ variant: "outline", size: "lg" })}>
               Gezileri Keşfet
             </Link>
           </div>

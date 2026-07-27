@@ -7,6 +7,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { login, saveAuthTokens } from "@/lib/api";
 import PasswordInput from "@/components/PasswordInput";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -74,11 +76,8 @@ export default function LoginPage() {
               <label className="font-mono text-xs text-text-tertiary uppercase tracking-widest block mb-2">
                 E-posta
               </label>
-              <input
+              <Input
                 name="email" type="email" placeholder="sen@ornek.com"
-                className="w-full bg-surface2 border border-border-strong rounded-md px-4 py-3.5
-                  text-text placeholder:text-text-tertiary text-sm
-                  focus:outline-none focus:border-accent-text transition-colors"
                 required disabled={loading || success}
               />
             </div>
@@ -95,17 +94,16 @@ export default function LoginPage() {
               />
             </div>
 
-            <button
+            <Button
               type="submit" disabled={loading || success}
-              className="w-full flex items-center justify-center gap-2 bg-accent text-on-accent hover:bg-accent-hover transition-colors
-                rounded-md py-3.5 mt-2 font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full py-3.5 mt-2"
             >
               {loading ? (
                 <><Loader2 className="w-4 h-4 animate-spin" /> Giriş yapılıyor…</>
               ) : (
                 <><span>Giriş Yap</span><ArrowRight className="w-4 h-4" /></>
               )}
-            </button>
+            </Button>
           </form>
 
           <div className="border-t border-border my-7" />

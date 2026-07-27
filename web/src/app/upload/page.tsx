@@ -10,6 +10,9 @@ import {
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import { uploadVideo, queueUrl } from "@/lib/api";
+import { Button } from "@/components/ui/Button";
+import { Input } from "@/components/ui/Input";
+import { Card } from "@/components/ui/Card";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -368,17 +371,15 @@ export default function UploadPage() {
                       disabled={uploading}
                     />
 
-                    <button
+                    <Button
                       onClick={handleFileSubmit}
                       disabled={!file || uploading}
-                      className="w-full flex items-center justify-center gap-2
-                        py-4 rounded-md text-sm font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors
-                        disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="w-full py-4 text-sm"
                       aria-label="Videoyu yükle ve analiz başlat"
                     >
                       <Upload className="w-4 h-4" aria-hidden />
                       Yükle ve Analiz Başlat
-                    </button>
+                    </Button>
                   </>
                 )}
               </motion.div>
@@ -401,7 +402,7 @@ export default function UploadPage() {
                     >
                       Video Linki
                     </label>
-                    <input
+                    <Input
                       id="video-url"
                       type="url"
                       value={url}
@@ -411,22 +412,16 @@ export default function UploadPage() {
                       autoComplete="off"
                       spellCheck={false}
                       aria-describedby="url-hint"
-                      className="w-full bg-surface2 border border-border-strong rounded-md
-                        px-4 py-3.5 text-text placeholder:text-text-tertiary text-sm
-                        focus:outline-none focus:border-accent-text transition-colors
-                        disabled:opacity-50"
                     />
                     <p id="url-hint" className="text-text-tertiary text-xs mt-2">
                       Instagram Reels, YouTube Shorts veya doğrudan MP4 linki desteklenmektedir.
                     </p>
                   </div>
 
-                  <button
+                  <Button
                     type="submit"
                     disabled={!url.trim() || uploading}
-                    className="w-full flex items-center justify-center gap-2
-                      py-4 rounded-md text-sm font-bold bg-accent text-on-accent hover:bg-accent-hover transition-colors
-                      disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="w-full py-4 text-sm"
                     aria-label="Linki kuyruğa al ve analiz başlat"
                   >
                     {uploading ? (
@@ -440,7 +435,7 @@ export default function UploadPage() {
                         Kuyruğa Al
                       </>
                     )}
-                  </button>
+                  </Button>
                 </form>
               </motion.div>
             )}
@@ -461,10 +456,10 @@ export default function UploadPage() {
             { step: "2", label: "AI analiz eder" },
             { step: "3", label: "Gezi planın hazır" },
           ].map(({ step, label }) => (
-            <div key={step} className="bg-surface border border-border rounded-lg p-4">
+            <Card key={step} className="p-4">
               <div className="font-mono text-xs text-accent-text mb-2">0{step}</div>
               <p className="text-text-secondary text-xs leading-snug">{label}</p>
-            </div>
+            </Card>
           ))}
         </motion.div>
 

@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { CheckCircle, ArrowRight, Smartphone, Globe, Sparkles } from "lucide-react";
+import { buttonVariants } from "@/components/ui/Button";
+import { Card } from "@/components/ui/Card";
+import { cn } from "@/lib/utils";
 
 export default function WelcomePage() {
   const router = useRouter();
@@ -57,7 +60,7 @@ export default function WelcomePage() {
         </motion.p>
 
         {/* Adımlar */}
-        <div className="bg-surface border border-border rounded-lg p-6 text-left mb-6 space-y-4">
+        <Card className="p-6 text-left mb-6 space-y-4">
           <p className="font-mono text-xs text-text-tertiary uppercase tracking-widest mb-4">
             Nasıl Kullanırsın?
           </p>
@@ -94,7 +97,7 @@ export default function WelcomePage() {
               </div>
             </motion.div>
           ))}
-        </div>
+        </Card>
 
         {/* Butonlar */}
         <motion.div
@@ -102,15 +105,12 @@ export default function WelcomePage() {
           transition={{ delay: 0.65 }}
           className="flex flex-col gap-3"
         >
-          <Link
-            href="/dashboard"
-            className="bg-accent text-on-accent hover:bg-accent-hover transition-colors py-3.5 rounded-md font-bold text-sm flex items-center justify-center gap-2"
-          >
+          <Link href="/dashboard" className={buttonVariants({ size: "md" }) + " py-3.5"}>
             Dashboard&apos;a Git <ArrowRight className="w-4 h-4" />
           </Link>
           <Link
             href="/explore"
-            className="py-3.5 rounded-md text-sm text-text-secondary hover:text-text border border-border-strong hover:border-border-strong transition-all"
+            className={cn(buttonVariants({ variant: "outline", size: "md" }), "py-3.5 font-normal text-text-secondary hover:text-text")}
           >
             Önce Gezileri Keşfet
           </Link>
