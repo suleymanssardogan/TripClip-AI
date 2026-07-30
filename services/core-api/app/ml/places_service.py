@@ -76,10 +76,10 @@ class PlacesService:
         # Redis erişilemezse (bağlantı koptu) process-içi fallback için kullanılır.
         self._rate_lock = threading.Lock()
         self._local_next_slot: dict = {}
-        # Sticky bool → timestamp tabanlı retry (60 sn sonra tekrar dene)
+        # Sticky bool → timestamp tabanlı retry. Process-içi fallback; asıl
+        # durum Redis'te tutulur (bkz. _overpass_circuit_open).
         self._overpass_failed_at: Optional[float] = None
-        # İlk timeout'dan sonra tek pipeline süresince skip et (600s = 10dk)
-        # Bir sonraki video'da tekrar denenecek (PlacesService yeniden init edilir)
+        # İlk timeout'dan sonra bu süre boyunca Overpass'ı hiç deneme.
         self._overpass_retry_after: float = 600.0
         try:
             # REDIS_URL (auth dahil) — hardcoded host/port kullanmak production'da
@@ -124,6 +124,75 @@ class PlacesService:
             if wait > 0:
                 time.sleep(wait)
             self._local_next_slot[key] = max(now, last_slot) + interval
+
+    # ─────────────────────────────────────────────────────────────
+    # Overpass devre kesici (circuit breaker)
+    # ─────────────────────────────────────────────────────────────
+    #
+    # Overpass endpoint'lerinin üçü de sürekli timeout veriyor (Türkiye
+    # bbox'ında regex isim araması çok pahalı bir sorgu). Devre kesici
+    # eskiden yalnızca instance alanındaydı; PlacesService her videoda
+    # yeniden kurulduğu için her video 3 endpoint × timeout kadar —
+    # ölçtüğümüzde ~28 saniye — boşa bekliyordu ve sıfır sonuç dönüyordu.
+    # Durumu Redis'e taşıyınca ilk başarısızlıktan sonraki tüm videolar
+    # Overpass'ı hiç denemeden geçiyor.
+
+    _OVERPASS_CIRCUIT_KEY  = "circuit:overpass:open"
+    # "open" süresi dolduğunda tamamen sağlıklı varsaymamak için — Overpass
+    # bir kez düştüyse bir sonraki deneme UCUZ olmalı (tek endpoint, kısa
+    # timeout). Bu bayrak olmadan cooldown her dolduğunda bir video yeniden
+    # 3 endpoint × 8s = ~25s ödüyordu.
+    _OVERPASS_DEGRADED_KEY = "circuit:overpass:degraded"
+    _OVERPASS_DEGRADED_TTL = 24 * 3600
+    _OVERPASS_PROBE_TIMEOUT = 3.0
+
+    def _overpass_circuit_open(self) -> bool:
+        """Devre açık mı (yani Overpass'ı hiç denememeli miyiz)?"""
+        if self.cache:
+            try:
+                if self.cache.get(self._OVERPASS_CIRCUIT_KEY):
+                    return True
+            except Exception:
+                pass  # Redis yoksa aşağıdaki process-içi kontrole düş
+
+        if self._overpass_failed_at is None:
+            return False
+        return (time.time() - self._overpass_failed_at) < self._overpass_retry_after
+
+    def _overpass_probe_mode(self) -> bool:
+        """
+        Yarı-açık durum: devre kapandı ama Overpass yakın geçmişte düşmüştü.
+        Tek endpoint'e kısa timeout'la yoklama yaparız; başarısızsa devre
+        hemen yeniden açılır, başarılıysa tamamen iyileşmiş sayılır.
+        """
+        if not self.cache:
+            return self._overpass_failed_at is not None
+        try:
+            return bool(self.cache.get(self._OVERPASS_DEGRADED_KEY))
+        except Exception:
+            return self._overpass_failed_at is not None
+
+    def _trip_overpass_circuit(self) -> None:
+        """Devreyi aç — `_overpass_retry_after` boyunca Overpass denenmez."""
+        self._overpass_failed_at = time.time()
+        if self.cache:
+            try:
+                self.cache.setex(self._OVERPASS_CIRCUIT_KEY,
+                                 int(self._overpass_retry_after), "1")
+                self.cache.setex(self._OVERPASS_DEGRADED_KEY,
+                                 self._OVERPASS_DEGRADED_TTL, "1")
+            except Exception:
+                pass
+
+    def _reset_overpass_circuit(self) -> None:
+        """Başarılı yanıt geldi — Overpass tamamen sağlıklı say."""
+        self._overpass_failed_at = None
+        if self.cache:
+            try:
+                self.cache.delete(self._OVERPASS_CIRCUIT_KEY,
+                                  self._OVERPASS_DEGRADED_KEY)
+            except Exception:
+                pass
 
     # ─────────────────────────────────────────────────────────────
     # Cache helpers
@@ -363,16 +432,10 @@ class PlacesService:
 out center 3;
 """
         try:
-            # Cooldown kontrolü — son hatadan _overpass_retry_after sn geçmediyse atla
-            if self._overpass_failed_at is not None:
-                elapsed = time.time() - self._overpass_failed_at
-                if elapsed < self._overpass_retry_after:
-                    logger.debug("Overpass cooldown (%.0fs kaldı), atlanıyor: '%s'",
-                                 self._overpass_retry_after - elapsed, name)
-                    return None
-                # Cooldown doldu → bir şans daha
-                logger.info("Overpass yeniden deneniyor (cooldown doldu)…")
-                self._overpass_failed_at = None
+            # Devre açıksa hiç deneme — videolar ve worker'lar arasında paylaşılır.
+            if self._overpass_circuit_open():
+                logger.debug("Overpass devresi açık, atlanıyor: '%s'", name)
+                return None
 
             # Round-robin başlangıç endpoint'i — her çağrı bir sonraki endpoint'ten
             # başlar. Aşağıda her endpoint KENDİ throttle key'iyle bekletildiği için
@@ -383,10 +446,18 @@ out center 3;
                 start_idx = self._overpass_endpoint_idx
                 self._overpass_endpoint_idx = (start_idx + 1) % n_endpoints
 
+            # Yarı-açık yoklama: tek endpoint, kısa timeout. Overpass hâlâ
+            # ölüyse maliyet 3s (25s değil); ayaktaysa devre tamamen kapanır.
+            probing = self._overpass_probe_mode()
+            if probing:
+                attempts, req_timeout = 1, self._OVERPASS_PROBE_TIMEOUT
+                logger.info("Overpass yoklaması (tek endpoint, %.0fs)…", req_timeout)
+            else:
+                attempts, req_timeout = n_endpoints, 8
+
             # Fallback endpoint zinciri — ilk cevap veren kazanır
             resp = None
-            tried = 0
-            for attempt in range(n_endpoints):
+            for attempt in range(attempts):
                 idx = (start_idx + attempt) % n_endpoints
                 url = self._OVERPASS_ENDPOINTS[idx]
                 # Rate limiter: her endpoint bağımsız — min 3s arayla, Redis
@@ -394,24 +465,25 @@ out center 3;
                 self._throttle(f"ratelimit:overpass:{idx}", self._overpass_min_interval)
                 try:
                     resp = requests.post(url, data={"data": query},
-                                         headers=self.headers, timeout=8)
+                                         headers=self.headers, timeout=req_timeout)
                     if resp.status_code == 200:
                         break
                     if resp.status_code == 429:
                         time.sleep(3)
                 except requests.exceptions.Timeout:
                     logger.warning("Overpass timeout: %s — sonraki endpoint deneniyor", url)
-                    tried += 1
                     continue
                 except Exception:
-                    tried += 1
                     continue
 
             if resp is None or resp.status_code != 200:
-                # Tüm endpointler başarısız → cooldown başlat (60s)
-                logger.warning("Overpass: tüm endpointler başarısız '%s' — 60s cooldown", name)
-                self._overpass_failed_at = time.time()
+                logger.warning("Overpass: tüm endpointler başarısız '%s' — devre %ds açılıyor",
+                               name, int(self._overpass_retry_after))
+                self._trip_overpass_circuit()
                 return None
+
+            # Buraya geldiysek Overpass yanıt verdi — devreyi tamamen kapat.
+            self._reset_overpass_circuit()
 
             elements = resp.json().get("elements", [])
             if not elements:
@@ -474,7 +546,7 @@ out center 3;
                                            "ConnectionError", "NewConnectionError")):
                 logger.warning("Overpass DNS/network hatası — %ds sonra tekrar denenecek: %s",
                                int(self._overpass_retry_after), e)
-                self._overpass_failed_at = time.time()
+                self._trip_overpass_circuit()
             else:
                 logger.error("Overpass hatası '%s': %s", name, e)
             return None

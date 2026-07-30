@@ -127,7 +127,11 @@ class GeminiService:
         """
         url  = f"{self._endpoint}?key={self.api_key}"
         generation_config: Dict = {
-            "temperature":    0.2,
+            # temperature=0 → greedy decoding. 0.2 ile aynı videodan farklı
+            # sayıda mekan çıkıyordu (ölçüm: aynı video 3 kez işlendi, Gemini
+            # 9 / 9 / 5 lokasyon döndürdü). Yaratıcılığa ihtiyacımız yok;
+            # ipuçlarında da tutarlılık lehine bu ödünç kabul edilebilir.
+            "temperature":    0.0,
             "maxOutputTokens": 2048,
         }
         if response_schema is not None:
