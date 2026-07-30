@@ -128,12 +128,20 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
         set_progress(video_id, "queued", 2)
 
         processor = _get_processor()
-        result    = processor.process_video(video_path, video_id)
+        # İpuçları kritik yolda değil — kullanıcı haritayı ve mekanları
+        # görmek için beklemesin. Video COMPLETED işaretlendikten sonra
+        # ayrı task üretiyor (ölçüm: ~6s kazanç).
+        result    = processor.process_video(video_path, video_id, defer_tips=True)
 
         repo.save_results(video_id, result)
         set_progress(video_id, "completed", 100)
 
         logger.info("✅ Task tamamlandı | video_id=%s", video_id)
+
+        # Sonucu kaydettikten SONRA kuyruğa al — bu task başarısız olsa bile
+        # video COMPLETED kalır, sadece ipuçları eksik olur.
+        generate_tips_task.delay(video_id)
+
         return {"status": "completed", "video_id": video_id}
 
     except SoftTimeLimitExceeded:
@@ -156,6 +164,65 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
             set_progress(video_id, "retrying", 0)
 
         raise   # autoretry_for tetiklensin
+
+    finally:
+        db.close()
+
+
+# ── Ertelenmiş Seyahat İpuçları Task'ı ────────────────────────────────────────
+
+@_celery_app.task(
+    name="app.tasks.video_tasks.generate_tips_task",
+    queue="video_processing",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+    retry_backoff=True,
+    acks_late=True,
+)
+def generate_tips_task(self, video_id: int) -> dict:
+    """
+    Seyahat ipuçlarını video COMPLETED olduktan sonra üretir.
+
+    Ana pipeline'dan ayrıldı çünkü kullanıcının haritayı ve mekan listesini
+    görmesi için ipuçları gerekmiyor; sıralı olarak beklemek toplam süreye
+    ~6 saniye ekliyordu.
+
+    Bu task başarısız olursa video COMPLETED kalır ve yalnızca ipuçları
+    bölümü boş görünür — pipeline'ın geri kalanındaki graceful degradation
+    felsefesiyle tutarlı.
+    """
+    from app.core.database import SessionLocal
+    from app.infrastructure.repositories.sql_video_repository import SqlVideoRepository
+
+    db   = SessionLocal()
+    repo = SqlVideoRepository(db)
+
+    try:
+        video = repo.get_by_id(video_id)
+        if not video:
+            logger.warning("İpucu task'ı: video bulunamadı | video_id=%s", video_id)
+            return {"status": "skipped", "video_id": video_id}
+
+        locations = video.deduplicated_locations or []
+        if not locations:
+            logger.info("İpucu task'ı: lokasyon yok, atlanıyor | video_id=%s", video_id)
+            return {"status": "skipped", "video_id": video_id}
+
+        processor = _get_processor()
+        tips      = processor.generate_travel_tips(locations, video_id)
+
+        repo.save_travel_tips(video_id, tips)
+        tip_count = len((tips or {}).get("tips", []))
+        logger.info("💡 İpuçları kaydedildi | video_id=%s | %d ipucu", video_id, tip_count)
+        return {"status": "completed", "video_id": video_id, "tips": tip_count}
+
+    except Exception as exc:
+        logger.error("İpucu task'ı başarısız | video_id=%s | hata: %s", video_id, exc)
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc)
+        # Denemeler tükendi — video COMPLETED kalsın, sessizce vazgeç.
+        return {"status": "failed", "video_id": video_id}
 
     finally:
         db.close()
@@ -214,13 +281,17 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
 
         # ── Adım 2: ML pipeline ─────────────────────────────────────────────
         processor = _get_processor()
-        result    = processor.process_video(video_path, video_id)
+        # İpuçları ertelenir — bkz. process_video_task.
+        result    = processor.process_video(video_path, video_id, defer_tips=True)
 
         # ── Adım 3: Kaydet ──────────────────────────────────────────────────
         repo.save_results(video_id, result)
         set_progress(video_id, "completed", 100)
 
         logger.info("✅ URL task tamamlandı | video_id=%s", video_id)
+
+        generate_tips_task.delay(video_id)
+
         return {"status": "completed", "video_id": video_id}
 
     except SoftTimeLimitExceeded:

@@ -151,6 +151,20 @@ class SqlVideoRepository(AbstractVideoRepository):
         video.status            = VideoStatus.COMPLETED
         self._db.commit()
 
+    def save_travel_tips(self, video_id: int, tips: Dict[str, Any]) -> None:
+        """
+        Yalnızca seyahat ipuçlarını günceller.
+
+        Ertelenmiş ipucu task'ı için — video zaten COMPLETED durumda ve
+        kullanıcı sonucu görüyor olabilir; status'a veya diğer alanlara
+        dokunmadan sadece bu alanı doldururuz.
+        """
+        video = self.get_by_id(video_id)
+        if not video:
+            return
+        video.travel_tips = tips
+        self._db.commit()
+
     def mark_failed(self, video_id: int) -> None:
         video = self.get_by_id(video_id)
         if video:

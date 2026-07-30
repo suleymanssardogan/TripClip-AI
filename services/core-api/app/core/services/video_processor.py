@@ -220,13 +220,49 @@ class VideoProcessingService:
     # Ana pipeline
     # ─────────────────────────────────────────────────────────────────────────
 
-    def process_video(self, video_path: str, video_id: int) -> Dict:
+    def _run_travel_tips(self, deduplicated_locations: List[Dict], video_id: int):
+        """İpuçlarını üretir. Pipeline içinden de, ertelenmiş task'tan da çağrılır."""
+        if self._use_gemini and self.gemini:
+            tip_names = [loc.get("original_name", "") for loc in deduplicated_locations]
+            return _safe_run(
+                "Gemini(tips)",
+                lambda: self.gemini.generate_travel_tips(tip_names, video_id=video_id) if tip_names else {},
+                fallback={},
+            )
+        return _safe_run(
+            "RAG",
+            lambda: (
+                self.rag.generate_travel_tips(deduplicated_locations)
+                if deduplicated_locations else {}
+            ),
+            fallback={},
+        )
+
+    def generate_travel_tips(self, deduplicated_locations: List[Dict],
+                             video_id: int) -> Dict:
+        """
+        Yalnızca seyahat ipuçlarını üretir — `defer_tips=True` ile çalışan
+        pipeline'ın ardından çağrılmak üzere.
+
+        Pipeline'daki `_safe_run` ile aynı graceful-degradation davranışını
+        korur: hata olursa boş dict döner, çağıran task patlamaz.
+        """
+        return self._run_travel_tips(deduplicated_locations, video_id).data
+
+    def process_video(self, video_path: str, video_id: int,
+                      defer_tips: bool = False) -> Dict:
         """
         Video → AI pipeline → sonuç dict.
 
         Graceful degradation garantisi:
           Her AI aşaması try/except ile sarılmıştır.
           Herhangi bir hata → fallback değer, işlem devam eder.
+
+        Args:
+            defer_tips: True ise seyahat ipuçları üretilmez ve sonuçtaki
+                `travel_tips` boş döner. Çağıran, video COMPLETED olduktan
+                sonra `generate_travel_tips` ile ayrıca üretmelidir —
+                kullanıcıyı ~6 saniye daha az bekletir.
         """
         if not self._ml_available:
             raise RuntimeError("ML servisleri mevcut değil — Docker ortamında çalıştırın")
@@ -611,25 +647,18 @@ class VideoProcessingService:
         # ─────────────────────────────────────────────────────────────────────
         # ── 9. Travel Tips: Gemini VEYA Ollama/RAG ───────────────────────────
         # ─────────────────────────────────────────────────────────────────────
-        set_progress(video_id, "rag", 95)
-        if self._use_gemini and self.gemini:
-            tip_names = [loc.get("original_name", "") for loc in deduplicated_locations]
-            r_rag = _safe_run(
-                "Gemini(tips)",
-                lambda: self.gemini.generate_travel_tips(tip_names, video_id=video_id) if tip_names else {},
-                fallback={},
-            )
+        # `defer_tips=True` ise burada üretilmez — kullanıcının sonucu görmesi
+        # için ipuçları gerekmiyor ve bu adım ölçümde ~6s tutuyordu. Çağıran
+        # (video_tasks) videoyu COMPLETED işaretledikten SONRA ayrı bir task ile
+        # üretip kaydeder.
+        if defer_tips:
+            travel_tips: Dict = {}
+            logger.info("💡 Seyahat ipuçları ertelendi — ayrı task üretecek")
         else:
-            r_rag = _safe_run(
-                "RAG",
-                lambda: (
-                    self.rag.generate_travel_tips(deduplicated_locations)
-                    if deduplicated_locations else {}
-                ),
-                fallback={},
-            )
-        travel_tips: Dict = r_rag.data
-        degradation_log.append(r_rag)
+            set_progress(video_id, "rag", 95)
+            r_rag = self._run_travel_tips(deduplicated_locations, video_id)
+            travel_tips = r_rag.data
+            degradation_log.append(r_rag)
 
         # ─────────────────────────────────────────────────────────────────────
         # ── 10. Qdrant — Vektör Embedding ────────────────────────────────────
