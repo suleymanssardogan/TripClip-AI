@@ -27,30 +27,119 @@ logger = logging.getLogger(__name__)
 MAX_FRAMES = 10   # Gemini'ye gönderilecek max frame sayısı
 API_BASE   = "https://generativelanguage.googleapis.com/v1beta/models"
 
+# ─────────────────────────────────────────────────────────────
+# Structured output şemaları (Gemini responseSchema — JSON mode)
+# ─────────────────────────────────────────────────────────────
+_LOCATIONS_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "locations": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "name": {"type": "STRING"},
+                    "lat":  {"type": "NUMBER", "nullable": True},
+                    "lng":  {"type": "NUMBER", "nullable": True},
+                    "type": {"type": "STRING"},
+                },
+                "required": ["name"],
+            },
+        }
+    },
+    "required": ["locations"],
+}
+
+_TRAVEL_TIPS_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "tips": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "location": {"type": "STRING"},
+                    "tip":      {"type": "STRING"},
+                },
+                "required": ["location", "tip"],
+            },
+        },
+        "summary": {"type": "STRING"},
+    },
+    "required": ["tips", "summary"],
+}
+
 
 class GeminiService:
+
+    # Celery'nin result_expires (3600s) ile uyumlu — bir task retry edilirse
+    # aynı pencerede Gemini'ye tekrar gidip tekrar ücretlendirilmez.
+    CACHE_TTL = 3600
 
     def __init__(self):
         self.api_key   = os.getenv("GEMINI_API_KEY", "")
         self.model     = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
         self._endpoint = f"{API_BASE}/{self.model}:generateContent"
+        try:
+            from app.core.redis import get_redis
+            self._redis = get_redis()
+        except Exception:
+            self._redis = None
         logger.info("GeminiService initialized (model=%s, REST API)", self.model)
+
+    # ─────────────────────────────────────────────────────────────
+    # Idempotency cache — video_id anahtarlı (retry'da tekrar ücretlendirmeyi
+    # önler). Sadece BAŞARILI sonuçlar cache'lenir — hata/fallback cache'lenmez,
+    # böylece bir retry gerçek bir yeniden deneme şansı bulur.
+    # ─────────────────────────────────────────────────────────────
+
+    def _cache_get(self, key: str):
+        if not self._redis:
+            return None
+        try:
+            raw = self._redis.get(key)
+            return json.loads(raw) if raw else None
+        except Exception:
+            return None
+
+    def _cache_set(self, key: str, data) -> None:
+        if not self._redis:
+            return
+        try:
+            self._redis.setex(key, self.CACHE_TTL, json.dumps(data))
+        except Exception:
+            pass
 
     # ─────────────────────────────────────────────────────────────
     # Core HTTP helper
     # ─────────────────────────────────────────────────────────────
 
-    def _call(self, parts: List[Dict], timeout: int = 60, max_retries: int = 3) -> str:
+    def _call(self, parts: List[Dict], timeout: int = 60, max_retries: int = 3,
+              response_schema: Optional[Dict] = None) -> str:
         """Gemini REST API'ye istek at, ham metin döndür.
         503/429 hatalarında otomatik retry (1s → 3s → 7s backoff).
+
+        response_schema verilirse Gemini'nin structured output modu (JSON mode)
+        devreye girer — model çıktısı şemaya uymak ZORUNDA, bu da
+        `_parse_json`'ın markdown-fence/truncated-JSON kurtarma yollarına
+        düşme ihtimalini ortadan kaldırır (üretimde gördüğümüz
+        "Gemini JSON parse hatası" fallback'inin kök nedeni).
         """
         url  = f"{self._endpoint}?key={self.api_key}"
+        generation_config: Dict = {
+            # temperature=0 → greedy decoding. 0.2 ile aynı videodan farklı
+            # sayıda mekan çıkıyordu (ölçüm: aynı video 3 kez işlendi, Gemini
+            # 9 / 9 / 5 lokasyon döndürdü). Yaratıcılığa ihtiyacımız yok;
+            # ipuçlarında da tutarlılık lehine bu ödünç kabul edilebilir.
+            "temperature":    0.0,
+            "maxOutputTokens": 2048,
+        }
+        if response_schema is not None:
+            generation_config["responseMimeType"] = "application/json"
+            generation_config["responseSchema"] = response_schema
         body = {
             "contents": [{"parts": parts}],
-            "generationConfig": {
-                "temperature":    0.2,
-                "maxOutputTokens": 2048,
-            },
+            "generationConfig": generation_config,
         }
         last_exc = None
         for attempt in range(max_retries):
@@ -153,6 +242,7 @@ class GeminiService:
         self,
         frames: List[str],
         transcript: str = "",
+        video_id: Optional[int] = None,
     ) -> List[Dict]:
         """
         Video frame'leri + ses transkripsiyonundan yer adlarını + koordinatlarını çıkar.
@@ -164,7 +254,18 @@ class GeminiService:
             ...
           ]
         Koordinat bilinmiyorsa lat/lng = None — uygulama yine de mekanı listeler.
+
+        video_id verilirse sonuç Redis'e cache'lenir — Celery task retry
+        ederse (autoretry_for) aynı video için Gemini'ye tekrar gidip tekrar
+        ücretlendirilmez.
         """
+        cache_key = f"gemini:locations:{video_id}" if video_id is not None else None
+        if cache_key:
+            cached = self._cache_get(cache_key)
+            if cached is not None:
+                logger.info("⚡ Gemini cache hit (locations) video_id=%s", video_id)
+                return cached
+
         parts: List[Dict] = []
 
         sampled = self._sample_frames(frames, MAX_FRAMES)
@@ -202,7 +303,7 @@ class GeminiService:
         parts.append({"text": prompt_text})
 
         try:
-            raw  = self._call(parts, timeout=60)
+            raw  = self._call(parts, timeout=60, response_schema=_LOCATIONS_SCHEMA)
             data = self._parse_json(raw)
             raw_locs = data.get("locations", [])
 
@@ -237,6 +338,8 @@ class GeminiService:
 
             names = [l["name"] for l in locs]
             logger.info("✅ Gemini: %d lokasyon → %s", len(locs), names)
+            if cache_key:
+                self._cache_set(cache_key, locs)
             return locs
 
         except json.JSONDecodeError:
@@ -245,8 +348,15 @@ class GeminiService:
             return [{"name": n, "lat": None, "lng": None, "type": "place"}
                     for n in self._line_fallback(raw_text)]
         except Exception as e:
+            # Burada []  döndürülüp yutulursa video_processor._safe_run bunu
+            # "başarılı, 0 lokasyon" ile ayırt edemez ve degradation raporu
+            # yanlış şekilde ✅ OK gösterir (bkz. 2026-07-26 DNS kesintisi
+            # olayı). Fırlatarak _safe_run'ın kendi fallback/degradation
+            # mekanizmasına devrediyoruz — döndürülen veri yine boş liste
+            # olur, tek fark artık doğru şekilde "fallback kullanıldı" olarak
+            # işaretlenmesi.
             logger.error("Gemini extract_locations hatası: %s", e)
-            return []
+            raise
 
     @staticmethod
     def _line_fallback(text: str) -> List[str]:
@@ -272,13 +382,22 @@ class GeminiService:
     # Travel tips
     # ─────────────────────────────────────────────────────────────
 
-    def generate_travel_tips(self, locations: List[str]) -> Dict:
+    def generate_travel_tips(self, locations: List[str], video_id: Optional[int] = None) -> Dict:
         """
         Lokasyon listesinden seyahat ipuçları üret.
         Ollama/Mistral'ın yerini alır — çok daha hızlı ve kaliteli.
+
+        video_id verilirse sonuç Redis'e cache'lenir (bkz. extract_locations).
         """
         if not locations:
             return {"tips": [], "summary": ""}
+
+        cache_key = f"gemini:tips:{video_id}" if video_id is not None else None
+        if cache_key:
+            cached = self._cache_get(cache_key)
+            if cached is not None:
+                logger.info("⚡ Gemini cache hit (tips) video_id=%s", video_id)
+                return cached
 
         loc_text = ", ".join(locations[:8])
         prompt   = (
@@ -290,12 +409,18 @@ class GeminiService:
         )
 
         try:
-            raw  = self._call([{"text": prompt}], timeout=30)
+            raw  = self._call([{"text": prompt}], timeout=30, response_schema=_TRAVEL_TIPS_SCHEMA)
             data = self._parse_json(raw)
             tips = data.get("tips", [])
             summary = data.get("summary", "")
             logger.info("✅ Gemini travel tips: %d ipucu", len(tips))
-            return {"tips": tips, "summary": summary}
+            result = {"tips": tips, "summary": summary}
+            if cache_key:
+                self._cache_set(cache_key, result)
+            return result
         except Exception as e:
+            # extract_locations'daki aynı gerekçe: sessizce boş dönmek yerine
+            # fırlatarak _safe_run'ın degradation raporunu doğru işaretlemesini
+            # sağlıyoruz.
             logger.error("Gemini travel tips hatası: %s", e)
-            return {"tips": [], "summary": ""}
+            raise

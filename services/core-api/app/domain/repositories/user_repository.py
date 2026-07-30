@@ -37,3 +37,8 @@ class AbstractUserRepository(ABC):
     def update_apple_id(self, user_id: int, apple_id: str) -> None:
         """Kullanıcının Apple ID'sini güncelle."""
         ...
+
+    @abstractmethod
+    def update_apns_token(self, user_id: int, token: str) -> None:
+        """Kullanıcının APNs push bildirim device token'ını güncelle."""
+        ...

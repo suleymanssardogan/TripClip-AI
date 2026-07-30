@@ -18,10 +18,10 @@ struct LoginView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "person.circle.fill")
                             .font(.system(size: 52))
-                            .foregroundStyle(AppColors.neon)
+                            .foregroundStyle(AppColors.accentText)
                         Text("Giriş Yap")
                             .font(.system(size: 28, weight: .bold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(AppColors.text)
                     }
                     .padding(.top, 40)
 
@@ -52,7 +52,7 @@ struct LoginView: View {
                     if let error = vm.error {
                         Text(error.localizedDescription ?? "Bir hata oluştu.")
                             .font(.system(size: 14))
-                            .foregroundStyle(AppColors.coral)
+                            .foregroundStyle(AppColors.destructive)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal)
                     }
@@ -63,7 +63,7 @@ struct LoginView: View {
                     } label: {
                         Group {
                             if vm.isLoading {
-                                ProgressView().tint(.black)
+                                ProgressView().tint(AppColors.onAccent)
                             } else {
                                 Text("Giriş Yap")
                                     .font(.system(size: 16, weight: .semibold))
@@ -71,10 +71,11 @@ struct LoginView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
-                        .background(vm.canSubmit ? AppColors.neon : AppColors.neon.opacity(0.35))
-                        .foregroundStyle(.black)
+                        .background(vm.canSubmit ? AppColors.accent : AppColors.accent.opacity(0.35))
+                        .foregroundStyle(AppColors.onAccent)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                     }
+                    .buttonStyle(PressableButtonStyle())
                     .disabled(!vm.canSubmit)
                 }
                 .padding(.horizontal, 24)
@@ -83,7 +84,6 @@ struct LoginView: View {
         }
         .navigationTitle("Giriş Yap")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(.dark, for: .navigationBar)
     }
 }
 
@@ -100,7 +100,7 @@ struct AuthTextField: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(AppColors.muted)
+                .foregroundStyle(AppColors.textSecondary)
                 .textCase(.uppercase)
                 .tracking(1)
 
@@ -116,14 +116,14 @@ struct AuthTextField: View {
             }
             .textContentType(contentType)
             .font(.system(size: 16))
-            .foregroundStyle(.white)
+            .foregroundStyle(AppColors.text)
             .padding(.horizontal, 14)
             .padding(.vertical, 14)
-            .background(AppColors.surface)
+            .background(AppColors.surface2)
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                    .stroke(AppColors.borderStrong, lineWidth: 1)
             )
         }
     }

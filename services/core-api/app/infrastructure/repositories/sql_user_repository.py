@@ -53,3 +53,9 @@ class SqlUserRepository(AbstractUserRepository):
         if user:
             user.apple_id = apple_id
             self._db.commit()
+
+    def update_apns_token(self, user_id: int, token: str) -> None:
+        user = self.get_by_id(user_id)
+        if user:
+            user.apns_token = token
+            self._db.commit()

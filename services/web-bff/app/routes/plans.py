@@ -3,8 +3,11 @@ Web BFF — Plans route handler'ları.
 Transformer katmanı veri şekillendirmeyi üstlenir; route sadece proxy + transform yapar.
 Tüm Core API hataları web_error_wrapper aracılığıyla Next.js dostu mesajlara çevrilir.
 """
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
+from pydantic import BaseModel
 import httpx
+from app.core.internal_client import internal_client
+from app.core.auth import get_current_user_id
 import os
 import uuid
 
@@ -29,7 +32,7 @@ async def get_plans(
     """Public feed — web kart formatında."""
     rid = str(uuid.uuid4())[:8]
     async with web_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with internal_client(15.0) as client:
             resp = await client.get(f"{CORE_API_URL}/internal/videos/public", params={
                 "city": city, "limit": limit, "offset": offset
             })
@@ -50,7 +53,7 @@ async def get_stats():
     """Platform istatistikleri."""
     rid = str(uuid.uuid4())[:8]
     async with web_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with internal_client(10.0) as client:
             resp = await client.get(f"{CORE_API_URL}/internal/videos/stats")
         if resp.status_code >= 400:
             # İstatistik hatası kritik değil — sıfır döndür
@@ -60,13 +63,23 @@ async def get_stats():
 
 @router.get("/user/{user_id}")
 async def get_user_plans(user_id: int):
-    """Kullanıcıya ait planlar — dashboard formatında."""
+    """
+    Kullanıcıya ait planlar — dashboard formatında.
+
+    NOT: core-api'nin /internal/videos/user/{id} route'u kullanıcının hiç
+    videosu olmasa bile normal 200 + boş liste döner ("kullanıcı yok" diye bir
+    hata yolu yok) — dolayısıyla >= 400 burada HER ZAMAN gerçek bir arıza
+    demektir (DB'ye erişilemedi vb.), "kullanıcının videosu yok" değil. Bu
+    yüzden eskiden burada yapılan sessizce boş liste dönme, dashboard'da gerçek
+    bir hatayı "henüz video yok" boş durumuyla ayırt edilemez hale getiriyordu
+    — şimdi hata olduğu gibi frontend'e yansıtılıyor.
+    """
     rid = str(uuid.uuid4())[:8]
     async with web_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with internal_client(15.0) as client:
             resp = await client.get(f"{CORE_API_URL}/internal/videos/user/{user_id}")
         if resp.status_code >= 400:
-            return {"plans": [], "total": 0}
+            raise_from_response(resp, request_id=rid)
 
     data = resp.json()
     return {
@@ -102,12 +115,36 @@ async def get_plan(video_id: int):
     return await _fetch_video(video_id)
 
 
+class StopOrderRequest(BaseModel):
+    order: list[list[int]]
+
+
+@router.patch("/{video_id}/order")
+async def update_plan_order(
+    video_id: int,
+    body: StopOrderRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """Editor'de kullanıcının belirlediği durak sırasını kalıcı olarak kaydeder — geçerli JWT zorunlu."""
+    rid = str(uuid.uuid4())[:8]
+    async with web_error_wrapper(request_id=rid):
+        async with internal_client(10.0) as client:
+            resp = await client.patch(
+                f"{CORE_API_URL}/internal/videos/{video_id}/order",
+                json={"order": body.order},
+                headers={"x-user-id": str(user_id)},
+            )
+        if resp.status_code >= 400:
+            raise_from_response(resp, request_id=rid)
+    return resp.json()
+
+
 # ── Yardımcı ──────────────────────────────────────────────────────────────────
 
 async def _fetch_video(video_id: int) -> dict:
     rid = str(uuid.uuid4())[:8]
     async with web_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with internal_client(15.0) as client:
             resp = await client.get(f"{CORE_API_URL}/internal/videos/{video_id}")
         if resp.status_code >= 400:
             raise_from_response(resp, request_id=rid)

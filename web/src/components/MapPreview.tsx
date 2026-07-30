@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, MapPin } from "lucide-react";
 import { useEffect, useState } from "react";
 import "leaflet/dist/leaflet.css";
 
@@ -20,15 +20,9 @@ interface Props {
   locations?: Location[];
 }
 
-const MOCK_POINTS: Location[] = [
-  { original_name: "Hadrian Kapısı", place_data: { name: "Hadrian Kapısı, Antalya", location: { lat: 36.8853, lng: 30.7082 }, type: "landmark" } },
-  { original_name: "Lara Plajı", place_data: { name: "Lara Plajı, Antalya", location: { lat: 36.8530, lng: 30.8037 }, type: "beach" } },
-  { original_name: "Kaleiçi", place_data: { name: "Kaleiçi, Antalya", location: { lat: 36.8840, lng: 30.7040 }, type: "district" } },
-];
-
 export default function MapPreview({ locations }: Props) {
   const [mounted, setMounted] = useState(false);
-  const points = locations && locations.length > 0 ? locations : MOCK_POINTS;
+  const points = locations ?? [];
 
   useEffect(() => {
     const initLeaflet = async () => {
@@ -43,10 +37,13 @@ export default function MapPreview({ locations }: Props) {
 
       if (L && L.Icon && L.Icon.Default) {
         delete L.Icon.Default.prototype._getIconUrl;
+        // unpkg CDN yerine public/leaflet altında bundle edilmiş yerel ikonlar —
+        // CDN erişilemezse (offline, kurumsal firewall) haritada işaretçi
+        // ikonları kırılmasın diye.
         L.Icon.Default.mergeOptions({
-          iconRetinaUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png",
-          iconUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png",
-          shadowUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png",
+          iconRetinaUrl: "/leaflet/marker-icon-2x.png",
+          iconUrl: "/leaflet/marker-icon.png",
+          shadowUrl: "/leaflet/marker-shadow.png",
         });
       }
       setTimeout(() => {
@@ -56,8 +53,17 @@ export default function MapPreview({ locations }: Props) {
     initLeaflet();
   }, []);
 
+  if (points.length === 0) {
+    return (
+      <div className="w-full h-full bg-surface2 rounded-md flex flex-col items-center justify-center gap-2 text-text-tertiary">
+        <MapPin className="w-6 h-6" />
+        <p className="text-xs">Haritada gösterilecek lokasyon yok</p>
+      </div>
+    );
+  }
+
   if (!mounted || !MapContainer) {
-    return <div className="w-full h-full bg-zinc-900 animate-pulse rounded-xl" />;
+    return <div className="w-full h-full bg-surface2 animate-pulse rounded-md" />;
   }
 
   const validPoints = points.filter(p => p.place_data?.location?.lat && p.place_data?.location?.lng);
@@ -85,7 +91,7 @@ export default function MapPreview({ locations }: Props) {
         />
 
         {validPoints.length > 1 && (
-          <Polyline positions={polylinePositions} color="#3b82f6" weight={2} opacity={0.6} dashArray="8,4" />
+          <Polyline positions={polylinePositions} color="#3FD9C4" weight={2} opacity={0.6} dashArray="8,4" />
         )}
 
         {validPoints.map((point, i) => (

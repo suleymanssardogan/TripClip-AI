@@ -22,17 +22,20 @@
 		5004D599C2AD94FED9B811ED /* PersistenceController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CBC611FB37ABE8A2FA8067F /* PersistenceController.swift */; };
 		587C391896AA84080537B245 /* RegisterViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 35B293E6D103D668154E573B /* RegisterViewModel.swift */; };
 		6807A0337CCF24A692AB3531 /* HistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F09F163223BC580F03BBEE16 /* HistoryView.swift */; };
+		69F712CDCC4B0EC67E389F94 /* AppColors.swift in Sources */ = {isa = PBXBuildFile; fileRef = F006DFAB5A2D29CC39E8C597 /* AppColors.swift */; };
 		7E22CDFF8F112AB1063DD7DC /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0563BA80A92665BB8D3A36D /* AppDelegate.swift */; };
 		808671464A9F8DDC44A75919 /* TripClipApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 143A5A8A5C2354EB64A0F946 /* TripClipApp.swift */; };
 		82AE0D51B2BCCF9606A438D6 /* BackgroundUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B16DD309E3B724FBA8CE45 /* BackgroundUploader.swift */; };
 		8ACEA027B149AE74906C2729 /* APIError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A71CAFE212CFE225B5434D /* APIError.swift */; };
 		8C9A5236AC2BA08600CA7055 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B88E418A97C9B8335A0182 /* ShareViewController.swift */; };
 		9B4E8E31E67157E8FB8B698C /* PlanRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDD0E790D6A67CF3AF6AB16D /* PlanRowView.swift */; };
+		9B7CD97AF5500C5452CB3A70 /* JWT.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18955B16C88C0C8D98082272 /* JWT.swift */; };
 		9D7203302EEB74D57AD161DE /* PlanModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26143DBFA5C545A4B9D4C760 /* PlanModels.swift */; };
 		9F64BB29DD6BD8A9A7419EDB /* TravelTipsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2917DDC3423D027754721B5F /* TravelTipsSection.swift */; };
 		A1C5DB090907E4A9DA8B0F17 /* Endpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFCA77B601BF52F62A73B068 /* Endpoint.swift */; };
 		A56C61BC9E5FBCF44A31FEC6 /* AuthEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADF35CFE561AB96B922DB322 /* AuthEnvironment.swift */; };
 		A84581BE16BADAAB51A78C31 /* RegisterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64B1B16045F93DF8A0A3065C /* RegisterView.swift */; };
+		B1076AE06106D575A2F5978E /* PressableButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBFC849057C30ECFA60FADF4 /* PressableButtonStyle.swift */; };
 		BA24C752A4F5DA672D334766 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74FD6988CA6DE8735788ABE5 /* APIClient.swift */; };
 		BB27274DD95A80DDD2A8E53A /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7A3D344230EA31CC3C37BDA /* HomeView.swift */; };
 		BE7975EC6E7D2277D55AE620 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = BF585DBEA2E14514DEA6E08B /* PrivacyInfo.xcprivacy */; };
@@ -46,6 +49,7 @@
 		E00CEE7F93833C0D7EED148E /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 078D0B6788566B732166478A /* HomeViewModel.swift */; };
 		E8C230BC762FF9E4831B86E9 /* AppDelegate+BackgroundSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C5D4C5737D28C75BDF4C80A /* AppDelegate+BackgroundSession.swift */; };
 		F008BA49749ABB595686F4B3 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AED6B7F3B523FDF9A4D46607 /* KeychainStore.swift */; };
+		F6ADC28A15BAB58092FC0AF6 /* JWT.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18955B16C88C0C8D98082272 /* JWT.swift */; };
 		FC4FA733719C851108014441 /* TripShareCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9718E29EE427E8620545B9F9 /* TripShareCard.swift */; };
 		FE4EA46483C084FB9ED91CCF /* ProcessingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2245417A4D703AEFD81A708 /* ProcessingView.swift */; };
 /* End PBXBuildFile section */
@@ -79,6 +83,7 @@
 		078D0B6788566B732166478A /* HomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
 		132C959BE851008CB9C4D30B /* TripMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripMapView.swift; sourceTree = "<group>"; };
 		143A5A8A5C2354EB64A0F946 /* TripClipApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripClipApp.swift; sourceTree = "<group>"; };
+		18955B16C88C0C8D98082272 /* JWT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JWT.swift; sourceTree = "<group>"; };
 		19410676BD43A209514607B7 /* TripClipApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripClipApp.entitlements; sourceTree = "<group>"; };
 		26143DBFA5C545A4B9D4C760 /* PlanModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanModels.swift; sourceTree = "<group>"; };
 		2917DDC3423D027754721B5F /* TravelTipsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelTipsSection.swift; sourceTree = "<group>"; };
@@ -111,11 +116,13 @@
 		B0563BA80A92665BB8D3A36D /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		B909B84E18F81BADFB1C56F5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		B983A39E9A82C36BFBE87DD6 /* LocationCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationCard.swift; sourceTree = "<group>"; };
+		BBFC849057C30ECFA60FADF4 /* PressableButtonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PressableButtonStyle.swift; sourceTree = "<group>"; };
 		BF585DBEA2E14514DEA6E08B /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		C7A3D344230EA31CC3C37BDA /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		CDD0E790D6A67CF3AF6AB16D /* PlanRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanRowView.swift; sourceTree = "<group>"; };
 		D8B88E418A97C9B8335A0182 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		DFCA77B601BF52F62A73B068 /* Endpoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Endpoint.swift; sourceTree = "<group>"; };
+		F006DFAB5A2D29CC39E8C597 /* AppColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColors.swift; sourceTree = "<group>"; };
 		F09F163223BC580F03BBEE16 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		FCE29E0073E0455FABE8A37D /* ProcessingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -163,6 +170,15 @@
 				F09F163223BC580F03BBEE16 /* HistoryView.swift */,
 			);
 			path = History;
+			sourceTree = "<group>";
+		};
+		589DBF1E53AFA1F8D25A24D4 /* DesignSystem */ = {
+			isa = PBXGroup;
+			children = (
+				F006DFAB5A2D29CC39E8C597 /* AppColors.swift */,
+				BBFC849057C30ECFA60FADF4 /* PressableButtonStyle.swift */,
+			);
+			path = DesignSystem;
 			sourceTree = "<group>";
 		};
 		61E941145A44C64230CEFE1B /* Products */ = {
@@ -217,6 +233,7 @@
 		8A608A3E3914C479635921D7 /* Core */ = {
 			isa = PBXGroup;
 			children = (
+				589DBF1E53AFA1F8D25A24D4 /* DesignSystem */,
 				BA51781BA454B69F03530009 /* Models */,
 				7B44EB12C287EBCAB0B60440 /* Network */,
 				FF2A0E2E4560D3BB90B4F32C /* Storage */,
@@ -280,6 +297,7 @@
 			children = (
 				77B16DD309E3B724FBA8CE45 /* BackgroundUploader.swift */,
 				558793C78BE2EFC720EEC7DC /* Config.swift */,
+				18955B16C88C0C8D98082272 /* JWT.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -363,6 +381,14 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
+					13183EADEDD48DE2DEBE961C = {
+						DevelopmentTeam = JN85S9B6B8;
+						ProvisioningStyle = Automatic;
+					};
+					EB45705A6AE19BAFAC410B9D = {
+						DevelopmentTeam = JN85S9B6B8;
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = C8193204079B72FED2CB4219 /* Build configuration list for PBXProject "TripClipApp" */;
@@ -404,6 +430,7 @@
 			files = (
 				BA24C752A4F5DA672D334766 /* APIClient.swift in Sources */,
 				8ACEA027B149AE74906C2729 /* APIError.swift in Sources */,
+				69F712CDCC4B0EC67E389F94 /* AppColors.swift in Sources */,
 				E8C230BC762FF9E4831B86E9 /* AppDelegate+BackgroundSession.swift in Sources */,
 				7E22CDFF8F112AB1063DD7DC /* AppDelegate.swift in Sources */,
 				0FC211B5B1D80639D5134AD7 /* AppGroupStore.swift in Sources */,
@@ -415,6 +442,7 @@
 				6807A0337CCF24A692AB3531 /* HistoryView.swift in Sources */,
 				BB27274DD95A80DDD2A8E53A /* HomeView.swift in Sources */,
 				E00CEE7F93833C0D7EED148E /* HomeViewModel.swift in Sources */,
+				F6ADC28A15BAB58092FC0AF6 /* JWT.swift in Sources */,
 				F008BA49749ABB595686F4B3 /* KeychainStore.swift in Sources */,
 				3E9004802942DA325016C776 /* LocationCard.swift in Sources */,
 				082059E394ACA22AAD1E394B /* LoginView.swift in Sources */,
@@ -423,6 +451,7 @@
 				5004D599C2AD94FED9B811ED /* PersistenceController.swift in Sources */,
 				9D7203302EEB74D57AD161DE /* PlanModels.swift in Sources */,
 				9B4E8E31E67157E8FB8B698C /* PlanRowView.swift in Sources */,
+				B1076AE06106D575A2F5978E /* PressableButtonStyle.swift in Sources */,
 				FE4EA46483C084FB9ED91CCF /* ProcessingView.swift in Sources */,
 				3747DE962DDD76C53907647F /* ProcessingViewModel.swift in Sources */,
 				A84581BE16BADAAB51A78C31 /* RegisterView.swift in Sources */,
@@ -445,6 +474,7 @@
 			files = (
 				471301EF00AF5918CAA667FA /* BackgroundUploader.swift in Sources */,
 				17720540365DE7A6FCEBB257 /* Config.swift in Sources */,
+				9B7CD97AF5500C5452CB3A70 /* JWT.swift in Sources */,
 				8C9A5236AC2BA08600CA7055 /* ShareViewController.swift in Sources */,
 				0D2B5F2FE3D717DD868B8950 /* URLExtractor.swift in Sources */,
 			);
@@ -511,9 +541,12 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = JN85S9B6B8;
+				"DEV_API_HOST[sdk=iphoneos*]" = 192.168.1.103;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -596,9 +629,11 @@
 				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 1;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = JN85S9B6B8;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;

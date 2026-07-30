@@ -12,6 +12,7 @@
 ///     handleEventsForBackgroundURLSession metodu çağrılır.
 
 import Foundation
+import UserNotifications
 
 // MARK: - BackgroundUploader
 
@@ -37,9 +38,16 @@ final class BackgroundUploader: NSObject, @unchecked Sendable {
 
     private enum Keys {
         static let authToken      = "authToken"          // Ana uygulama yazar, extension okur
+        static let refreshToken   = "refreshToken"        // Access token dolduğunda yenilemek için
         static let pendingURL     = "pendingURL"          // Gönderilmek üzere bekleyen URL
         static let pendingVideoID = "pendingVideoID"      // API'den dönen video ID'si
         static let lastUploadDate = "lastUploadDate"
+        // Upload başarısız olduğunda (ağ hatası veya sunucu hata status'u) yazılır.
+        // Eskiden başarısızlık sadece print() ile logluyordu — extension process
+        // zaten kapanmak üzereyken kimse bu logu görmüyordu ve ana uygulamanın
+        // başarısızlığı fark etmesinin HİÇBİR yolu yoktu (kullanıcı videoyu
+        // paylaşır, hiçbir şey olmaz, sessizce kaybolur).
+        static let pendingUploadError = "pendingUploadError"
     }
 
     // MARK: App Group UserDefaults
@@ -60,6 +68,59 @@ final class BackgroundUploader: NSObject, @unchecked Sendable {
     /// Ana uygulamanın yazmak için kullandığı setter.
     func storeAuthToken(_ token: String) {
         sharedDefaults.set(token, forKey: Keys.authToken)
+    }
+
+    /// Access token dolduğunda yeni bir tane almak için kullanılır.
+    var refreshToken: String? {
+        sharedDefaults.string(forKey: Keys.refreshToken)
+    }
+
+    // MARK: - Token Tazeleme
+
+    /// Access token'ın süresi dolmak üzereyse refresh token ile yeniler.
+    ///
+    /// Share Extension `APIClient`'ı kullanmıyor, dolayısıyla onun
+    /// 401-yakala-yenile-tekrarla mantığından faydalanamıyor. Ayrıca yenilemenin
+    /// `extensionContext.completeRequest`'ten ÖNCE yapılması şart: sonrasında
+    /// process suspend ediliyor ve yalnızca başlatılmış background task'lar
+    /// hayatta kalıyor, yeni bir ağ isteği yapacak vakit kalmıyor.
+    ///
+    /// - Returns: Kullanılabilir bir access token; oturum yenilenemiyorsa nil.
+    func ensureFreshToken() async -> String? {
+        guard let token = authToken else { return nil }
+        guard JWT.isExpired(token) else { return token }
+
+        guard
+            let refreshToken,
+            let endpoint = URL(string: "\(TripClipConfig.apiBaseURL)/api/mobile/auth/refresh")
+        else { return nil }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(
+            withJSONObject: ["refresh_token": refreshToken]
+        )
+        request.timeoutInterval = 15
+
+        do {
+            // Background session DEĞİL: yanıtı hemen okumamız gerekiyor.
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard
+                (response as? HTTPURLResponse)?.statusCode == 200,
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let newAccess = json["access_token"] as? String
+            else { return nil }
+
+            storeAuthToken(newAccess)
+            if let newRefresh = json["refresh_token"] as? String {
+                sharedDefaults.set(newRefresh, forKey: Keys.refreshToken)
+            }
+            return newAccess
+        } catch {
+            print("[BackgroundUploader] Token yenilenemedi: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Gönderilecek URL'i App Group'a yazar.
@@ -85,9 +146,36 @@ final class BackgroundUploader: NSObject, @unchecked Sendable {
         return id
     }
 
+    /// Upload başarısız olduysa hata mesajını yazar — ana uygulama bunu okuyup
+    /// kullanıcıya gösterebilir (bkz. AppDelegate+BackgroundSession.swift).
+    func storePendingUploadError(_ message: String) {
+        sharedDefaults.set(message, forKey: Keys.pendingUploadError)
+    }
+
+    /// Ana uygulama açıldığında/uyandığında çağırmalı — bekleyen bir upload
+    /// hatası varsa mesajı döner ve kaydı temizler (tek seferlik tüketim,
+    /// consumePendingVideoID ile aynı desen).
+    func consumePendingUploadError() -> String? {
+        guard let message = sharedDefaults.string(forKey: Keys.pendingUploadError) else { return nil }
+        sharedDefaults.removeObject(forKey: Keys.pendingUploadError)
+        sharedDefaults.removeObject(forKey: Keys.pendingURL)
+        return message
+    }
+
     // MARK: - Background URLSession
 
     private lazy var backgroundSession: URLSession = {
+        #if targetEnvironment(simulator)
+        // Background URLSession'ın delegate callback'leri (didCompleteWithError,
+        // urlSessionDidFinishEvents) Simulator'da güvenilir şekilde tetiklenmiyor —
+        // background session'ın tüm amacı (extension process ölse bile devam etmek)
+        // zaten Simulator'da anlamsız. Test edilebilirlik için normal (foreground)
+        // bir session kullanıyoruz; gerçek cihazda hâlâ background session kullanılır.
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest  = 30
+        config.timeoutIntervalForResource = 120
+        return URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        #else
         var config = URLSessionConfiguration.background(withIdentifier: Config.sessionID)
         config.sharedContainerIdentifier = Config.appGroupID
         config.isDiscretionary           = false
@@ -95,6 +183,7 @@ final class BackgroundUploader: NSObject, @unchecked Sendable {
         config.timeoutIntervalForRequest  = 30
         config.timeoutIntervalForResource = 120
         return URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        #endif
     }()
 
     // MARK: - Public API
@@ -210,12 +299,39 @@ extension BackgroundUploader: URLSessionDataDelegate {
     func urlSession(_ session: URLSession,
                     task: URLSessionTask,
                     didCompleteWithError error: Error?) {
-        if let error = error {
-            // Hata — URL App Group'ta duruyor, ana uygulama retry yapabilir
-            print("[BackgroundUploader] Upload başarısız: \(error.localizedDescription)")
+        // Ağ hatası (error != nil) VEYA sunucu hata status'u (401/429/500 vb.) —
+        // ikisi de kullanıcının videosunun kuyruğa alınamadığı anlamına gelir.
+        // Eskiden yalnızca error != nil kontrol ediliyordu; bir 4xx/5xx yanıtı
+        // (task tamamlanır, error nil) sessizce hiçbir iz bırakmadan kaybolurdu.
+        let httpStatus = (task.response as? HTTPURLResponse)?.statusCode
+        let failed = error != nil || !(200...299).contains(httpStatus ?? 200)
+
+        if failed {
+            let message = error?.localizedDescription
+                ?? "Sunucu hatası (\(httpStatus.map(String.init) ?? "bilinmeyen"))"
+            print("[BackgroundUploader] Upload başarısız: \(message)")
+            storePendingUploadError(message)
+            notifyUploadFailed(message: message)
         }
         // Temp dosyaları temizle
         cleanupTempFiles()
+    }
+
+    /// Best-effort local bildirim — kullanıcı uygulamayı hiç açmasa bile
+    /// paylaşımın başarısız olduğunu fark etsin diye. Bildirim izni yoksa
+    /// (kullanıcı reddetmiş) sessizce hiçbir şey olmaz.
+    private func notifyUploadFailed(message: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Video paylaşılamadı"
+        content.body  = message
+        content.sound = .default
+
+        let request = UNNotificationRequest(
+            identifier: "tripclip-upload-failed-\(UUID().uuidString)",
+            content: content,
+            trigger: nil   // hemen göster
+        )
+        UNUserNotificationCenter.current().add(request)
     }
 
     /// iOS, arka plan session'ı tamamladığında ana uygulamada

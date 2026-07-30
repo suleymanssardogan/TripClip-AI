@@ -12,6 +12,7 @@ enum AppGroupStore {
 
     private enum Keys {
         static let authToken     = "authToken"
+        static let refreshToken  = "refreshToken"
         static let currentUserID = "currentUserID"
     }
 
@@ -27,6 +28,20 @@ enum AppGroupStore {
 
     static func deleteToken() {
         defaults?.removeObject(forKey: Keys.authToken)
+    }
+
+    // MARK: - Refresh Token
+
+    static func saveRefreshToken(_ token: String) {
+        defaults?.set(token, forKey: Keys.refreshToken)
+    }
+
+    static func loadRefreshToken() -> String? {
+        defaults?.string(forKey: Keys.refreshToken)
+    }
+
+    static func deleteRefreshToken() {
+        defaults?.removeObject(forKey: Keys.refreshToken)
     }
 
     // MARK: - User ID (needed by Share Extension for x-user-id header)
@@ -49,6 +64,7 @@ enum AppGroupStore {
 
     static func clearAll() {
         deleteToken()
+        deleteRefreshToken()
         deleteUserID()
     }
 }

@@ -11,7 +11,7 @@ export default function ThemeToggle() {
     <button
       onClick={toggle}
       aria-label={isLight ? "Karanlık moda geç" : "Aydınlık moda geç"}
-      className="relative w-9 h-9 flex items-center justify-center rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-muted hover:text-ice transition-all"
+      className="relative w-9 h-9 flex items-center justify-center rounded-md bg-white/[0.04] hover:bg-white/[0.08] text-text-secondary hover:text-text transition-all"
       title={isLight ? "Karanlık Mod" : "Aydınlık Mod"}
     >
       <Sun

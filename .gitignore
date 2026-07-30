@@ -116,3 +116,9 @@ services/core-api/credentials/
 
 # User-uploaded video content — never commit real user data
 services/core-api/uploads/
+
+# Production deployment — certs, ACME challenge scratch space, DB backups
+nginx/ssl/
+nginx/certbot-webroot/*
+!nginx/certbot-webroot/.gitkeep
+backups/

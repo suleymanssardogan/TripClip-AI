@@ -29,6 +29,7 @@ _MOBILE_MESSAGES: dict[str, str] = {
     "UNAUTHORIZED":              "Oturumunuz sona erdi. Lütfen tekrar giriş yapın.",
     "PERMISSION_DENIED":         "Bu işleme erişim izniniz yok.",
     "RATE_LIMIT_EXCEEDED":       "Çok fazla istek gönderdiniz. Biraz bekleyin.",
+    "DAILY_QUOTA_EXCEEDED":      "Günlük video işleme limitine ulaştınız. Lütfen yarın tekrar deneyin.",
     "VALIDATION_ERROR":          "Gönderilen bilgiler eksik veya hatalı.",
     "ML_SERVICE_UNAVAILABLE":    "AI analiz servisi şu an meşgul. Lütfen bekleyin.",
     "DATABASE_ERROR":            "Sunucu geçici olarak kullanılamıyor.",
@@ -52,7 +53,7 @@ def _parse_core_error(data: dict) -> tuple[str, str, int]:
         status = 401
     if code in {"VIDEO_NOT_FOUND"}:
         status = 404
-    if code == "RATE_LIMIT_EXCEEDED":
+    if code in {"RATE_LIMIT_EXCEEDED", "DAILY_QUOTA_EXCEEDED"}:
         status = 429
     return code, message, status
 

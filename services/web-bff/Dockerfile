@@ -19,4 +19,9 @@ COPY . .
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8002"]
+# --proxy-headers: nginx'in gönderdiği X-Forwarded-For/X-Real-IP header'larından
+# gerçek istemci IP'sini request.client.host'a yazar (aksi halde her istek nginx'in
+# container IP'si gibi görünür ve rate-limit tüm kullanıcılar arasında paylaşılır).
+# forwarded-allow-ips=* güvenli: bu container'a app-network dışından hiçbir port
+# açılmıyor (docker-compose.prod.yml), yani bu header'ı yalnızca nginx ayarlayabilir.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8002", "--proxy-headers", "--forwarded-allow-ips=*"]

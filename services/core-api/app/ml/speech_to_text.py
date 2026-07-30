@@ -89,8 +89,11 @@ class AudioProcessingService:
             }
 
         except Exception as e:
+            # Sessizce boş transkript döndürmek yerine fırlat — aksi halde
+            # video_processor._safe_run bunu "başarılı, konuşma yok" ile
+            # ayırt edemez ve degradation raporu yanlış şekilde ✅ OK gösterir.
             logger.error(f"Transcription failed: {e}")
-            return {"transcript": "", "language": language, "segments": []}
+            raise
     
     def process_video_audio(self, video_path: str, video_id: int) -> Optional[Dict]:
         """Video'dan audio çıkar ve transcribe et"""

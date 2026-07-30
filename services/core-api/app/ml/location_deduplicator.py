@@ -1,12 +1,47 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 import logging
 import math
+import re
+import unicodedata
 
 logger = logging.getLogger(__name__)
 
+# Türkçe harfleri ASCII karşılıklarına indirger. `.lower()` öncesi uygulanır çünkü
+# Python "İ".lower() → "i̇" (i + birleşik nokta) üretir ve bu eşleşmeyi bozar.
+_TURKISH_ASCII = str.maketrans({
+    "ı": "i", "İ": "i", "I": "i",
+    "ş": "s", "Ş": "s",
+    "ğ": "g", "Ğ": "g",
+    "ç": "c", "Ç": "c",
+    "ö": "o", "Ö": "o",
+    "ü": "u", "Ü": "u",
+})
+
+
+def normalize_place_name(name: Optional[str]) -> str:
+    """
+    Mekan adını karşılaştırılabilir bir anahtara indirger.
+
+    Aynı mekan pipeline'a hem Gemini'den hem Nominatim'den girdiğinde isimler
+    Türkçe karakterlerde ayrışıyor ("Kaş Halk Plajı" / "Kas Halk Plajı") ve
+    koordinatlar birkaç metre kaydığı için mesafe kontrolü bunları yakalayamıyor.
+    Normalizasyon sonrası ikisi de "kas halk plaji" olur.
+    """
+    if not name:
+        return ""
+
+    text = name.translate(_TURKISH_ASCII).lower()
+    # Kalan diakritikleri (â, é, î …) ayrıştırıp at.
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    # Noktalama ve fazladan boşlukları tek boşluğa indir.
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return " ".join(text.split())
+
+
 class LocationDeduplicator:
-    """Deduplicate enriched locations based on coordinates"""
-    
+    """Deduplicate enriched locations based on coordinates and normalized names"""
+
     def __init__(self, distance_threshold_km: float = 5.0):
         """
         Args:
@@ -14,7 +49,7 @@ class LocationDeduplicator:
         """
         self.distance_threshold = distance_threshold_km
         logger.info(f"✅ LocationDeduplicator initialized (threshold: {distance_threshold_km}km)")
-    
+
     def calculate_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """
         Calculate distance between two coordinates using Haversine formula
@@ -41,51 +76,67 @@ class LocationDeduplicator:
     
     def deduplicate_locations(self, enriched_locations: List[Dict]) -> List[Dict]:
         """
-        Remove duplicate locations based on coordinate proximity
+        Remove duplicate locations based on normalized name or coordinate proximity
         Keeps the location with higher importance score
         """
         if not enriched_locations or len(enriched_locations) <= 1:
             return enriched_locations
-        
+
         deduplicated = []
         seen_coords = []
-        
+        seen_names = set()
+
         # Sort by importance (if available)
         sorted_locations = sorted(
             enriched_locations,
             key=lambda x: x.get('place_data', {}).get('importance', 0),
             reverse=True
         )
-        
+
         for location in sorted_locations:
             place_data = location.get('place_data', {})
             location_coords = place_data.get('location', {})
-            
+
             lat = location_coords.get('lat')
             lng = location_coords.get('lng')
-            
+
             if not lat or not lng:
                 logger.warning(f"Location missing coordinates: {location.get('original_name')}")
                 continue
-            
-            # Check if this location is too close to any already added
+
             is_duplicate = False
-            
-            for seen_lat, seen_lng in seen_coords:
-                distance = self.calculate_distance(lat, lng, seen_lat, seen_lng)
-                
-                if distance < self.distance_threshold:
-                    logger.info(
-                        f"Duplicate found: {location.get('original_name')} "
-                        f"(distance: {distance:.2f}km from existing location)"
-                    )
-                    is_duplicate = True
-                    break
-            
+
+            # Aynı normalize isim = aynı mekan. Tek bir videonun içinde aynı adın
+            # iki farklı yeri göstermesi beklenmiyor, bu yüzden mesafeye bakmadan
+            # eliyoruz — koordinatlar geocoder'a göre metrelerce kayabiliyor.
+            name_key = normalize_place_name(location.get('original_name'))
+
+            if name_key and name_key in seen_names:
+                logger.info(
+                    f"Duplicate found: {location.get('original_name')} "
+                    f"(name match: '{name_key}')"
+                )
+                is_duplicate = True
+
+            # Check if this location is too close to any already added
+            if not is_duplicate:
+                for seen_lat, seen_lng in seen_coords:
+                    distance = self.calculate_distance(lat, lng, seen_lat, seen_lng)
+
+                    if distance < self.distance_threshold:
+                        logger.info(
+                            f"Duplicate found: {location.get('original_name')} "
+                            f"(distance: {distance:.2f}km from existing location)"
+                        )
+                        is_duplicate = True
+                        break
+
             if not is_duplicate:
                 deduplicated.append(location)
                 seen_coords.append((lat, lng))
-        
+                if name_key:
+                    seen_names.add(name_key)
+
         logger.info(f"✅ Deduplication: {len(enriched_locations)} → {len(deduplicated)} locations")
         return deduplicated
     

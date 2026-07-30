@@ -21,6 +21,23 @@ def test_whisper_service_configured_model():
         service = AudioProcessingService()
         assert service.model_name == "base"
 
+def test_transcribe_audio_raises_on_model_error():
+    """
+    Kök neden (2026-07-26): transcribe_audio hatayı yutup boş transkript
+    döndürüyordu; video_processor._safe_run bunu "başarılı, konuşma yok" ile
+    ayırt edemiyor ve degradation raporu yanlış şekilde ✅ OK gösteriyordu.
+    Artık fırlatıyor — _safe_run fallback'e düşüp doğru şekilde işaretliyor.
+    """
+    from app.ml.speech_to_text import AudioProcessingService
+
+    service = AudioProcessingService()
+    service.model = mock.MagicMock()
+    service.model.transcribe.side_effect = RuntimeError("model çöktü")
+
+    with pytest.raises(RuntimeError):
+        service.transcribe_audio("fake_audio.wav")
+
+
 def test_landmark_service_disabled_by_default():
     """Test that LandmarkDetectionService remains disabled when USE_GOOGLE_VISION is false."""
     with mock.patch.dict(os.environ, {"USE_GOOGLE_VISION": "false"}):
@@ -42,6 +59,38 @@ def test_landmark_service_enabled_but_invalid_credentials():
         # Should catch DefaultCredentialsError and set enabled to False
         assert service.enabled is False
         assert service.client is None
+
+
+def test_rag_service_disabled_without_ollama_url():
+    """Test that RAGService stays disabled and degrades gracefully when OLLAMA_URL is unset."""
+    with mock.patch.dict(os.environ, {"OLLAMA_URL": ""}):
+        from app.ml.rag_service import RAGService
+        service = RAGService()
+        assert service.enabled is False
+        assert service.generate_travel_tips([{"name": "Antalya"}]) == {"tips": [], "summary": ""}
+
+
+def test_rag_service_reads_url_and_model_from_env():
+    """Test that RAGService reads OLLAMA_URL / OLLAMA_MODEL from the environment instead of hardcoding them."""
+    with mock.patch.dict(os.environ, {
+        "OLLAMA_URL": "http://ollama.internal:11434",
+        "OLLAMA_MODEL": "llama3",
+    }):
+        from app.ml.rag_service import RAGService
+        service = RAGService()
+        assert service.enabled is True
+        assert service.ollama_url == "http://ollama.internal:11434"
+        assert service.model == "llama3"
+
+
+def test_rag_service_survives_ollama_connection_failure():
+    """Test that an unreachable Ollama server never raises — the pipeline must not crash."""
+    with mock.patch.dict(os.environ, {"OLLAMA_URL": "http://ollama.internal:11434"}):
+        from app.ml.rag_service import RAGService
+        service = RAGService()
+        with mock.patch("requests.post", side_effect=ConnectionError("refused")):
+            result = service.generate_travel_tips([{"name": "Antalya"}])
+        assert result == {"tips": [], "summary": "", "locations_covered": ["Antalya"]}
 
 
 def test_places_service_scoring():

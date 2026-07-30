@@ -57,3 +57,12 @@ class VideoDetailResponse(BaseModel):
     duration: Optional[int]
     created_at: str
     ai_results: Dict[str, Any]
+    # Kaç AI aşamasının fallback'e düştüğü — None ise henüz işlenmemiş/eski kayıt.
+    degradation: Optional[Dict[str, Any]] = None
+    # Kullanıcının editor'de kaydettiği durak sırası (gün başına ID listesi).
+    stop_order: Optional[List[List[int]]] = None
+
+
+class StopOrderRequest(BaseModel):
+    """Editor'de sürükle-bırak ile belirlenen durak sırası — gün başına ID listesi."""
+    order: List[List[int]]

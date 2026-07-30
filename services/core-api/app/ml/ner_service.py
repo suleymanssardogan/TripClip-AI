@@ -19,6 +19,36 @@ NER_TIMEOUT_SECONDS = 45
 # BERT max token ≈ 512 — güvenli karakter limiti
 MAX_TEXT_CHARS = 1800
 
+# Yer ismi değil ünlem/dolgu kelimeler — tek kelime YA DA bunların ardışık
+# birleşimi olarak etiketlenebilir (aggregation_strategy="simple" "Ya" + "Allah"
+# gibi ardışık aynı-tip token'ları tek bir entity'de birleştirir; "ya allah"
+# aggregate string'i bu yüzden tek-kelime eşleşmesini atlatabilir).
+_LOCATION_NOISE = {
+    "dis", "bis", "yo", "aci", "mis", "bey", "ey", "ah",
+    "bi", "bir", "bu", "şu", "o", "ne", "ki",
+    "ya", "allah", "valla", "vallah", "vay", "helal", "haram",
+    "maşallah", "masallah", "inşallah", "insallah", "elhamdulillah",
+    "subhanallah", "yok", "var", "evet", "hayır", "tamam",
+}
+# Ünlem/dolgu kelimeler ORG için de geçerli (örn. "Ya Allah" bir işletme adı
+# değildir) — bu yüzden _LOCATION_NOISE ile birleşik, üstüne ORG'a özgü
+# genel/kurumsal kelimeler eklenir.
+_ORG_NOISE = _LOCATION_NOISE | {
+    "allah", "bismillah", "türk", "türkiye", "türklerin",
+    "devlet", "hükümet", "belediye", "bakanlık",
+}
+
+
+def _is_noise(word: str, noise_set: set) -> bool:
+    """word tamamen bilinen dolgu/ünlem kelimelerinden mi oluşuyor?
+    Tam eşleşmenin yanı sıra, birden fazla kelimeden oluşan aggregate
+    entity'lerin (örn. "Ya Allah") her bir parçasını da tek tek sınar."""
+    normalized = word.lower().strip()
+    if normalized in noise_set:
+        return True
+    parts = normalized.split()
+    return len(parts) > 1 and all(p in noise_set for p in parts)
+
 
 class NERService:
     """Named Entity Recognition for location extraction"""
@@ -73,14 +103,6 @@ class NERService:
         if entities is None:
             return []
 
-        ner_noise = {
-            "dis", "bis", "yo", "aci", "mis", "bey", "ey", "ah",
-            "bi", "bir", "bu", "şu", "o", "ne", "ki",
-            # Dini ifadeler / ünlemler — yer ismi değil
-            "ya", "allah", "valla", "vallah", "vay", "helal", "haram",
-            "maşallah", "masallah", "inşallah", "insallah", "elhamdulillah",
-            "subhanallah", "yok", "var", "ne", "evet", "hayır", "tamam",
-        }
         locations = [
             {
                 "text":  ent["word"],
@@ -91,7 +113,7 @@ class NERService:
             if ent["entity_group"] in ["LOC", "GPE"]
             and ent["score"] > 0.65
             and len(ent["word"]) >= 3
-            and ent["word"].lower().strip() not in ner_noise
+            and not _is_noise(ent["word"], _LOCATION_NOISE)
             and not ent["word"].startswith("##")
         ]
         logger.info("NER: %d entity çıkarıldı", len(locations))
@@ -118,18 +140,13 @@ class NERService:
 
         all_entities = self._run_with_timeout(_infer_all)
         if all_entities:
-            # Türkçe dini/genel kelimeler ORG sayılmasın
-            org_noise = {
-                "allah", "bismillah", "türk", "türkiye", "türklerin",
-                "devlet", "hükümet", "belediye", "bakanlık",
-            }
             for ent in all_entities:
                 if (
                     ent["entity_group"] == "ORG"
                     and ent["score"] > 0.80
                     and len(ent["word"]) >= 4
                     and not ent["word"].startswith("##")
-                    and ent["word"].lower().strip() not in org_noise
+                    and not _is_noise(ent["word"], _ORG_NOISE)
                     # Baş harfi büyük olmayan ORG'ları atla (genellikle yanlış)
                     and ent["word"][0].isupper()
                 ):
@@ -167,15 +184,30 @@ class NERService:
             logger.warning("NER OCR filter timeout — heuristic'e düşüldü (%d metin)", len(ocr_texts))
             return ocr_texts
 
-        # OCR ASCII Türkçe içerebilir → eşik 0.50
-        found_words = {
-            ent["word"].lower().strip()
-            for ent in entities
-            if ent["entity_group"] in ["LOC", "GPE"]
-            and ent["score"] > 0.50
-            and len(ent["word"]) >= 3
-            and not ent["word"].startswith("##")
-        }
+        # OCR ASCII Türkçe içerebilir → LOC/GPE eşiği 0.50.
+        # ORG (restoran/işletme adı — tabela metinlerinde çok yaygın, örn.
+        # "Ciğerci Aziz Usta", "Şafi Künefe") daha önce hiç kabul edilmiyordu;
+        # bu yüzden storefront/tabela POI'leri sessizce düşüyordu. Transcript
+        # NER'deki (extract_locations_from_transcript) ORG eşiğiyle aynı mantık.
+        found_words = set()
+        for ent in entities:
+            if ent["word"].startswith("##"):
+                continue
+            word = ent["word"]
+            if (
+                ent["entity_group"] in ("LOC", "GPE")
+                and ent["score"] > 0.50
+                and len(word) >= 3
+                and not _is_noise(word, _LOCATION_NOISE)
+            ):
+                found_words.add(word.lower().strip())
+            elif (
+                ent["entity_group"] == "ORG"
+                and ent["score"] > 0.65
+                and len(word) >= 4
+                and not _is_noise(word, _ORG_NOISE)
+            ):
+                found_words.add(word.lower().strip())
 
         result = []
         for text in ocr_texts:

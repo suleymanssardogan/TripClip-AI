@@ -1,11 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from prometheus_fastapi_instrumentator import Instrumentator
 from app.routes import auth, plans
 from app.routes import videos as videos_router
 import logging
@@ -13,6 +18,16 @@ import sys
 import time
 import uuid
 import os
+
+# Sentry — yalnızca DSN tanımlanmışsa etkinleştir (core-api ile aynı desen)
+_sentry_dsn = os.getenv("SENTRY_DSN")
+if _sentry_dsn:
+    import sentry_sdk
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        send_default_pii=True,
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES_RATE", "1.0")),
+    )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -66,6 +81,20 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Rate limiter — /auth/refresh, /auth/logout gibi yeni endpoint'ler için
+# (core-api/mobile-bff ile aynı kurulum).
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Host-header doğrulaması. nginx gerçek public domain'i Host header'ı olarak
+# iletir (bkz. nginx/nginx.conf `proxy_set_header Host $host`), bu yüzden
+# varsayılan "*" (kısıtlama yok) — production'da ALLOWED_HOSTS ile kendi
+# domain'inize daraltın (örn. "tripclip.app,www.tripclip.app").
+_raw_hosts = os.getenv("ALLOWED_HOSTS", "")
+ALLOWED_HOSTS = [h.strip() for h in _raw_hosts.split(",") if h.strip()] or ["*"]
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -74,6 +103,9 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 app.add_middleware(RequestLoggingMiddleware)
+
+# ── Prometheus metrikleri ──────────────────────────────────────────────────────
+Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
 # ── Global exception handlers ─────────────────────────────────────────────────
 @app.exception_handler(RequestValidationError)

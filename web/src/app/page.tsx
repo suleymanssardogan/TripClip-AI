@@ -6,12 +6,14 @@ import { ArrowRight, Play, Cpu, MapPin, Mic, Eye, ChevronDown, Sparkles } from "
 import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import { getStats, type PlatformStats } from "@/lib/api";
+import { buttonVariants } from "@/components/ui/Button";
+import { cn } from "@/lib/utils";
 
 const FEATURES = [
-  { icon: Eye,    label: "Computer Vision", desc: "YOLOv8 + Google Vision ile nesne ve landmark tespiti", color: "#4DFFC3" },
-  { icon: Mic,    label: "Ses Analizi",     desc: "Whisper ile Türkçe transkripsiyon ve anahtar kelime tespiti", color: "#8B5CF6" },
-  { icon: Cpu,    label: "NER Pipeline",    desc: "Turkish BERT ile lokasyon entity çıkarımı", color: "#FF6B4A" },
-  { icon: MapPin, label: "Rota Optimizasyonu", desc: "OpenStreetMap geocoding ve TSP algoritması ile optimum güzergah", color: "#F5C842" },
+  { icon: Eye,    label: "Görsel Analiz",   desc: "YOLOv8 ve Google Vision ile kareler taranır, nesneler ve simge yapılar tanınır." },
+  { icon: Mic,    label: "Ses Analizi",     desc: "Whisper ile konuşma metne çevrilir, yer isimleri konuşmadan da çıkarılır." },
+  { icon: Cpu,    label: "Konum Çıkarımı",  desc: "Türkçe BERT tabanlı NER, altyazı ve konuşmadan gerçek yer adlarını ayıklar." },
+  { icon: MapPin, label: "Rota Optimizasyonu", desc: "Nominatim ile konumlar eşleşir, TSP algoritması en verimli sırayı bulur." },
 ];
 
 const TICKER = [
@@ -20,17 +22,27 @@ const TICKER = [
 ];
 
 const STEPS = [
-  { num: "01", title: "Video Yükle",  desc: "Mobil uygulamadan gezi videonu yükle. MP4 / MOV, max 100 MB.",           color: "#4DFFC3" },
-  { num: "02", title: "AI Pipeline",  desc: "YOLOv8 → EasyOCR → Whisper → BERT NER → Nominatim → RAG.",              color: "#8B5CF6" },
-  { num: "03", title: "Plan Hazır",   desc: "İnteraktif harita, optimize rota, seyahat ipuçları ve paylaşım linki.", color: "#FF6B4A" },
+  { num: "01", title: "Video Paylaş",  desc: "Bir gezi videosu yükle ya da Instagram/YouTube linkini yapıştır." },
+  { num: "02", title: "AI Analiz Eder", desc: "Görüntü, ses ve yazı aynı anda işlenir; konumlar birleştirilip doğrulanır." },
+  { num: "03", title: "Plan Hazır",   desc: "Sıralı rota, harita ve seyahat ipuçlarıyla eksiksiz bir gezi planı çıkar." },
 ];
 
-const BENTO_PREVIEW = [
-  { bg: "#1E0E04", border: "#FF6B4A", label: "Analiz: 24", sub: "tamamlanan",   icon: "📈" },
-  { bg: "#06082A", border: "#8B5CF6", label: "Gezi Planım", sub: "AI Powered", icon: "🗺️", large: true },
-  { bg: "#F5C842", border: "#F5C842", label: "10₺'den",    sub: "iOS · Ücretsiz", icon: "✈️", light: true },
-  { bg: "#06120B", border: "#4DFFC3", label: "48 mekan",   sub: "tespit edildi", icon: "📍" },
-];
+/** Decorative scenic illustration — sky gradient + hills + balloons. */
+function SceneCard({ className = "" }: { className?: string }) {
+  return (
+    <div className={`relative overflow-hidden rounded-lg ${className}`}
+      style={{ background: "linear-gradient(180deg, #12141C, #2B2320)" }}>
+      <svg viewBox="0 0 400 320" preserveAspectRatio="xMidYMid slice" className="absolute inset-0 w-full h-full">
+        <circle cx="300" cy="90" r="52" fill="#FFC352" />
+        <path d="M0 200 Q100 160 200 195 T400 180 V320 H0 Z" fill="#23262E" />
+        <path d="M0 240 Q120 215 220 235 T400 225 V320 H0 Z" fill="#181A1F" />
+        <g><ellipse cx="120" cy="140" rx="30" ry="38" fill="#FFB020" /><rect x="112" y="174" width="16" height="10" rx="2" fill="#3a2a12" /></g>
+        <g><ellipse cx="210" cy="100" rx="22" ry="28" fill="#EDE7DC" /></g>
+        <g><ellipse cx="260" cy="170" rx="16" ry="20" fill="#C4573A" /></g>
+      </svg>
+    </div>
+  );
+}
 
 export default function LandingPage() {
   const [stats, setStats] = useState<PlatformStats | null>(null);
@@ -39,142 +51,106 @@ export default function LandingPage() {
   const heroY       = useTransform(scrollYProgress, [0, 1], [0, 80]);
   const heroOpacity = useTransform(scrollYProgress, [0, 0.75], [1, 0]);
 
-  useEffect(() => { getStats().then(setStats).catch(() => {}); }, []);
+  useEffect(() => { getStats().then(setStats).catch(err => console.error("getStats failed:", err)); }, []);
 
   return (
-    <div className="min-h-screen overflow-x-hidden">
+    <div className="min-h-screen overflow-x-hidden bg-bg">
       <Navbar />
 
       {/* HERO */}
-      <section ref={heroRef}
-        className="relative pt-32 pb-40 px-6 overflow-hidden flex flex-col items-center justify-center">
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="orb w-[600px] h-[600px] bg-neon -top-28 -left-40" style={{opacity:0.07}} />
-          <div className="orb w-[500px] h-[500px] bg-violet top-40 -right-32" style={{opacity:0.09}} />
-          <div className="orb w-[350px] h-[350px] bg-coral -bottom-10 left-1/3" style={{opacity:0.05}} />
+      <section ref={heroRef} className="relative pt-32 pb-24 px-6 overflow-hidden">
+        <div
+          aria-hidden
+          className="absolute -top-32 -left-32 w-[36rem] h-[36rem] rounded-full opacity-[0.1] blur-3xl pointer-events-none"
+          style={{ background: "radial-gradient(circle, rgb(var(--c-accent)) 0%, rgb(var(--c-route)) 70%, transparent 100%)" }}
+        />
+        <div className="max-w-6xl mx-auto grid lg:grid-cols-[1.1fr_1fr] gap-12 items-center relative">
+          <motion.div style={{ y: heroY, opacity: heroOpacity }} className="relative z-10">
+            <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+              className="inline-flex items-center gap-2.5 mb-8 px-4 py-1.5 rounded-full border border-border bg-surface2">
+              <span className="glow-dot" />
+              <span className="font-mono text-[11px] text-text-secondary tracking-widest uppercase">
+                Reel&apos;den Gezi Planına
+              </span>
+            </motion.div>
+
+            <motion.h1 initial={{ opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.7, delay: 0.1 }}
+              className="font-display font-black leading-[0.98] tracking-tight mb-6"
+              style={{ fontSize: "clamp(2.75rem, 6vw, 4.5rem)" }}>
+              <span className="text-text block">İzledin.</span>
+              <span className="text-accent-text block">Şimdi git.</span>
+            </motion.h1>
+
+            <motion.p initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.25 }}
+              className="text-text-secondary text-lg max-w-md mb-10 leading-relaxed">
+              Bir gezi videosu paylaş — TripClip AI konumları, rotayı ve tahmini bütçeyi
+              çıkarır. Geriye kalan tek şey gitmek.
+            </motion.p>
+
+            <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.35 }}
+              className="flex flex-col sm:flex-row items-start gap-4">
+              <Link href="/login" className={cn(buttonVariants({ size: "lg" }), "group")}>
+                Hemen Başla
+                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              </Link>
+              <Link href="/explore" className={buttonVariants({ variant: "outline", size: "lg" })}>
+                <Play className="w-4 h-4" /> Gezileri Keşfet
+              </Link>
+            </motion.div>
+
+            {stats && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }}
+                className="flex items-center gap-10 mt-16 pt-8 border-t border-border">
+                {[
+                  { val: stats.completed_videos, label: "Video Analiz" },
+                  { val: stats.total_cities,     label: "Şehir Tespit" },
+                  { val: stats.total_users,      label: "Kullanıcı" },
+                ].map((s, i) => (
+                  <div key={i}>
+                    <p className="font-mono font-semibold text-3xl text-text tabular-nums">{s.val}+</p>
+                    <p className="font-mono text-[10px] text-text-tertiary mt-1 tracking-widest uppercase">
+                      {s.label}
+                    </p>
+                  </div>
+                ))}
+              </motion.div>
+            )}
+          </motion.div>
+
+          <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.7, delay: 0.2 }}>
+            <SceneCard className="h-[380px] shadow-card" />
+          </motion.div>
         </div>
 
-        <motion.div style={{ y: heroY, opacity: heroOpacity }}
-          className="relative z-10 text-center px-4 max-w-5xl mx-auto">
-
-          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
-            className="inline-flex items-center gap-2.5 mb-10 px-5 py-2 rounded-full
-              border border-neon/20 bg-neon/[0.05]">
-            <div className="glow-dot" />
-            <span className="text-xs font-mono text-neon/80 tracking-widest uppercase">
-              AI-Powered Travel Intelligence
-            </span>
-          </motion.div>
-
-          <motion.h1 initial={{ opacity: 0, y: 32 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.7, delay: 0.1 }}
-            className="font-serif font-black leading-[0.93] tracking-tight mb-8"
-            style={{ fontSize: "clamp(3rem, 10vw, 8rem)" }}>
-            <span className="text-ice block">Videodan</span>
-            <span className="gradient-text block">Gezi Planına</span>
-            <span className="text-ice block">Saniyeler İçinde.</span>
-          </motion.h1>
-
-          <motion.p initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.25 }}
-            className="text-muted text-lg max-w-md mx-auto mb-10 leading-relaxed">
-            Gezi videolarını yükle — AI otomatik olarak OCR, Whisper ve NER
-            ile lokasyonları çıkarır, haritalar ve optimize eder.
-          </motion.p>
-
-          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.35 }}
-            className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link href="/login"
-              className="btn-primary px-8 py-4 rounded-2xl text-base font-bold
-                flex items-center gap-2 group shadow-[0_0_40px_rgba(77,255,195,0.2)]">
-              Hemen Başla
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-            </Link>
-            <Link href="/explore"
-              className="btn-neon px-8 py-4 rounded-2xl text-base font-bold flex items-center gap-2">
-              <Play className="w-4 h-4" /> Gezileri Keşfet
-            </Link>
-          </motion.div>
-
-          {stats && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }}
-              className="flex items-center justify-center gap-10 md:gap-20 mt-24 pt-10
-                border-t border-white/[0.05]">
-              {[
-                { val: stats.completed_videos, label: "Video Analiz" },
-                { val: stats.total_cities,     label: "Şehir Tespit" },
-                { val: stats.total_users,      label: "Kullanıcı" },
-              ].map((s, i) => (
-                <div key={i} className="text-center">
-                  <p className="font-display font-black text-4xl text-neon">{s.val}+</p>
-                  <p className="text-[11px] text-muted mt-1.5 tracking-widest uppercase font-mono">
-                    {s.label}
-                  </p>
-                </div>
-              ))}
-            </motion.div>
-          )}
-        </motion.div>
-
         <motion.div animate={{ y: [0, 8, 0] }} transition={{ repeat: Infinity, duration: 2 }}
-          className="absolute bottom-10 left-1/2 -translate-x-1/2 text-muted/25">
+          className="hidden lg:flex justify-center mt-16 text-text-tertiary">
           <ChevronDown className="w-5 h-5" />
         </motion.div>
       </section>
 
       {/* TICKER */}
-      <div className="relative overflow-hidden border-y border-neon/[0.08] bg-neon/[0.015] py-3">
+      <div className="relative overflow-hidden border-y border-border py-3">
         <div className="flex gap-14 whitespace-nowrap animate-ticker">
           {[...TICKER, ...TICKER, ...TICKER].map((item, i) => (
-            <span key={i} className="text-sm font-mono text-neon/25 flex items-center gap-4">
-              <span className="w-1 h-1 rounded-full bg-neon/25 flex-shrink-0" />
+            <span key={i} className="text-sm font-mono text-text-tertiary flex items-center gap-4">
+              <span className={`w-1 h-1 rounded-full flex-shrink-0 ${i % 2 === 0 ? "bg-route" : "bg-accent"}`} />
               {item}
             </span>
           ))}
         </div>
       </div>
 
-      {/* BENTO PREVIEW */}
-      <section className="py-28 px-6 max-w-7xl mx-auto">
-        <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }} className="text-center mb-14">
-          <p className="text-xs font-mono text-neon/40 tracking-widest uppercase mb-3">Dashboard</p>
-          <h2 className="font-serif font-black text-4xl md:text-5xl text-ice tracking-tight">
-            Kişisel Gezi <span className="gradient-text-neon">Dashboard&apos;ın</span>
-          </h2>
-        </motion.div>
-
-        <motion.div initial={{ opacity: 0, y: 32 }} whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }} transition={{ delay: 0.1 }}
-          className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-3xl mx-auto">
-          {BENTO_PREVIEW.map((cell, i) => (
-            <motion.div key={i}
-              initial={{ opacity: 0, scale: 0.92 }}
-              whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              transition={{ delay: i * 0.08 + 0.2 }}
-              className={`rounded-3xl p-5 flex flex-col gap-2 ${cell.large ? "md:row-span-2" : ""}`}
-              style={{ background: cell.bg, border: `1px solid ${cell.border}22` }}>
-              <div className="text-3xl">{cell.icon}</div>
-              <p className={`font-serif font-black text-xl leading-none ${cell.light ? "text-[#080B14]" : "text-ice"}`}>
-                {cell.label}
-              </p>
-              <p className={`text-xs ${cell.light ? "text-[#080B14]/60" : "text-muted"}`}>
-                {cell.sub}
-              </p>
-            </motion.div>
-          ))}
-        </motion.div>
-      </section>
-
       {/* NASIL ÇALIŞIR */}
-      <section className="py-28 px-6 max-w-7xl mx-auto">
+      <section className="py-28 px-6 max-w-6xl mx-auto">
         <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }} className="text-center mb-16">
-          <p className="text-xs font-mono text-neon/40 tracking-widest uppercase mb-3">Pipeline</p>
-          <h2 className="font-serif font-black text-4xl md:text-5xl text-ice tracking-tight">
-            Nasıl Çalışır?
+          viewport={{ once: true }} className="mb-16">
+          <p className="font-mono text-xs text-text-tertiary tracking-widest uppercase mb-3">Nasıl Çalışır</p>
+          <h2 className="font-display font-black text-3xl md:text-4xl text-text tracking-tight">
+            Üç adımda hazır.
           </h2>
         </motion.div>
 
@@ -182,34 +158,55 @@ export default function LandingPage() {
           {STEPS.map((step, i) => (
             <motion.div key={i}
               initial={{ opacity: 0, y: 28 }} whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }} transition={{ delay: i * 0.12 }}
-              className="relative rounded-3xl p-7 overflow-hidden
-                bg-white/[0.03] border border-white/[0.07]
-                hover:border-white/15 transition-all duration-300">
-              <div className="absolute -top-4 -right-2 font-display font-black text-[7rem]
-                leading-none select-none pointer-events-none"
-                style={{ color: step.color, opacity: 0.05 }}>
-                {step.num}
-              </div>
-              <div className="absolute top-6 right-6 w-2 h-2 rounded-full"
-                style={{ background: step.color, boxShadow: `0 0 10px ${step.color}` }} />
-              <div className="relative z-10">
-                <p className="font-mono text-[11px] mb-4 tracking-widest"
-                  style={{ color: step.color }}>ADIM {step.num}</p>
-                <h3 className="font-display font-bold text-xl text-ice mb-3">{step.title}</h3>
-                <p className="text-muted text-sm leading-relaxed">{step.desc}</p>
-              </div>
+              viewport={{ once: true }} transition={{ delay: i * 0.1 }}
+              className="relative rounded-lg p-7 bg-surface border border-border hover:border-border-strong transition-colors">
+              <p className="font-mono text-[11px] text-accent-text mb-4 tracking-widest">ADIM {step.num}</p>
+              <h3 className="font-display font-bold text-xl text-text mb-3">{step.title}</h3>
+              <p className="text-text-secondary text-sm leading-relaxed">{step.desc}</p>
             </motion.div>
           ))}
         </div>
       </section>
 
+      {/* DASHBOARD ÖNİZLEME */}
+      <section className="py-20 px-6 max-w-6xl mx-auto">
+        <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }} className="mb-12">
+          <p className="font-mono text-xs text-text-tertiary tracking-widest uppercase mb-3">Örnek</p>
+          <h2 className="font-display font-black text-3xl md:text-4xl text-text tracking-tight">
+            Her gezi, tek bir kart.
+          </h2>
+        </motion.div>
+
+        <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }} transition={{ delay: 0.1 }}
+          className="relative max-w-md rounded-lg border border-border bg-surface overflow-hidden shadow-card">
+          {/* Kartın kendisi gerçek bir sonuçla birebir aynı stilde olduğu için
+              (aynı rozet, aynı düzen) — üstteki bölüm etiketi ("Örnek") yeterli
+              değil, kart tek başına paylaşılsa/kopyalansa bile bunun bir mockup
+              olduğu net olmalı. */}
+          <span className="absolute top-3 left-3 z-10 font-mono text-[9px] px-2 py-1 rounded-full bg-bg/90 backdrop-blur border border-border-strong text-text-tertiary uppercase tracking-widest">
+            Örnek Görünüm
+          </span>
+          <SceneCard className="h-40" />
+          <div className="p-5">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-display font-bold text-lg text-text">Kapadokya, Türkiye</h3>
+              <span className="font-mono text-[10px] px-2 py-1 rounded-full bg-route/10 border border-route/25 text-route uppercase tracking-widest">
+                Rota Hazır
+              </span>
+            </div>
+            <p className="text-text-tertiary text-xs">3 gün · 7 nokta · 1 video&apos;dan oluşturuldu</p>
+          </div>
+        </motion.div>
+      </section>
+
       {/* AI MODELLER */}
-      <section className="py-20 px-6 max-w-7xl mx-auto">
+      <section className="py-20 px-6 max-w-6xl mx-auto">
         <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true }} className="text-center mb-12">
-          <p className="text-xs font-mono text-violet/40 tracking-widest uppercase mb-3">Tech Stack</p>
-          <h2 className="font-serif font-black text-4xl text-ice tracking-tight">AI Modeller</h2>
+          viewport={{ once: true }} className="mb-12">
+          <p className="font-mono text-xs text-text-tertiary tracking-widest uppercase mb-3">Motor</p>
+          <h2 className="font-display font-black text-3xl text-text tracking-tight">Videoyu nasıl okuyoruz</h2>
         </motion.div>
 
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -217,14 +214,12 @@ export default function LandingPage() {
             <motion.div key={i}
               initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }} transition={{ delay: i * 0.08 }}
-              className="rounded-3xl p-6 bg-white/[0.025] border border-white/[0.06]
-                hover:border-white/12 transition-all duration-300">
-              <div className="w-11 h-11 rounded-2xl flex items-center justify-center mb-5"
-                style={{ background: `${f.color}10`, border: `1px solid ${f.color}22` }}>
-                <f.icon className="w-5 h-5" style={{ color: f.color }} />
+              className="rounded-lg p-6 bg-surface border border-border hover:border-border-strong transition-colors">
+              <div className="w-11 h-11 rounded-md flex items-center justify-center mb-5 bg-surface2 border border-border">
+                <f.icon className="w-5 h-5 text-text-secondary" />
               </div>
-              <h3 className="font-display font-bold text-ice mb-2">{f.label}</h3>
-              <p className="text-muted text-xs leading-relaxed">{f.desc}</p>
+              <h3 className="font-display font-bold text-text mb-2">{f.label}</h3>
+              <p className="text-text-tertiary text-xs leading-relaxed">{f.desc}</p>
             </motion.div>
           ))}
         </div>
@@ -232,67 +227,53 @@ export default function LandingPage() {
 
       {/* CTA */}
       <section className="py-20 px-6">
-        <motion.div initial={{ opacity: 0, scale: 0.97 }}
-          whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }}
-          className="animated-border max-w-4xl mx-auto">
-          <div className="bg-[#080B14] rounded-[calc(1.5rem-1px)] px-10 py-16 text-center relative overflow-hidden">
-            <div className="absolute inset-0 pointer-events-none">
-              <div className="orb w-64 h-64 bg-neon top-0 left-0" style={{opacity:0.06}} />
-              <div className="orb w-48 h-48 bg-violet bottom-0 right-0" style={{opacity:0.07}} />
-            </div>
-            <div className="relative z-10">
-              <div className="inline-flex items-center gap-2 bg-neon/8 border border-neon/20
-                rounded-full px-4 py-1.5 mb-6">
-                <Sparkles className="w-3.5 h-3.5 text-neon" />
-                <span className="text-xs font-mono text-neon/80">Fırat Üniversitesi · 2026</span>
-              </div>
-              <h2 className="font-serif font-black text-4xl md:text-5xl text-ice mb-5
-                tracking-tight leading-tight">
-                Gezi videolarını<br />
-                <span className="gradient-text-neon">akıllı planlara</span> dönüştür.
-              </h2>
-              <p className="text-muted mb-10 max-w-md mx-auto text-sm leading-relaxed">
-                Yazılım Mühendisliği bitirme projesi. Mobil uygulamadan analiz et,
-                web&apos;den keşfet ve paylaş.
-              </p>
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Link href="/login"
-                  className="btn-primary px-8 py-4 rounded-2xl font-bold
-                    flex items-center justify-center gap-2 group">
-                  Ücretsiz Başla
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </Link>
-                <Link href="/explore"
-                  className="btn-neon px-8 py-4 rounded-2xl font-bold flex items-center justify-center gap-2">
-                  Gezileri Keşfet
-                </Link>
-              </div>
-            </div>
+        <motion.div initial={{ opacity: 0, y: 16 }}
+          whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}
+          className="max-w-3xl mx-auto rounded-lg border border-border bg-surface px-10 py-16 text-center">
+          <div className="inline-flex items-center gap-2 bg-surface2 border border-border rounded-full px-4 py-1.5 mb-6">
+            <Sparkles className="w-3.5 h-3.5 text-accent-text" />
+            <span className="font-mono text-xs text-text-secondary">Fırat Üniversitesi · 2026</span>
+          </div>
+          <h2 className="font-display font-black text-3xl md:text-4xl text-text mb-5 tracking-tight leading-tight">
+            Bir sonraki gezini<br />izlediğin yerden başlat.
+          </h2>
+          <p className="text-text-secondary mb-10 max-w-md mx-auto text-sm leading-relaxed">
+            Yazılım Mühendisliği bitirme projesi. Mobil uygulamadan analiz et,
+            web&apos;den keşfet ve paylaş.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center">
+            <Link href="/login" className={cn(buttonVariants({ size: "lg" }), "group")}>
+              Ücretsiz Başla
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </Link>
+            <Link href="/explore" className={buttonVariants({ variant: "outline", size: "lg" })}>
+              Gezileri Keşfet
+            </Link>
           </div>
         </motion.div>
       </section>
 
       {/* FOOTER */}
-      <footer className="border-t border-white/[0.05] py-10 px-6 mt-4">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+      <footer className="border-t border-border py-10 px-6 mt-4">
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
           <Link href="/" className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-neon rounded-md flex items-center justify-center">
+            <div className="w-6 h-6 bg-accent rounded-sm flex items-center justify-center">
               <svg viewBox="0 0 16 16" fill="none" className="w-3 h-3">
-                <path d="M8 2L14 6v4l-6 4L2 10V6l6-4z" fill="#080B14"/>
+                <path d="M8 2L14 6v4l-6 4L2 10V6l6-4z" fill="rgb(var(--c-on-accent))" />
               </svg>
             </div>
-            <span className="font-display font-black text-sm text-ice">
-              Trip<span className="text-neon">Clip</span>
-              <span className="text-muted font-normal text-xs ml-1">AI</span>
+            <span className="font-display font-black text-sm text-text">
+              Trip<span className="text-accent-text">Clip</span>
+              <span className="text-text-tertiary font-normal text-xs ml-1">AI</span>
             </span>
           </Link>
-          <p className="text-xs text-muted/50 text-center">
+          <p className="text-xs text-text-tertiary text-center">
             © 2026 Süleyman Sardoğan · Fırat Üniversitesi Yazılım Mühendisliği
           </p>
-          <div className="flex gap-6 text-xs text-muted/60">
-            <Link href="/explore" className="hover:text-neon transition-colors">Keşfet</Link>
-            <Link href="/login"   className="hover:text-neon transition-colors">Giriş</Link>
-            <Link href="/signup"  className="hover:text-neon transition-colors">Kaydol</Link>
+          <div className="flex gap-6 text-xs text-text-secondary">
+            <Link href="/explore" className="hover:text-text transition-colors">Keşfet</Link>
+            <Link href="/login"   className="hover:text-text transition-colors">Giriş</Link>
+            <Link href="/signup"  className="hover:text-text transition-colors">Kaydol</Link>
           </div>
         </div>
       </footer>

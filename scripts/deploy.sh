@@ -36,3 +36,4 @@ done
 
 echo "==> Deployment complete."
 echo "    Status: $($COMPOSE ps --format 'table {{.Name}}\t{{.Status}}')"
+echo "    Next:   ./scripts/smoke-test.sh yourdomain.com"

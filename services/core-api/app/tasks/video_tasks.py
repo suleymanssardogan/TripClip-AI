@@ -18,17 +18,79 @@ Retry politikası:
 import logging
 import os
 
-from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 
-# celery_app burada import edilir → shared_task dekoratörü hangi app'e
-# bağlanacağını bilir. Bu import olmadan shared_task localhost'a düşer.
-from app.core.celery_app import celery_app as _celery_app  # noqa: F401
+# @_celery_app.task (shared_task DEĞİL) kasıtlı: shared_task, task.app'i
+# celery.current_app (thread-local) proxy'si üzerinden çözer. FastAPI'nin sync
+# route handler'ları (bu task'ları .delay() ile çağıran /process, /queue-url)
+# Starlette tarafından bir threadpool worker thread'inde çalıştırılır — o
+# thread'in current_app'i ana thread'deki ile AYNI DEĞİLDİR, boş bir thread-local
+# stack'e düşer ve celery sıfır konfigürasyonlu (broker=None) bir varsayılan
+# Celery() app'i icat eder. Sonuç: .delay() sessizce AMQP/localhost'a bağlanmaya
+# çalışıp ConnectionRefusedError ile patlar, çağıran taraftaki geniş except
+# bloğu bunu yutar — video "kuyruğa alındı" der ama asla işlenmez.
+# @_celery_app.task, task.app'i current_app'ten BAĞIMSIZ olarak kalıcı şekilde
+# bu app'e bağlar; hangi thread'den çağrılırsa çağrılsın doğru broker kullanılır.
+from app.core.celery_app import celery_app as _celery_app
 
 logger = logging.getLogger("tripclip.tasks.video")
 
 
-@shared_task(
+class PermanentDownloadError(Exception):
+    """
+    yt-dlp indirmesi, tekrar denense de asla başarılı olmayacak bir sebeple
+    başarısız oldu (video silinmiş/özel/coğrafi kısıtlı/desteklenmeyen URL).
+    process_url_task bu tipi autoretry_for=(Exception,) yakalamadan ÖNCE
+    ayrıca yakalar ve retry etmeden hemen "failed" işaretler — aksi halde
+    Instagram'ın kalıcı olarak reddettiği bir bağlantı için worker ~10 dakika
+    boyunca (3 deneme, üstel backoff) anlamsız yeniden denemeler yapardı.
+    """
+
+
+# Instagram/yt-dlp'nin kalıcı (retry ile düzelmeyecek) hatalarda verdiği
+# tipik mesaj kalıpları — küçük harfe çevrilmiş metinde aranır. Bilerek
+# yalın "unavailable" gibi tek kelimeler DEĞİL, daha spesifik ifadeler
+# kullanılır — aksi halde geçici "HTTP 503 Service Unavailable" gibi ağ
+# hataları da (yanlışlıkla) kalıcı sayılıp retry'siz bırakılırdı.
+_PERMANENT_YT_DLP_MARKERS = (
+    "video unavailable",
+    "not available",
+    "no longer available",
+    "this account is private",
+    "has been removed",
+    "does not exist",
+    "unsupported url",
+    "login required",
+    "requires authentication",
+    "content isn't available",
+    "geo-restricted",
+)
+
+
+def _is_permanent_yt_dlp_failure(message: str) -> bool:
+    lowered = (message or "").lower()
+    return any(marker in lowered for marker in _PERMANENT_YT_DLP_MARKERS)
+
+# ── Paylaşılan VideoProcessingService instance'ı ──────────────────────────────
+#
+# VideoProcessingService.__init__ YOLO/BERT NER/Whisper/SentenceTransformer gibi
+# ağır ML modellerini yükler (BERT NER tek başına soğuk yüklemede ~30-60s).
+# Worker `--pool=solo` ile tek process olarak çalıştığı için (aynı anda tek task),
+# bu servisi her task'ta yeniden oluşturmak yerine worker process başına bir kez
+# oluşturup yeniden kullanıyoruz. __init__ video'ya özgü hiçbir mutable state
+# tutmaz (frames_dir video_id ile parametrize edilir), bu yüzden paylaşım güvenli.
+_processor = None
+
+
+def _get_processor():
+    global _processor
+    if _processor is None:
+        from app.core.services.video_processor import VideoProcessingService
+        _processor = VideoProcessingService()
+    return _processor
+
+
+@_celery_app.task(
     name="app.tasks.video_tasks.process_video_task",
     queue="video_processing",
     bind=True,                    # self → retry için gerekli
@@ -54,7 +116,6 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
     """
     from app.core.database import SessionLocal
     from app.infrastructure.repositories.sql_video_repository import SqlVideoRepository
-    from app.core.services.video_processor import VideoProcessingService
     from app.core.redis import set_progress
 
     logger.info("🎬 Task başladı | video_id=%s | attempt=%s", video_id, self.request.retries + 1)
@@ -66,13 +127,21 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
         repo.mark_processing(video_id)
         set_progress(video_id, "queued", 2)
 
-        processor = VideoProcessingService()
-        result    = processor.process_video(video_path, video_id)
+        processor = _get_processor()
+        # İpuçları kritik yolda değil — kullanıcı haritayı ve mekanları
+        # görmek için beklemesin. Video COMPLETED işaretlendikten sonra
+        # ayrı task üretiyor (ölçüm: ~6s kazanç).
+        result    = processor.process_video(video_path, video_id, defer_tips=True)
 
         repo.save_results(video_id, result)
         set_progress(video_id, "completed", 100)
 
         logger.info("✅ Task tamamlandı | video_id=%s", video_id)
+
+        # Sonucu kaydettikten SONRA kuyruğa al — bu task başarısız olsa bile
+        # video COMPLETED kalır, sadece ipuçları eksik olur.
+        generate_tips_task.delay(video_id)
+
         return {"status": "completed", "video_id": video_id}
 
     except SoftTimeLimitExceeded:
@@ -100,9 +169,68 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
         db.close()
 
 
+# ── Ertelenmiş Seyahat İpuçları Task'ı ────────────────────────────────────────
+
+@_celery_app.task(
+    name="app.tasks.video_tasks.generate_tips_task",
+    queue="video_processing",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+    retry_backoff=True,
+    acks_late=True,
+)
+def generate_tips_task(self, video_id: int) -> dict:
+    """
+    Seyahat ipuçlarını video COMPLETED olduktan sonra üretir.
+
+    Ana pipeline'dan ayrıldı çünkü kullanıcının haritayı ve mekan listesini
+    görmesi için ipuçları gerekmiyor; sıralı olarak beklemek toplam süreye
+    ~6 saniye ekliyordu.
+
+    Bu task başarısız olursa video COMPLETED kalır ve yalnızca ipuçları
+    bölümü boş görünür — pipeline'ın geri kalanındaki graceful degradation
+    felsefesiyle tutarlı.
+    """
+    from app.core.database import SessionLocal
+    from app.infrastructure.repositories.sql_video_repository import SqlVideoRepository
+
+    db   = SessionLocal()
+    repo = SqlVideoRepository(db)
+
+    try:
+        video = repo.get_by_id(video_id)
+        if not video:
+            logger.warning("İpucu task'ı: video bulunamadı | video_id=%s", video_id)
+            return {"status": "skipped", "video_id": video_id}
+
+        locations = video.deduplicated_locations or []
+        if not locations:
+            logger.info("İpucu task'ı: lokasyon yok, atlanıyor | video_id=%s", video_id)
+            return {"status": "skipped", "video_id": video_id}
+
+        processor = _get_processor()
+        tips      = processor.generate_travel_tips(locations, video_id)
+
+        repo.save_travel_tips(video_id, tips)
+        tip_count = len((tips or {}).get("tips", []))
+        logger.info("💡 İpuçları kaydedildi | video_id=%s | %d ipucu", video_id, tip_count)
+        return {"status": "completed", "video_id": video_id, "tips": tip_count}
+
+    except Exception as exc:
+        logger.error("İpucu task'ı başarısız | video_id=%s | hata: %s", video_id, exc)
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc)
+        # Denemeler tükendi — video COMPLETED kalsın, sessizce vazgeç.
+        return {"status": "failed", "video_id": video_id}
+
+    finally:
+        db.close()
+
+
 # ── URL Download + Process Task ───────────────────────────────────────────────
 
-@shared_task(
+@_celery_app.task(
     name="app.tasks.video_tasks.process_url_task",
     queue="video_processing",
     bind=True,
@@ -133,7 +261,6 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
     import tempfile
     from app.core.database import SessionLocal
     from app.infrastructure.repositories.sql_video_repository import SqlVideoRepository
-    from app.core.services.video_processor import VideoProcessingService
     from app.core.redis import set_progress
 
     logger.info(
@@ -153,14 +280,18 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
         set_progress(video_id, "queued", 10)
 
         # ── Adım 2: ML pipeline ─────────────────────────────────────────────
-        processor = VideoProcessingService()
-        result    = processor.process_video(video_path, video_id)
+        processor = _get_processor()
+        # İpuçları ertelenir — bkz. process_video_task.
+        result    = processor.process_video(video_path, video_id, defer_tips=True)
 
         # ── Adım 3: Kaydet ──────────────────────────────────────────────────
         repo.save_results(video_id, result)
         set_progress(video_id, "completed", 100)
 
         logger.info("✅ URL task tamamlandı | video_id=%s", video_id)
+
+        generate_tips_task.delay(video_id)
+
         return {"status": "completed", "video_id": video_id}
 
     except SoftTimeLimitExceeded:
@@ -168,6 +299,17 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
         repo.mark_failed(video_id)
         set_progress(video_id, "failed", 0)
         raise
+
+    except PermanentDownloadError as exc:
+        # Retry ile düzelmeyecek bir hata (video silinmiş/özel/desteklenmeyen
+        # URL) — autoretry_for=(Exception,) tetiklenmeden burada hemen
+        # "failed" işaretlenir ve exception YUTULUR (raise edilmez), böylece
+        # Celery bunu retry etmez. ~10 dakikalık anlamsız bekleme önlenir.
+        logger.error("🚫 Kalıcı indirme hatası (retry edilmeyecek) | video_id=%s | %s",
+                     video_id, exc)
+        repo.mark_failed(video_id)
+        set_progress(video_id, "failed", 0)
+        return {"status": "failed", "video_id": video_id, "reason": "permanent_download_error"}
 
     except Exception as exc:
         attempt = self.request.retries + 1
@@ -218,9 +360,14 @@ def _download_url(url: str, video_id: int) -> str:
            if "YT_DLP_COOKIES" in os.environ else {}),
     }
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        filename = ydl.prepare_filename(info)
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            filename = ydl.prepare_filename(info)
+    except yt_dlp.utils.DownloadError as exc:
+        if _is_permanent_yt_dlp_failure(str(exc)):
+            raise PermanentDownloadError(str(exc)) from exc
+        raise   # geçici hata (ağ vb.) — autoretry_for yeniden denesin
 
     if not os.path.exists(filename):
         raise FileNotFoundError(f"yt-dlp indirdi ama dosya yok: {filename}")

@@ -16,9 +16,17 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     ENABLE_PREVIEWS: YES
     DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+    DEVELOPMENT_TEAM: JN85S9B6B8
+    CODE_SIGN_STYLE: Automatic
   configs:
     Debug:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+      # Mac'in LAN IP'si — fiziksel cihazda test ederken mobile-bff'e ulaşmak için.
+      # Telefon ve Mac aynı WiFi ağında olmalı. `ipconfig getifaddr en0` ile güncelleyin.
+      # Sadece gerçek cihaz SDK'sında set edilir ([sdk=iphoneos*]) — Simulator'da
+      # bu değer boş kalır, böylece Config.swift'in "localhost" fallback'i devreye
+      # girer (Simulator, Mac'in ağ yığınını paylaştığı için localhost çalışır).
+      DEV_API_HOST[sdk=iphoneos*]: "192.168.1.103"
     Release:
       SWIFT_OPTIMIZATION_LEVEL: "-O"
 
@@ -57,6 +65,7 @@ targets:
         NSLocationWhenInUseUsageDescription: "TripClip, harita üzerinde gezi güzergahlarını göstermek için konumunuzu kullanır."
         NSPhotoLibraryUsageDescription: "TripClip, gezi videolarını yüklemek için fotoğraf kitaplığınıza erişir."
         ITSAppUsesNonExemptEncryption: false
+        DEV_API_HOST: "$(DEV_API_HOST)"
 
     entitlements:
       path: TripClipApp/Resources/TripClipApp.entitlements
@@ -92,12 +101,14 @@ targets:
     info:
       path: TripClipShare/Info.plist
       properties:
+        CFBundleDisplayName: TripClip'e Ekle
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
           NSExtensionActivationRule: "SUBQUERY(extensionItems, $item, SUBQUERY($item.attachments, $att, ANY $att.registeredTypeIdentifiers UTI-CONFORMS-TO 'public.url' OR ANY $att.registeredTypeIdentifiers UTI-CONFORMS-TO 'public.plain-text').@count > 0).@count > 0"
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        DEV_API_HOST: "$(DEV_API_HOST)"
 
     entitlements:
       path: TripClipShare/TripClipShare.entitlements

@@ -4,6 +4,7 @@ import AuthenticationServices
 struct WelcomeView: View {
 
     @Environment(AuthEnvironment.self) private var auth
+    @Environment(\.colorScheme) private var colorScheme
     @State private var path     = NavigationPath()
     @State private var appleErr = ""
     @State private var loading  = false
@@ -20,16 +21,16 @@ struct WelcomeView: View {
                     VStack(spacing: 16) {
                         Image(systemName: "mappin.and.ellipse")
                             .font(.system(size: 64))
-                            .foregroundStyle(AppColors.neon)
+                            .foregroundStyle(AppColors.accentText)
                             .symbolEffect(.pulse)
 
                         Text("TripClip")
                             .font(.system(size: 42, weight: .black, design: .rounded))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(AppColors.text)
 
                         Text("Instagram videolarından\ngezi planı oluştur")
                             .font(.system(size: 16))
-                            .foregroundStyle(.white.opacity(0.55))
+                            .foregroundStyle(AppColors.textSecondary)
                             .multilineTextAlignment(.center)
                     }
 
@@ -42,26 +43,28 @@ struct WelcomeView: View {
                                 .font(.system(size: 16, weight: .semibold))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 16)
-                                .background(AppColors.neon)
-                                .foregroundStyle(Color.black)
+                                .background(AppColors.accent)
+                                .foregroundStyle(AppColors.onAccent)
                                 .clipShape(RoundedRectangle(cornerRadius: 16))
                         }
+                        .buttonStyle(PressableButtonStyle())
 
                         NavigationLink(value: "register") {
                             Text("Hesap Oluştur")
                                 .font(.system(size: 16, weight: .semibold))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 16)
-                                .background(Color.white.opacity(0.08))
-                                .foregroundStyle(.white)
+                                .background(AppColors.surface2)
+                                .foregroundStyle(AppColors.text)
                                 .clipShape(RoundedRectangle(cornerRadius: 16))
                         }
+                        .buttonStyle(PressableButtonStyle())
 
                         // ── Divider ─────────────────────────────────────────
                         HStack(spacing: 12) {
-                            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
-                            Text("veya").font(.caption).foregroundStyle(.white.opacity(0.4))
-                            Rectangle().fill(Color.white.opacity(0.12)).frame(height: 1)
+                            Rectangle().fill(AppColors.border).frame(height: 1)
+                            Text("veya").font(.caption).foregroundStyle(AppColors.textTertiary)
+                            Rectangle().fill(AppColors.border).frame(height: 1)
                         }
 
                         // ── Apple Sign In ────────────────────────────────────
@@ -79,7 +82,7 @@ struct WelcomeView: View {
                                 loading = false
                             }
                         }
-                        .signInWithAppleButtonStyle(.white)
+                        .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
                         .frame(maxWidth: .infinity)
                         .frame(height: 50)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -88,7 +91,7 @@ struct WelcomeView: View {
                         if !appleErr.isEmpty {
                             Text(appleErr)
                                 .font(.caption)
-                                .foregroundStyle(AppColors.coral)
+                                .foregroundStyle(AppColors.destructive)
                                 .multilineTextAlignment(.center)
                         }
                     }
@@ -105,17 +108,6 @@ struct WelcomeView: View {
             }
         }
     }
-}
-
-// MARK: - App Colors
-
-enum AppColors {
-    static let background = Color(red: 0.06, green: 0.07, blue: 0.13)
-    static let surface    = Color(red: 0.10, green: 0.11, blue: 0.18)
-    static let neon       = Color(red: 0.30, green: 1.00, blue: 0.76)
-    static let coral      = Color(red: 1.00, green: 0.42, blue: 0.29)
-    static let violet     = Color(red: 0.54, green: 0.36, blue: 0.95)
-    static let muted      = Color.white.opacity(0.45)
 }
 
 #Preview {

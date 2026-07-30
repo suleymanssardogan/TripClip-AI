@@ -41,6 +41,7 @@ extension AppDelegate {
         ) { [weak self] _ in
             completionHandler()
             self?.handlePendingVideoIfNeeded()
+            self?.handlePendingUploadErrorIfNeeded()
         }
     }
 
@@ -56,10 +57,29 @@ extension AppDelegate {
             object: videoID
         )
     }
+
+    // MARK: - Pending Upload Error
+
+    /// App Group'ta bekleyen bir upload hatası varsa uygulama içi bir bildirim
+    /// yayınlar — uygulama zaten açıksa (local notification banner'ı görünmez)
+    /// bir ekranın bunu yakalayıp göstermesi için. Uygulama kapalıyken
+    /// BackgroundUploader zaten bir local notification göstermiş olur (bkz.
+    /// BackgroundUploader.notifyUploadFailed) — bu, o senaryoyu tekrarlamaz,
+    /// yalnızca App Group'taki kaydı tüketip UI katmanına haber verir.
+    func handlePendingUploadErrorIfNeeded() {
+        guard let message = BackgroundUploader.shared.consumePendingUploadError() else { return }
+        NotificationCenter.default.post(
+            name: .tripClipUploadFailed,
+            object: message
+        )
+    }
 }
 
 extension Notification.Name {
     static let tripClipNavigateToVideo = Notification.Name(
         "com.sardogan.TripClipAI.navigateToVideo"
+    )
+    static let tripClipUploadFailed = Notification.Name(
+        "com.sardogan.TripClipAI.uploadFailed"
     )
 }

@@ -41,17 +41,17 @@ export default function PasswordInput({
         value={value}
         onChange={onChange}
         autoComplete={autoComplete}
-        className={`w-full bg-white/[0.04] border border-white/10 rounded-xl px-4 py-3.5 pr-11
-          text-ice placeholder:text-muted text-sm
-          focus:outline-none focus:border-neon/40 transition-colors ${className}`}
+        className={`w-full bg-surface2 border border-border-strong rounded-md px-4 py-3.5 pr-11
+          text-text placeholder:text-text-tertiary text-sm
+          focus:outline-none focus:border-accent-text transition-colors ${className}`}
       />
       <button
         type="button"
         onClick={() => setVisible(v => !v)}
         tabIndex={-1}
         aria-label={visible ? "Şifreyi gizle" : "Şifreyi göster"}
-        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-md
-          text-muted hover:text-ice transition-colors disabled:opacity-50"
+        className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-sm
+          text-text-tertiary hover:text-text transition-colors disabled:opacity-50"
         disabled={disabled}
       >
         {visible ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}

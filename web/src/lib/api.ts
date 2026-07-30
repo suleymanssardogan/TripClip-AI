@@ -5,11 +5,83 @@ function getToken(): string | null {
   return localStorage.getItem("token");
 }
 
+function getRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("refresh_token");
+}
+
 function clearAuthStorage(): void {
   if (typeof window === "undefined") return;
   localStorage.removeItem("token");
+  localStorage.removeItem("refresh_token");
   localStorage.removeItem("user_id");
   localStorage.removeItem("email");
+}
+
+interface AuthTokens {
+  access_token: string;
+  refresh_token: string;
+  user_id: number;
+  email: string;
+}
+
+/**
+ * Login/register yanıtından gelen token çiftini localStorage'a yazar.
+ * Tekrarlanan localStorage.setItem üçlüsü yerine tek bir yer.
+ */
+export function saveAuthTokens(data: AuthTokens): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("token", data.access_token);
+  localStorage.setItem("refresh_token", data.refresh_token);
+  localStorage.setItem("user_id", String(data.user_id));
+  localStorage.setItem("email", data.email);
+}
+
+/**
+ * Sunucu tarafında refresh token'ı iptal etmeyi dener (best-effort), sonra
+ * local storage'ı temizleyip /login'e yönlendirir.
+ */
+export function logout(): void {
+  const refreshToken = getRefreshToken();
+  if (refreshToken) {
+    fetch(`${BASE_URL}/auth/logout`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    }).catch(() => { /* best-effort — client tarafı temizlik yine de yapılır */ });
+  }
+  clearAuthStorage();
+  if (typeof window !== "undefined") {
+    window.location.href = "/login";
+  }
+}
+
+/**
+ * Access token süresi dolduğunda (401) çağrılır. Başarılıysa yeni token
+ * çiftini kaydeder ve yeni access token'ı döner; başarısızsa storage'ı
+ * temizler ve null döner. Recursive 401 handling'e girmemek için ham
+ * `fetch` kullanır (request() üzerinden gitmez).
+ */
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+
+  try {
+    const res = await fetch(`${BASE_URL}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!res.ok) {
+      clearAuthStorage();
+      return null;
+    }
+    const data: AuthTokens = await res.json();
+    saveAuthTokens(data);
+    return data.access_token;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -41,7 +113,7 @@ function extractErrorMessage(body: unknown, status: number): string {
   return HTTP_MESSAGES[status] ?? `Bir hata oluştu (HTTP ${status}).`;
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, options: RequestInit = {}, _retried = false): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -57,17 +129,19 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => null);
-
-    // Token expiry: redirect only when an authenticated request (has token) gets 401.
-    // Auth endpoints (/auth/*) return 401 for wrong credentials — never redirect those.
-    if (res.status === 401 && token && !path.startsWith("/auth")) {
-      clearAuthStorage();
+    // Token expiry: try a silent refresh once, then retry the original request.
+    // Auth endpoints (/auth/*) return 401 for wrong credentials — never refresh those.
+    if (res.status === 401 && token && !_retried && !path.startsWith("/auth")) {
+      const newToken = await refreshAccessToken();
+      if (newToken) {
+        return request<T>(path, options, true);
+      }
       if (typeof window !== "undefined") {
         window.location.href = "/login";
       }
     }
 
+    const body = await res.json().catch(() => null);
     throw new Error(extractErrorMessage(body, res.status));
   }
 
@@ -77,14 +151,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 // ─── Auth ──────────────────────────────────────────────────────────────────
 
 export async function login(email: string, password: string) {
-  return request<{ access_token: string; user_id: number; email: string }>(
+  return request<AuthTokens>(
     "/auth/login",
     { method: "POST", body: JSON.stringify({ email, password }) }
   );
 }
 
 export async function register(email: string, password: string, username?: string) {
-  return request<{ access_token: string; user_id: number; email: string }>(
+  return request<AuthTokens>(
     "/auth/register",
     { method: "POST", body: JSON.stringify({ email, password, username }) }
   );
@@ -105,13 +179,13 @@ export async function getVideoProgress(id: number): Promise<ProgressResponse> {
  * Upload a video file with real progress reporting.
  * Uses XMLHttpRequest because fetch() does not expose upload progress.
  */
-export async function uploadVideo(
+function uploadVideoOnce(
   file: File,
   onProgress: (percent: number) => void,
-): Promise<{ id: number; status: string }> {
+  token: string | null,
+): Promise<{ id: number; status: string } | { retryNeeded: true }> {
   return new Promise((resolve, reject) => {
-    const token = getToken();
-    const form  = new FormData();
+    const form = new FormData();
     form.append("file", file);
 
     const xhr = new XMLHttpRequest();
@@ -123,15 +197,13 @@ export async function uploadVideo(
     };
 
     xhr.onload = () => {
+      if (xhr.status === 401 && token) {
+        resolve({ retryNeeded: true });
+        return;
+      }
       if (xhr.status >= 400) {
         let body: unknown = null;
         try { body = JSON.parse(xhr.responseText); } catch { /* ignore */ }
-
-        if (xhr.status === 401 && token) {
-          clearAuthStorage();
-          if (typeof window !== "undefined") window.location.href = "/login";
-        }
-
         reject(new Error(extractErrorMessage(body, xhr.status)));
         return;
       }
@@ -150,6 +222,29 @@ export async function uploadVideo(
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     xhr.send(form);
   });
+}
+
+export async function uploadVideo(
+  file: File,
+  onProgress: (percent: number) => void,
+): Promise<{ id: number; status: string }> {
+  const token = getToken();
+  const result = await uploadVideoOnce(file, onProgress, token);
+
+  if ("retryNeeded" in result) {
+    const newToken = await refreshAccessToken();
+    if (!newToken) {
+      if (typeof window !== "undefined") window.location.href = "/login";
+      throw new Error("Oturum sona erdi. Lütfen tekrar giriş yapın.");
+    }
+    const retried = await uploadVideoOnce(file, onProgress, newToken);
+    if ("retryNeeded" in retried) {
+      throw new Error("Oturum sona erdi. Lütfen tekrar giriş yapın.");
+    }
+    return retried;
+  }
+
+  return result;
 }
 
 /**
@@ -174,6 +269,14 @@ export async function getPlans(params?: { city?: string; limit?: number; offset?
 
 export async function getPlan(id: number) {
   return request<VideoDetail>(`/plans/${id}`);
+}
+
+/** Editor'de sürükle-bırak ile belirlenen durak sırasını kalıcı olarak kaydeder (gün başına ID listesi). */
+export async function updatePlanOrder(id: number, order: number[][]) {
+  return request<{ success: boolean }>(`/plans/${id}/order`, {
+    method: "PATCH",
+    body: JSON.stringify({ order }),
+  });
 }
 
 export async function getUserPlans(userId: number) {
@@ -226,6 +329,12 @@ export interface VideoDetail {
     rag: { travel_tips: { tips: any[]; summary: string } };
     ocr_pois: string[] | null;
   } | null;
+  degradation: {
+    total_services: number;
+    successful: number;
+    failed_services: string[];
+  } | null;
+  stop_order: number[][] | null;
 }
 
 export interface PlatformStats {

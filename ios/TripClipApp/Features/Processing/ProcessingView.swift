@@ -13,6 +13,7 @@ struct ProcessingView: View {
     var onCompleted: ((Int) -> Void)? = nil
 
     @StateObject private var vm: ProcessingViewModel
+    @Environment(\.dismiss) private var dismiss
 
     init(videoID: Int, apiClient: APIClient, token: String,
          onCompleted: ((Int) -> Void)? = nil) {
@@ -27,8 +28,7 @@ struct ProcessingView: View {
 
     var body: some View {
         ZStack {
-            // Arka plan — mevcut tasarımla aynı koyu tema
-            Color(red: 0.06, green: 0.07, blue: 0.13)
+            AppColors.background
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
@@ -45,11 +45,11 @@ struct ProcessingView: View {
                 // ── Stage Title ────────────────────────────────────────────
                 Text(vm.stage.displayTitle)
                     .font(.system(size: 24, weight: .bold))
-                    .foregroundColor(.white)
+                    .foregroundColor(AppColors.text)
 
                 Text(vm.stage.displaySubtitle)
                     .font(.system(size: 15))
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(AppColors.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.top, 8)
                     .padding(.horizontal, 32)
@@ -67,27 +67,67 @@ struct ProcessingView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "clock")
                             .font(.caption)
-                            .foregroundColor(.white.opacity(0.4))
+                            .foregroundColor(AppColors.textTertiary)
                         Text(vm.formattedElapsed)
                             .font(.system(size: 13, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.4))
+                            .foregroundColor(AppColors.textTertiary)
                         Text("·  Bu işlem 1–3 dakika sürebilir")
                             .font(.system(size: 13))
-                            .foregroundColor(.white.opacity(0.4))
+                            .foregroundColor(AppColors.textTertiary)
                     }
                     .padding(.bottom, 40)
                 }
 
                 // ── Hata / Timeout CTA ─────────────────────────────────────
+                // Eskiden bu ekranda sadece bir uyarı metni vardı, aksiyon
+                // butonu yoktu — kullanıcı çıkmaz sokakta kalıyordu.
                 if case .failed(let msg) = vm.stage {
-                    ErrorBanner(message: msg)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 32)
+                    VStack(spacing: 12) {
+                        ErrorBanner(message: msg)
+                        Button {
+                            dismiss()
+                        } label: {
+                            Text("Geri Dön")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        }
+                        .background(AppColors.surface2)
+                        .foregroundColor(AppColors.text)
+                        .cornerRadius(12)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 32)
                 }
                 if case .timedOut = vm.stage {
-                    ErrorBanner(message: "İşlem zaman aşımına uğradı. Lütfen tekrar deneyin.")
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 32)
+                    VStack(spacing: 12) {
+                        ErrorBanner(message: "İşlem zaman aşımına uğradı. Sunucuda hâlâ devam ediyor olabilir.")
+                        Button {
+                            vm.retryAfterTimeout()
+                        } label: {
+                            Text("Beklemeye Devam Et")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        }
+                        .background(AppColors.accentText)
+                        .foregroundColor(AppColors.background)
+                        .cornerRadius(12)
+
+                        Button {
+                            dismiss()
+                        } label: {
+                            Text("Geri Dön")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                        }
+                        .background(AppColors.surface2)
+                        .foregroundColor(AppColors.text)
+                        .cornerRadius(12)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 32)
                 }
             }
         }
@@ -113,10 +153,10 @@ private struct CircularProgressView: View {
 
     private var strokeColor: Color {
         switch stage {
-        case .done:           return .green
-        case .failed, .timedOut: return .red
+        case .done:           return AppColors.success
+        case .failed, .timedOut: return AppColors.destructive
         default:
-            return Color(red: 0.55, green: 0.35, blue: 0.95)  // mor-mavi gradyan rengi
+            return AppColors.accentText
         }
     }
 
@@ -124,7 +164,7 @@ private struct CircularProgressView: View {
         ZStack {
             // Arka iz
             Circle()
-                .stroke(Color.white.opacity(0.1), lineWidth: 6)
+                .stroke(AppColors.surface2, lineWidth: 6)
 
             // İlerleme yayı
             Circle()
@@ -145,7 +185,7 @@ private struct CircularProgressView: View {
 
                 Text("%\(percent)")
                     .font(.system(size: 15, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.85))
+                    .foregroundColor(AppColors.text)
             }
         }
     }
@@ -193,8 +233,8 @@ private struct StageDotRow: View {
             ForEach(0..<allStages.count, id: \.self) { i in
                 Circle()
                     .fill(isActive(allStages[i])
-                          ? Color(red: 0.22, green: 0.55, blue: 0.95)
-                          : Color.white.opacity(0.2))
+                          ? AppColors.accentText
+                          : AppColors.border)
                     .frame(width: 8, height: 8)
                     .animation(.easeInOut, value: stage.percent)
             }
@@ -209,13 +249,13 @@ private struct ErrorBanner: View {
     var body: some View {
         HStack {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundColor(.orange)
+                .foregroundColor(AppColors.destructive)
             Text(message)
                 .font(.system(size: 14))
-                .foregroundColor(.white.opacity(0.85))
+                .foregroundColor(AppColors.text)
         }
         .padding(14)
-        .background(Color.red.opacity(0.18))
+        .background(AppColors.destructive.opacity(0.18))
         .cornerRadius(12)
     }
 }

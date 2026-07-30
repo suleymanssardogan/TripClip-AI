@@ -2,126 +2,99 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   DESIGN TOKENS — dark is the default ground, .light overrides.
+   Stored as space-separated RGB triplets so Tailwind's
+   rgb(var(--x) / <alpha-value>) opacity modifiers keep working
+   (bg-accent/10, text-route/60, etc.), matching this app's
+   existing bg-neon/8-style usage throughout.
+   ============================================================ */
 @layer base {
+  :root,
+  :root.dark {
+    --c-bg: 12 13 16;
+    --c-surface: 26 28 33;
+    --c-surface2: 34 37 43;
+    --c-border: 42 46 53;
+    --c-border-strong: 58 63 72;
+    --c-text: 243 241 236;
+    --c-text-secondary: 162 166 173;
+    --c-text-tertiary: 108 112 121;
+    --c-accent: 255 176 32;
+    --c-accent-hover: 255 195 82;
+    --c-accent-text: 255 176 32;
+    --c-on-accent: 26 18 6;
+    --c-route: 63 217 196;
+    --c-success: 52 199 89;
+    --c-warning: 224 162 51;
+    --c-destructive: 255 69 58;
+  }
+
+  :root.light {
+    --c-bg: 246 247 248;
+    --c-surface: 255 255 255;
+    --c-surface2: 237 238 240;
+    --c-border: 225 227 231;
+    --c-border-strong: 203 206 211;
+    --c-text: 20 22 26;
+    --c-text-secondary: 82 86 93;
+    --c-text-tertiary: 130 134 141;
+    --c-accent: 232 137 26;
+    --c-accent-hover: 214 125 18;
+    --c-accent-text: 168 82 0;
+    --c-on-accent: 26 18 6;
+    --c-route: 12 117 104;
+    --c-success: 31 122 53;
+    --c-warning: 154 91 0;
+    --c-destructive: 215 0 21;
+  }
+
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
 
   body {
-    background-color: #080B14;
-    color: #E2F0FF;
-    font-family: var(--font-inter), sans-serif;
+    background-color: rgb(var(--c-bg));
+    color: rgb(var(--c-text));
+    font-family: var(--font-general-sans), sans-serif;
     -webkit-font-smoothing: antialiased;
     background-image:
-      linear-gradient(rgba(77,255,195,0.018) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(77,255,195,0.018) 1px, transparent 1px);
+      linear-gradient(rgba(255,176,32,0.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,176,32,0.018) 1px, transparent 1px);
     background-size: 40px 40px;
   }
 
   ::selection {
-    background: rgba(77,255,195,0.25);
-    color: #fff;
+    background: rgb(var(--c-accent) / 0.3);
+    color: rgb(var(--c-on-accent));
   }
 
   ::-webkit-scrollbar { width: 5px; }
-  ::-webkit-scrollbar-track { background: #080B14; }
-  ::-webkit-scrollbar-thumb { background: #1E2D40; border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: #4DFFC3; }
+  ::-webkit-scrollbar-track { background: rgb(var(--c-bg)); }
+  ::-webkit-scrollbar-thumb { background: rgb(var(--c-border-strong)); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgb(var(--c-accent)); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
 }
 
+/* ============================================================
+   COMPONENT CLASSES — small set still composed directly (not
+   available as single Tailwind utilities): tag chips and the
+   ambient status dot. Everything else is plain Tailwind
+   utility composition in the page/component files themselves.
+   ============================================================ */
 @layer components {
 
-  .glass {
-    background: rgba(15, 21, 33, 0.70);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border: 1px solid rgba(255,255,255,0.06);
-  }
-
-  .neon-card {
-    background: rgba(15, 21, 33, 0.80);
-    border: 1px solid rgba(77,255,195,0.12);
-    box-shadow: 0 4px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(77,255,195,0.04);
-    transition: all 0.3s cubic-bezier(0.4,0,0.2,1);
-  }
-  .neon-card:hover {
-    border-color: rgba(77,255,195,0.30);
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 20px rgba(77,255,195,0.08);
-    transform: translateY(-2px);
-  }
-
-  .bento-cell {
-    border-radius: 2rem;
-    overflow: hidden;
-    transition: transform 0.3s cubic-bezier(0.4,0,0.2,1), box-shadow 0.3s ease;
-  }
-  .bento-cell:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 16px 40px rgba(0,0,0,0.5);
-  }
-
-  .bento-orange { background: #1E0E04; border: 1px solid rgba(255,107,74,0.18); }
-  .bento-navy   { background: #06082A; border: 1px solid rgba(139,92,246,0.18); }
-  .bento-gold   { background: #F5C842; border: none; }
-  .bento-dark   { background: #0A0D1A; border: 1px solid rgba(255,255,255,0.06); }
-  .bento-green  { background: #06120B; border: 1px solid rgba(77,255,195,0.15); }
-
-  .gradient-text {
-    background: linear-gradient(135deg, #4DFFC3 0%, #8B5CF6 50%, #FF6B4A 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-  .gradient-text-neon {
-    background: linear-gradient(90deg, #4DFFC3, #8B5CF6);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-  .gradient-text-gold {
-    background: linear-gradient(135deg, #F5C842, #FF6B4A);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  .btn-neon {
-    background: rgba(77,255,195,0.08);
-    border: 1px solid rgba(77,255,195,0.35);
-    color: #4DFFC3;
-    transition: all 0.2s ease;
-  }
-  .btn-neon:hover {
-    background: rgba(77,255,195,0.16);
-    box-shadow: 0 0 24px rgba(77,255,195,0.25);
-  }
-
-  .btn-primary {
-    background: linear-gradient(135deg, #4DFFC3, #22c9a0);
-    color: #080B14;
-    font-weight: 700;
-    transition: all 0.2s ease;
-  }
-  .btn-primary:hover {
-    box-shadow: 0 0 32px rgba(77,255,195,0.45);
-    transform: translateY(-1px);
-  }
-
-  .btn-gold {
-    background: #080B14;
-    color: #F5C842;
-    font-weight: 800;
-    border: none;
-    transition: all 0.2s ease;
-  }
-  .btn-gold:hover {
-    background: #0F1521;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-  }
-
   .tag {
-    background: rgba(77,255,195,0.08);
-    border: 1px solid rgba(77,255,195,0.20);
-    color: #4DFFC3;
+    background: rgb(var(--c-route) / 0.08);
+    border: 1px solid rgb(var(--c-route) / 0.20);
+    color: rgb(var(--c-route));
     font-size: 0.7rem;
     font-weight: 600;
     letter-spacing: 0.05em;
@@ -129,225 +102,26 @@
     border-radius: 999px;
   }
 
-  .badge-done {
-    background: rgba(52,211,153,0.10);
-    border: 1px solid rgba(52,211,153,0.25);
-    color: #34D399;
-    font-size: 0.65rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    padding: 0.2rem 0.7rem;
-    border-radius: 999px;
-  }
-
-  .badge-pending {
-    background: rgba(251,191,36,0.10);
-    border: 1px solid rgba(251,191,36,0.25);
-    color: #FBBF24;
-    font-size: 0.65rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    padding: 0.2rem 0.7rem;
-    border-radius: 999px;
-  }
-
   .glow-dot {
     width: 7px; height: 7px;
     border-radius: 50%;
-    background: #4DFFC3;
-    box-shadow: 0 0 8px #4DFFC3, 0 0 16px rgba(77,255,195,0.5);
-    animation: glow-pulse 2s ease-in-out infinite;
-  }
-
-  .orb {
-    position: absolute;
-    border-radius: 50%;
-    filter: blur(80px);
-    pointer-events: none;
-    opacity: 0.12;
-  }
-
-  .animated-border {
-    position: relative;
-    border-radius: 1.5rem;
-    padding: 1px;
-    background: linear-gradient(135deg, rgba(77,255,195,0.35), rgba(139,92,246,0.35), rgba(255,107,74,0.35));
-    background-size: 200% 200%;
-    animation: gradient-shift 4s linear infinite;
+    background: rgb(var(--c-route));
+    box-shadow: 0 0 8px rgb(var(--c-route)), 0 0 16px rgb(var(--c-route) / 0.5);
+    animation: glow-pulse-route 2s ease-in-out infinite;
   }
 }
 
-@keyframes gradient-shift {
-  0%   { background-position: 0% 50%; }
-  50%  { background-position: 100% 50%; }
-  100% { background-position: 0% 50%; }
-}
-@keyframes glow-pulse {
-  0%,100% { box-shadow: 0 0 8px #4DFFC3, 0 0 16px rgba(77,255,195,0.5); }
-  50%     { box-shadow: 0 0 12px #4DFFC3, 0 0 28px rgba(77,255,195,0.7); }
-}
-@keyframes float {
-  0%,100% { transform: translateY(0px); }
-  50%     { transform: translateY(-10px); }
+@keyframes glow-pulse-route {
+  0%,100% { box-shadow: 0 0 8px rgb(var(--c-route)), 0 0 16px rgb(var(--c-route) / 0.5); }
+  50%     { box-shadow: 0 0 12px rgb(var(--c-route)), 0 0 28px rgb(var(--c-route) / 0.7); }
 }
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 
-/* ── Theme Toggle: html.light overrides ───────────────────────────────────
-   "html.light" set olduğunda Tailwind ile yazılmış koyu tema öğelerini
-   yumuşak krem/charcoal varyantlarına çeviriyoruz. Hiçbir component'i
-   refactor etmeden, sadece CSS ile ışık modunu geçici aç/kapa.
-─────────────────────────────────────────────────────────────────────────── */
-
-html.light body {
-  background-color: #FAF7F2 !important;
-  color: #1C1C1E !important;
-  background-image:
-    linear-gradient(rgba(28,28,30,0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(28,28,30,0.025) 1px, transparent 1px) !important;
-}
-
-/* Tailwind utility renk override'ları — yalnızca light mode'da geçerli */
-html.light .bg-surface,
-html.light .bg-bg,
-html.light .bg-card     { background-color: #FFFFFF !important; }
-html.light .bg-dim      { background-color: #F4EFE6 !important; }
-html.light .bg-white\/5,
-html.light .bg-white\/10 { background-color: rgba(28,28,30,0.04) !important; }
-
-html.light .text-ice    { color: #1C1C1E !important; }
-html.light .text-muted  { color: #5C5C5E !important; }
-html.light .text-neon   { color: #0A8F6B !important; }   /* daha okunaklı yeşil */
-html.light .text-violet { color: #6D28D9 !important; }
-
-html.light .border-white\/5,
-html.light .border-white\/10,
-html.light .border-white\/20 { border-color: rgba(28,28,30,0.10) !important; }
-
-html.light .neon-card {
-  background: #FFFFFF !important;
-  border: 1px solid #E8E0D0 !important;
-  box-shadow: 0 4px 18px rgba(28,28,30,0.06), 0 1px 0 rgba(28,28,30,0.02) !important;
-}
-html.light .neon-card:hover {
-  border-color: #C8A96E !important;
-  box-shadow: 0 8px 24px rgba(28,28,30,0.10) !important;
-}
-
-html.light .glass {
-  background: rgba(255,255,255,0.85) !important;
-  border: 1px solid rgba(28,28,30,0.08) !important;
-}
-
-html.light .btn-primary {
-  background: linear-gradient(135deg, #1C1C1E, #2C2C2E) !important;
-  color: #FFFFFF !important;
-}
-html.light .btn-primary:hover {
-  box-shadow: 0 6px 18px rgba(28,28,30,0.18) !important;
-}
-
-html.light .gradient-text {
-  background: linear-gradient(135deg, #0A8F6B 0%, #6D28D9 50%, #DC4C3F 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-}
-
-html.light ::-webkit-scrollbar-track { background: #FAF7F2 !important; }
-html.light ::-webkit-scrollbar-thumb { background: #C8A96E !important; }
-
-html.light .tag {
-  background: rgba(10,143,107,0.10) !important;
-  border: 1px solid rgba(10,143,107,0.25) !important;
-  color: #0A8F6B !important;
-}
-
-/* Print için PDF için daha okunaklı */
+/* Print — PDF export */
 @media print {
   body { background: white !important; color: black !important; background-image: none !important; }
   nav, .no-print { display: none !important; }
-  .neon-card { border: 1px solid #E5E5E5 !important; box-shadow: none !important; background: white !important; break-inside: avoid; }
-  .text-ice, .text-neon, .text-muted, .text-violet, .text-coral { color: #1C1C1E !important; }
   a { color: black !important; text-decoration: none !important; }
-}
-
-/* ── Light / Luxury Theme ─────────────────────────────────────────────── */
-
-.light-page {
-  background-color: #FAF7F2;
-  color: #1C1C1E;
-  background-image: none;
-}
-
-.bg-cream {
-  background-color: #FAF7F2;
-}
-
-.text-charcoal    { color: #1C1C1E; }
-.text-charcoal-mid { color: #5C5C5E; }
-.text-charcoal-lt  { color: #9A9A9C; }
-.text-gold         { color: #C8A96E; }
-.border-warm-border { border-color: #E8E0D0; }
-
-.luxury-label {
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: #C8A96E;
-}
-
-.luxury-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  background: #1C1C1E;
-  color: #FAF7F2;
-  font-size: 0.875rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 0.875rem 1.75rem;
-  border: none;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-.luxury-btn:hover {
-  background: #2C2C2E;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.15);
-}
-
-.luxury-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #1C1C1E;
-  border-bottom: 1px solid #1C1C1E;
-  padding-bottom: 1px;
-  transition: color 0.2s, border-color 0.2s;
-}
-.luxury-link:hover {
-  color: #C8A96E;
-  border-color: #C8A96E;
-}
-
-.luxury-divider {
-  border: none;
-  border-top: 1px solid #E8E0D0;
-}
-
-.gold-line {
-  display: block;
-  width: 2.5rem;
-  height: 2px;
-  background: linear-gradient(90deg, #C8A96E, #E8C98E);
-}
-
-@keyframes luxury-fade-in {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
 }

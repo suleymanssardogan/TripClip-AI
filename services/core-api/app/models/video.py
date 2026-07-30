@@ -47,6 +47,12 @@ class Video(Base):
     optimized_route = Column(JSON, nullable=True)
     travel_tips = Column(JSON, nullable=True)
     ocr_pois = Column(JSON, nullable=True)
+
+    # Hangi AI aşamalarının fallback'e düştüğünü kaydeder — pipeline'ın
+    # sessizce bozuk sonuç üretip COMPLETED olarak işaretlenmesini önlemek için.
+    degradation = Column(JSON, nullable=True)
+    # Kullanıcının editor'de belirlediği durak sırası: gün başına ID listesi.
+    stop_order = Column(JSON, nullable=True)
     
 
     

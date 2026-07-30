@@ -8,7 +8,7 @@ struct TravelTipsSection: View {
         VStack(alignment: .leading, spacing: 10) {
             Label("Seyahat İpuçları", systemImage: "lightbulb.fill")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(AppColors.text)
 
             ForEach(Array(tips.enumerated()), id: \.offset) { _, tip in
                 TipRow(tip: tip)
@@ -25,13 +25,13 @@ private struct TipRow: View {
             if !tip.location.isEmpty {
                 Text(tip.location)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(AppColors.neon)
+                    .foregroundStyle(AppColors.accentText)
                     .textCase(.uppercase)
                     .tracking(0.5)
             }
             Text(tip.tip)
                 .font(.system(size: 13))
-                .foregroundStyle(Color.white.opacity(0.80))
+                .foregroundStyle(AppColors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(12)
@@ -40,7 +40,7 @@ private struct TipRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(AppColors.neon.opacity(0.12), lineWidth: 1)
+                .stroke(AppColors.accent.opacity(0.12), lineWidth: 1)
         )
     }
 }

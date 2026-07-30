@@ -77,7 +77,7 @@ Kullanıcılar Instagram'da yüzlerce gezi videosu kaydeder; bu videolar organiz
 | NER (klasik mod) | Turkish BERT (HuggingFace) |
 | Geocoding | Nominatim (OpenStreetMap) |
 | Route | TSP Solver (Haversine) |
-| Travel Tips | Qdrant + sentence-transformers embeddings |
+| Travel Tips | `USE_GEMINI=true` (varsayılan): Gemini üretir. Klasik modda (`USE_GEMINI=false`): Qdrant + sentence-transformers + opsiyonel Ollama (`OLLAMA_URL` boşsa devre dışı — bkz. [docs/deployment.md](docs/deployment.md)) |
 | Konteyner | Docker Compose (8 servis: core-api, celery-worker, mobile-bff, web-bff, postgres, redis, mongodb, qdrant) |
 
 ### iOS (Swift)
@@ -232,6 +232,16 @@ Her aşama Redis'e yazılır → iOS & Web gerçek zamanlı progress gösterir.
 | **Geçmiş** | CoreData ile offline erişim |
 | **Paylaşım** | Instagram Story kartı, görsel paylaşım, PDF dışa aktarma |
 | **Share Extension** | Instagram'dan direkt TripClip AI'a paylaş |
+
+### TODO — App Icon (App Store gönderimi öncesi)
+
+`ios/TripClipApp/Resources/Assets.xcassets/AppIcon.appiconset/` şu an sadece `Contents.json` içeriyor, gerçek görsel yok. `project.yml` modern **tek boyutlu App Icon** formatını kullanıyor (`ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon`, Contents.json'da tek "universal / 1024x1024" girişi) — bu yüzden Xcode 14+ ile tüm diğer boyutlar (Home Screen, Spotlight, Settings, App Store) otomatik türetiliyor. Gerekli olan:
+
+- **1 adet 1024×1024 px PNG**, alfa kanalı / şeffaflık **olmadan** (App Store Connect bu formatı reddeder).
+- Dosyayı Xcode'da `AppIcon.appiconset`'e sürükleyip bırakmak yeterli (Contents.json otomatik güncellenir).
+- Bu görsel aynı zamanda App Store Connect'teki "1024x1024 App Store icon" alanına da yüklenir — ayrı bir dosyaya gerek yok.
+
+Bu depo bir placeholder ikon üretmez; gerçek marka/logo asseti proje sahibi tarafından sağlanmalıdır.
 
 ---
 

@@ -7,8 +7,19 @@ struct ResultsView: View {
 
     @Environment(AuthEnvironment.self) private var auth
     @State private var vm          = ResultsViewModel()
-    @State private var shareItems: [Any] = []
-    @State private var showShare   = false
+    @State private var sharePayload: SharePayload?
+    @State private var exportFailed = false
+
+    /// `.sheet(item:)` kullanabilmek için Identifiable sarmalayıcı.
+    ///
+    /// `.sheet(isPresented:)` ile içerik closure'ı, state güncellemesi yayılmadan
+    /// önce değerlendiriliyor ve ilk açılışta paylaşım sayfası HENÜZ BOŞ olan
+    /// diziyi alıyordu — sayfa açılıyor ama içi boş görünüyordu. `.sheet(item:)`
+    /// içeriği tetikleyen değerden kurduğu için bu yarış ortadan kalkıyor.
+    private struct SharePayload: Identifiable {
+        let id = UUID()
+        let url: URL
+    }
 
     var body: some View {
         ZStack {
@@ -16,7 +27,7 @@ struct ResultsView: View {
 
             if vm.isLoading {
                 ProgressView()
-                    .tint(AppColors.neon)
+                    .tint(AppColors.accentText)
             } else if let error = vm.error {
                 errorView(error)
             } else if let plan = vm.plan {
@@ -25,36 +36,46 @@ struct ResultsView: View {
         }
         .navigationTitle("Gezi Detayı")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarColorScheme(.dark, for: .navigationBar)
         .toolbar {
             if let plan = vm.plan {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button {
-                            let pdf = PDFExportService.generate(plan: plan)
-                            shareItems = [pdf]
-                            showShare  = true
+                            share(PDFExportService.exportToFile(plan: plan, title: plan.displayTitle))
                         } label: {
                             Label("PDF İndir", systemImage: "doc.fill")
                         }
                         Button {
-                            let img = TripShareCard.render(plan: plan)
-                            shareItems = [img]
-                            showShare  = true
+                            share(TripShareCard.exportToFile(plan: plan, title: plan.displayTitle))
                         } label: {
                             Label("Story Kartı", systemImage: "square.and.arrow.up")
                         }
                     } label: {
                         Image(systemName: "ellipsis.circle")
-                            .foregroundStyle(AppColors.neon)
+                            .foregroundStyle(AppColors.accentText)
                     }
                 }
             }
         }
-        .sheet(isPresented: $showShare) {
-            ShareSheet(items: shareItems)
+        .sheet(item: $sharePayload) { payload in
+            ShareSheet(items: [payload.url])
+        }
+        .alert("Dosya oluşturulamadı", isPresented: $exportFailed) {
+            Button("Tamam", role: .cancel) { }
+        } message: {
+            Text("Paylaşım dosyası hazırlanamadı. Lütfen tekrar deneyin.")
         }
         .task { await vm.load(planID: planID, auth: auth, preloaded: preloadedPlan) }
+    }
+
+    /// Dışa aktarım başarısızsa sessizce boş bir paylaşım sayfası açmak yerine
+    /// kullanıcıya söyle.
+    private func share(_ url: URL?) {
+        guard let url else {
+            exportFailed = true
+            return
+        }
+        sharePayload = SharePayload(url: url)
     }
 
     // MARK: - Plan Content
@@ -93,7 +114,7 @@ struct ResultsView: View {
                     sectionHeader("Video Transkripsiyonu")
                     Text(transcript)
                         .font(.system(size: 13))
-                        .foregroundStyle(AppColors.muted)
+                        .foregroundStyle(AppColors.textSecondary)
                         .padding(.horizontal, 16)
                 }
 
@@ -107,23 +128,23 @@ struct ResultsView: View {
 
     private func statsStrip(_ plan: PlanDetail) -> some View {
         HStack(spacing: 0) {
-            statCell(icon: "mappin.circle.fill", value: "\(plan.locations.count)", label: "Mekan",  color: AppColors.neon)
-            Divider().frame(height: 36).background(Color.white.opacity(0.1))
-            statCell(icon: "clock.fill",          value: durationString(plan.duration),             label: "Süre",   color: AppColors.violet)
-            Divider().frame(height: 36).background(Color.white.opacity(0.1))
-            statCell(icon: "cpu.fill",             value: processingString(plan.processingTime),     label: "Analiz", color: AppColors.coral)
+            statCell(icon: "mappin.circle.fill", value: "\(plan.locations.count)", label: "Mekan")
+            Divider().frame(height: 36).background(AppColors.border)
+            statCell(icon: "clock.fill",          value: durationString(plan.duration),             label: "Süre")
+            Divider().frame(height: 36).background(AppColors.border)
+            statCell(icon: "cpu.fill",             value: processingString(plan.processingTime),     label: "Analiz")
         }
         .padding(.vertical, 14)
         .background(AppColors.surface)
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.07), lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(AppColors.border, lineWidth: 1))
     }
 
-    private func statCell(icon: String, value: String, label: String, color: Color) -> some View {
+    private func statCell(icon: String, value: String, label: String) -> some View {
         VStack(spacing: 4) {
-            Image(systemName: icon).foregroundStyle(color).font(.system(size: 16))
-            Text(value).font(.system(size: 15, weight: .bold)).foregroundStyle(.white)
-            Text(label).font(.system(size: 11)).foregroundStyle(AppColors.muted)
+            Image(systemName: icon).foregroundStyle(AppColors.textTertiary).font(.system(size: 16))
+            Text(value).font(.system(size: 15, weight: .bold)).foregroundStyle(AppColors.text)
+            Text(label).font(.system(size: 11)).foregroundStyle(AppColors.textSecondary)
         }
         .frame(maxWidth: .infinity)
     }
@@ -131,7 +152,7 @@ struct ResultsView: View {
     private func sectionHeader(_ title: String) -> some View {
         Text(title)
             .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(AppColors.muted)
+            .foregroundStyle(AppColors.textSecondary)
             .textCase(.uppercase)
             .tracking(0.8)
             .padding(.horizontal, 16)
@@ -151,15 +172,15 @@ struct ResultsView: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 48))
-                .foregroundStyle(AppColors.coral)
+                .foregroundStyle(AppColors.destructive)
             Text(error.localizedDescription ?? "Yüklenemedi.")
-                .foregroundStyle(AppColors.muted)
+                .foregroundStyle(AppColors.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
             Button("Tekrar Dene") {
                 Task { await vm.load(planID: planID, auth: auth) }
             }
-            .foregroundStyle(AppColors.neon)
+            .foregroundStyle(AppColors.accentText)
         }
     }
 }
@@ -167,7 +188,7 @@ struct ResultsView: View {
 // MARK: - UIActivityViewController wrapper
 
 private struct ShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
+    let items: [URL]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
         UIActivityViewController(activityItems: items, applicationActivities: nil)

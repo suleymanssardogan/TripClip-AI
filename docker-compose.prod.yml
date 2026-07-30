@@ -15,10 +15,14 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/certbot-webroot:/var/www/certbot:ro
     depends_on:
-      - web
-      - web-bff
-      - mobile-bff
+      web:
+        condition: service_healthy
+      web-bff:
+        condition: service_healthy
+      mobile-bff:
+        condition: service_healthy
     networks:
       - app-network
     logging:
@@ -62,6 +66,8 @@ services:
     image: postgres:15-alpine
     container_name: tripclip-postgres
     restart: always
+    mem_limit: 1g
+    cpus: 1.0
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-tripclip}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -86,6 +92,8 @@ services:
     image: redis:7-alpine
     container_name: tripclip-redis
     restart: always
+    mem_limit: 512m
+    cpus: 0.5
     command: >
       redis-server
       --appendonly yes
@@ -113,6 +121,8 @@ services:
     image: mongo:7
     container_name: tripclip-mongo
     restart: always
+    mem_limit: 1g
+    cpus: 1.0
     volumes:
       - mongo_data:/data/db
     networks:
@@ -145,9 +155,20 @@ services:
 
   # ── Core API ──────────────────────────────────────────────────────────────────
   core-api:
-    build: ./services/core-api
+    build:
+      context: ./services/core-api
+      # Build-time'da gömülen Whisper modelinin, runtime'daki WHISPER_MODEL
+      # env değeriyle uyuşmasını sağlar — .env'de değiştirdiğinizde
+      # `docker compose build` bunu otomatik kullanır, elle senkronize
+      # etmenize gerek kalmaz.
+      args:
+        WHISPER_MODEL: ${WHISPER_MODEL:-small}
     container_name: tripclip-core-api
     restart: always
+    # VPS kapasitesine göre ayarlayın — amaç, bu servisin bellek sızıntısı/
+    # patlaması durumunda tüm host'u değil sadece kendini etkilemesi.
+    mem_limit: 2g
+    cpus: 2.0
     depends_on:
       postgres:
         condition: service_healthy
@@ -163,9 +184,12 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
       APP_ENV: production
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      DAILY_UPLOAD_QUOTA_PER_USER: ${DAILY_UPLOAD_QUOTA_PER_USER:-20}
     volumes:
       - uploads_data:/app/uploads
     networks:
@@ -184,15 +208,23 @@ services:
 
   # ── Celery Worker ─────────────────────────────────────────────────────────────
   celery-worker:
-    build: ./services/core-api
+    build:
+      context: ./services/core-api
+      args:
+        WHISPER_MODEL: ${WHISPER_MODEL:-small}
     container_name: tripclip-celery-worker
     restart: always
+    # ML modelleri (YOLO + BERT NER + Whisper + SentenceTransformer) HER
+    # forked child process'te ayrı ayrı belleğe yüklenir (--concurrency=N
+    # ≈ N× model belleği). Aşağıdaki 8g/4.0 concurrency=2 için ayarlanmıştır —
+    # concurrency'yi artırırsanız her +1 için kabaca +3-4GB RAM / +1 cpu ekleyin,
+    # VPS kapasitenize göre ayarlayın.
+    mem_limit: 8g
+    cpus: 4.0
     command: >
-      celery -A app.core.celery_app worker
-      --loglevel=info
-      -Q video_processing
-      --pool=solo
-      -n worker@%h
+      sh -c "rm -rf /tmp/prometheus_multiproc && mkdir -p /tmp/prometheus_multiproc &&
+      celery -A app.core.celery_app worker --loglevel=info -Q video_processing
+      --pool=prefork --concurrency=2 -n worker@%h"
     depends_on:
       core-api:
         condition: service_healthy
@@ -208,10 +240,13 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
       USE_GOOGLE_VISION: ${USE_GOOGLE_VISION:-false}
+      OLLAMA_URL: ${OLLAMA_URL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
       APP_ENV: production
       SENTRY_DSN: ${SENTRY_DSN:-}
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
       OPENBLAS_NUM_THREADS: "1"
@@ -226,6 +261,14 @@ services:
       options:
         max-size: "50m"
         max-file: "10"
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery_app inspect ping -d worker@$$HOSTNAME || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 40s
+    expose:
+      - "9808"  # Prometheus metrics — sadece app-network içinden erişilir
 
   # ── Web BFF ───────────────────────────────────────────────────────────────────
   web-bff:
@@ -238,8 +281,11 @@ services:
     environment:
       CORE_API_URL: http://core-api:8000
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
       APP_ENV: production
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     networks:
       - app-network
     logging:
@@ -247,6 +293,12 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health')\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   # ── Mobile BFF ────────────────────────────────────────────────────────────────
   mobile-bff:
@@ -259,8 +311,11 @@ services:
     environment:
       CORE_API_URL: http://core-api:8000
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
       APP_ENV: production
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     networks:
       - app-network
     logging:
@@ -268,6 +323,60 @@ services:
       options:
         max-size: "10m"
         max-file: "5"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Monitoring: Prometheus + Grafana ──────────────────────────────────────────
+  # Public'e HİÇ port açılmaz — nginx bu servisleri proxy'lemez. Sadece
+  # 127.0.0.1'e bağlanır; erişim için SSH tünel kullanın:
+  #   ssh -L 9090:localhost:9090 -L 3010:localhost:3010 kullanici@sunucu
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: tripclip-prometheus
+    restart: always
+    mem_limit: 512m
+    cpus: 0.5
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: tripclip-grafana
+    restart: always
+    mem_limit: 512m
+    cpus: 0.5
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:3010:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 networks:
   app-network:
@@ -279,3 +388,5 @@ volumes:
   mongo_data:
   qdrant_data:
   uploads_data:
+  prometheus_data:
+  grafana_data:

@@ -1,17 +1,32 @@
 import type { Metadata } from "next";
-import { Inter, Plus_Jakarta_Sans, Playfair_Display } from "next/font/google";
+import { JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { ThemeProvider } from "@/lib/theme";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
-const jakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  variable: "--font-jakarta",
+// Display + body faces — self-hosted (not on Google Fonts).
+const satoshi = localFont({
+  variable: "--font-satoshi",
+  src: [
+    { path: "./fonts/Satoshi-Regular.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/Satoshi-Medium.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/Satoshi-Bold.woff2", weight: "700", style: "normal" },
+    { path: "./fonts/Satoshi-Black.woff2", weight: "900", style: "normal" },
+  ],
 });
-const playfair = Playfair_Display({
+const generalSans = localFont({
+  variable: "--font-general-sans",
+  src: [
+    { path: "./fonts/GeneralSans-Regular.woff2", weight: "400", style: "normal" },
+    { path: "./fonts/GeneralSans-Medium.woff2", weight: "500", style: "normal" },
+    { path: "./fonts/GeneralSans-Semibold.woff2", weight: "600", style: "normal" },
+  ],
+});
+// Data labels, timestamps, coordinates, budget figures.
+const jbMono = JetBrains_Mono({
   subsets: ["latin"],
-  variable: "--font-playfair",
-  weight: ["400", "700", "800", "900"],
+  variable: "--font-jbmono",
+  weight: ["400", "500", "600"],
 });
 
 export const metadata: Metadata = {
@@ -47,7 +62,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${inter.variable} ${jakarta.variable} ${playfair.variable} font-sans bg-bg text-ice antialiased`}
+        className={`${satoshi.variable} ${generalSans.variable} ${jbMono.variable} font-sans bg-bg text-text antialiased`}
         suppressHydrationWarning
       >
         <ThemeProvider>{children}</ThemeProvider>

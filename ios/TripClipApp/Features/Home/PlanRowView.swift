@@ -9,10 +9,10 @@ struct PlanRowView: View {
             // ── Location emoji ──────────────────────────────────────────────
             ZStack {
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(plan.isCompleted ? AppColors.neon.opacity(0.12) : Color.white.opacity(0.06))
+                    .fill(AppColors.surface2)
                     .overlay(
                         RoundedRectangle(cornerRadius: 14)
-                            .stroke(plan.isCompleted ? AppColors.neon.opacity(0.2) : Color.white.opacity(0.08))
+                            .stroke(AppColors.border)
                     )
                 Text(locationEmoji(for: plan.topLocation))
                     .font(.system(size: 26))
@@ -23,18 +23,18 @@ struct PlanRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(plan.displayTitle)
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(AppColors.text)
                     .lineLimit(1)
 
                 HStack(spacing: 10) {
                     Label("\(plan.locationsCount) mekan", systemImage: "mappin")
                         .font(.system(size: 12))
-                        .foregroundStyle(AppColors.muted)
+                        .foregroundStyle(AppColors.textSecondary)
 
                     if !plan.formattedDate.isEmpty {
                         Text(plan.formattedDate)
                             .font(.system(size: 12))
-                            .foregroundStyle(AppColors.muted)
+                            .foregroundStyle(AppColors.textSecondary)
                     }
                 }
             }
@@ -49,7 +49,7 @@ struct PlanRowView: View {
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .overlay(
             RoundedRectangle(cornerRadius: 18)
-                .stroke(Color.white.opacity(0.07), lineWidth: 1)
+                .stroke(AppColors.border, lineWidth: 1)
         )
     }
 
@@ -58,20 +58,20 @@ struct PlanRowView: View {
         if plan.isCompleted {
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(AppColors.muted)
+                .foregroundStyle(AppColors.textTertiary)
         } else {
             HStack(spacing: 4) {
                 Circle()
-                    .fill(AppColors.neon)
+                    .fill(AppColors.warning)
                     .frame(width: 6, height: 6)
-                    .overlay(Circle().fill(AppColors.neon).scaleEffect(1.5).opacity(0.3))
+                    .overlay(Circle().fill(AppColors.warning).scaleEffect(1.5).opacity(0.3))
                 Text("İşleniyor")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(AppColors.neon)
+                    .foregroundStyle(AppColors.warning)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(AppColors.neon.opacity(0.1))
+            .background(AppColors.warning.opacity(0.1))
             .clipShape(Capsule())
         }
     }

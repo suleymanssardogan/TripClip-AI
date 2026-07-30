@@ -1,8 +1,46 @@
 import UIKit
 
+// MARK: - Paylaşım dosyası yardımcısı
+
+/// Paylaşılacak içeriği geçici bir dosyaya yazar.
+///
+/// `UIActivityViewController`'a ham `Data` verilirse içerik tipini (UTI)
+/// belirleyemez ve boş bir paylaşım sayfası açılır — hiçbir eylem görünmez.
+/// Dosya URL'i verildiğinde UTI uzantıdan çözülür, üstelik paylaşım sayfasında
+/// düzgün bir ad ve önizleme çıkar.
+enum ShareExport {
+
+    /// Dosya adında kullanılamayacak karakterleri temizler.
+    static func sanitizedFilename(_ name: String, fallback: String) -> String {
+        let cleaned = name
+            .components(separatedBy: CharacterSet(charactersIn: "/\\?%*|\"<>:"))
+            .joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? fallback : cleaned
+    }
+
+    /// Veriyi geçici dizine yazar ve URL'ini döner.
+    static func writeTemporaryFile(_ data: Data, filename: String) -> URL? {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(filename)
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
+        }
+    }
+}
+
 // Generates an A4 PDF from a PlanDetail.
 // Ported from services/ios/TripClipAI — adapted to new PlanDetail model.
 struct PDFExportService {
+
+    /// PDF'i geçici dosyaya yazıp paylaşılabilir URL döner.
+    /// Paylaşım sayfası `Data` ile çalışmaz — bkz. `ShareExport`.
+    static func exportToFile(plan: PlanDetail, title: String) -> URL? {
+        let name = ShareExport.sanitizedFilename(title, fallback: "TripClip-Gezi-\(plan.id)")
+        return ShareExport.writeTemporaryFile(generate(plan: plan), filename: "\(name).pdf")
+    }
 
     static func generate(plan: PlanDetail) -> Data {
         let pageRect = CGRect(x: 0, y: 0, width: 595, height: 842) // A4

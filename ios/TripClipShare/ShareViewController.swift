@@ -15,6 +15,16 @@ import Social
 
 final class ShareViewController: UIViewController {
 
+    // MARK: - Design tokens (Ember accent — matches TripClipApp/AppColors)
+    // Defined inline since Share Extension targets don't share the main
+    // app's AppColors.swift file membership.
+    private static let accent = UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 1.0,   green: 0.690, blue: 0.125, alpha: 1)
+            : UIColor(red: 0.910, green: 0.537, blue: 0.102, alpha: 1)
+    }
+    private static let onAccent = UIColor(red: 0.102, green: 0.071, blue: 0.024, alpha: 1)
+
     // MARK: - State
 
     private enum ViewState {
@@ -40,7 +50,7 @@ final class ShareViewController: UIViewController {
     private let iconView: UIImageView = {
         let iv = UIImageView()
         iv.image = UIImage(systemName: "mappin.and.ellipse")
-        iv.tintColor = UIColor(red: 0.40, green: 0.78, blue: 0.96, alpha: 1) // TripClip neon-blue
+        iv.tintColor = ShareViewController.accent
         iv.contentMode = .scaleAspectFit
         iv.translatesAutoresizingMaskIntoConstraints = false
         return iv
@@ -79,8 +89,8 @@ final class ShareViewController: UIViewController {
         config.image           = UIImage(systemName: "paperplane.fill")
         config.imagePadding    = 8
         config.cornerStyle     = .capsule
-        config.baseBackgroundColor = UIColor(red: 0.40, green: 0.78, blue: 0.96, alpha: 1)
-        config.baseForegroundColor = .black
+        config.baseBackgroundColor = ShareViewController.accent
+        config.baseForegroundColor = ShareViewController.onAccent
         let btn = UIButton(configuration: config)
         btn.isEnabled = false
         btn.translatesAutoresizingMaskIntoConstraints = false
@@ -238,20 +248,50 @@ final class ShareViewController: UIViewController {
     @objc private func postTapped() {
         guard case .ready(let url) = state else { return }
 
+        // Kullanıcı ID'sini App Group'tan oku (ana uygulama login sırasında yazmış olmalı).
+        // Eskiden bulunamazsa 0'a düşüyordu — bu, giriş yapmamış/App Group'u
+        // henüz senkronize etmemiş bir kullanıcının videosunun sunucuda user_id=0
+        // olarak (geçersiz bir hesaba) yüklenmesi anlamına geliyordu. Şimdi
+        // bunun yerine net bir hata gösterip yüklemeyi engelliyoruz.
+        guard
+            let userID = UserDefaults(suiteName: BackgroundUploader.Config.appGroupID)?
+                .integer(forKey: "currentUserID"),
+            userID > 0
+        else {
+            state = .error("Önce TripClip uygulamasına giriş yapın.")
+            return
+        }
+
         // Butonu devre dışı bırak — double-tap önlemi
         postButton.isEnabled = false
 
-        // Kullanıcı ID'sini App Group'tan oku (ana uygulama login sırasında yazmış olmalı)
-        let userID = UserDefaults(suiteName: BackgroundUploader.Config.appGroupID)?
-            .integer(forKey: "currentUserID") ?? 0
+        // Access token 30 dakikada doluyor. Süresi geçmişse burada — yani
+        // completeRequest'ten ÖNCE, process hâlâ canlıyken — yeniliyoruz.
+        // Sonrasında yalnızca başlatılmış background task'lar hayatta kalıyor,
+        // yeni bir ağ isteği yapacak vakit kalmıyor ve upload sessizce 401 alıyordu.
+        spinner.startAnimating()
+        subtitleLabel.text = "Oturum kontrol ediliyor…"
 
-        // ─── KRİTİK: completeRequest SONRA background upload ───────────────────
-        // completionHandler, extension process suspend edilmeden hemen önce çalışır.
-        // Bu pencereyi kullanarak URLSession task'ını başlatıyoruz.
-        // Task başladıktan sonra process ölse bile iOS görevi canlı tutar.
-        extensionContext?.completeRequest(returningItems: []) { [weak self] _ in
+        Task { @MainActor [weak self] in
             guard let self else { return }
 
+            guard await BackgroundUploader.shared.ensureFreshToken() != nil else {
+                self.spinner.stopAnimating()
+                self.state = .error("Oturum süresi doldu. TripClip'i açıp tekrar giriş yapın.")
+                return
+            }
+
+            self.spinner.stopAnimating()
+            self.completeRequestAndEnqueue(url: url, userID: userID)
+        }
+    }
+
+    /// ─── KRİTİK: completeRequest SONRA background upload ───────────────────
+    /// completionHandler, extension process suspend edilmeden hemen önce çalışır.
+    /// Bu pencereyi kullanarak URLSession task'ını başlatıyoruz.
+    /// Task başladıktan sonra process ölse bile iOS görevi canlı tutar.
+    private func completeRequestAndEnqueue(url: URL, userID: Int) {
+        extensionContext?.completeRequest(returningItems: []) { _ in
             BackgroundUploader.shared.enqueue(url: url, userID: userID) { result in
                 if case .failure(let error) = result {
                     // Process zaten kapanıyor, loglayabiliriz sadece

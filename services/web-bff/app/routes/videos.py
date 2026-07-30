@@ -5,6 +5,7 @@ Tüm Core API hataları web_error_wrapper aracılığıyla Next.js dostu mesajla
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
 import httpx
+from app.core.internal_client import internal_client
 import os
 import uuid
 
@@ -37,7 +38,7 @@ async def upload_video(
         })
 
     async with web_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with internal_client(60.0) as client:
             resp = await client.post(
                 f"{CORE_API_URL}/internal/videos/process",
                 files={"file": (file.filename, content, file.content_type)},
@@ -58,7 +59,7 @@ async def get_video_progress(
     """Video işlem ilerlemesi — public erişilebilir."""
     rid = str(uuid.uuid4())[:8]
     async with web_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with internal_client(10.0) as client:
             resp = await client.get(f"{CORE_API_URL}/internal/videos/{video_id}/progress")
         if resp.status_code >= 400:
             # İlerleme alınamıyorsa varsayılan döndür (UI bloklanmasın)
@@ -74,7 +75,7 @@ async def get_video(
     """Video detayı — public erişilebilir (share/[id] sayfası)."""
     rid = str(uuid.uuid4())[:8]
     async with web_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with internal_client(15.0) as client:
             resp = await client.get(f"{CORE_API_URL}/internal/videos/{video_id}")
         if resp.status_code >= 400:
             raise_from_response(resp, request_id=rid)
@@ -97,7 +98,7 @@ async def queue_url(
     """
     rid = str(uuid.uuid4())[:8]
     async with web_error_wrapper(request_id=rid):
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with internal_client(15.0) as client:
             resp = await client.post(
                 f"{CORE_API_URL}/internal/videos/queue-url",
                 json={"url": body.url, "source": "web_upload"},
