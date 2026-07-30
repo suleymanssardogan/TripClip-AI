@@ -4,6 +4,15 @@ import UIKit
 // Ported from services/ios/TripClipAI — adapted to new LocationPin model.
 struct TripShareCard {
 
+    /// Kartı PNG olarak geçici dosyaya yazar. Dosya URL'i paylaşıldığında
+    /// paylaşım sayfasında gerçek önizleme ve düzgün bir dosya adı görünür —
+    /// ham `UIImage` ile jenerik bir yer tutucu çıkıyordu.
+    static func exportToFile(plan: PlanDetail, title: String) -> URL? {
+        guard let png = render(plan: plan).pngData() else { return nil }
+        let name = ShareExport.sanitizedFilename(title, fallback: "TripClip-Gezi-\(plan.id)")
+        return ShareExport.writeTemporaryFile(png, filename: "\(name).png")
+    }
+
     static func render(plan: PlanDetail) -> UIImage {
         let city     = plan.locations.first?.name.capitalized ?? "Türkiye"
         let count    = plan.locations.count

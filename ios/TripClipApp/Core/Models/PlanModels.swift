@@ -1,5 +1,63 @@
 import Foundation
 
+// MARK: - API Tarih Ayrıştırma
+
+/// Backend'in gönderdiği tarih dizgilerini toleranslı biçimde çözer.
+///
+/// core-api `datetime.utcnow().isoformat()` kullanıyor; çıktı
+/// `2026-07-29T07:23:20.116521` — timezone belirteci YOK. `ISO8601DateFormatter`
+/// `.withInternetDateTime` ile zorunlu olarak `Z`/`±HH:MM` bekler, dolayısıyla
+/// bu biçimde nil döner ve ekranda ham dizge kalırdı. Sunucu tarafı düzelene
+/// kadar (ve sonrasında da, format oynamalarına karşı) sırayla deneriz.
+enum APIDate {
+
+    // nonisolated(unsafe): ISO8601DateFormatter Sendable değil ama burada bir kez
+    // yapılandırılıp bir daha değiştirilmiyor; Apple yapılandırma sonrası
+    // date(from:) çağrılarının thread-safe olduğunu belgeliyor. Swift 6 bunu tip
+    // seviyesinde göremediği için elle işaretliyoruz. (DateFormatter zaten
+    // Sendable olduğundan naiveUTC'de gerekmiyor.)
+    nonisolated(unsafe) private static let internetWithFraction: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    nonisolated(unsafe) private static let internetDateTime: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    /// Timezone'suz varyant — UTC varsayılır (backend utcnow() kullanıyor).
+    private static let naiveUTC: DateFormatter = {
+        let f = DateFormatter()
+        f.locale     = Locale(identifier: "en_US_POSIX")
+        f.timeZone   = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return f
+    }()
+
+    static func parse(_ raw: String) -> Date? {
+        if let date = internetWithFraction.date(from: raw) { return date }
+        if let date = internetDateTime.date(from: raw)     { return date }
+        // Kesirli saniyeyi at: "…T07:23:20.116521" → "…T07:23:20".
+        // DateFormatter mikrosaniyeyi (6 hane) güvenilir ayrıştıramıyor.
+        let withoutFraction = raw.split(separator: ".", maxSplits: 1).first.map(String.init) ?? raw
+        return naiveUTC.date(from: withoutFraction)
+    }
+
+    /// Uygulama tamamen Türkçe — tarih de cihaz diline değil uygulamanın diline
+    /// uymalı, yoksa "29 July 2026" gibi karışık bir sonuç çıkıyor.
+    static let displayLocale = Locale(identifier: "tr_TR")
+
+    /// "29 Temmuz 2026"
+    static func displayString(from date: Date) -> String {
+        date.formatted(
+            .dateTime.day().month(.wide).year().locale(displayLocale)
+        )
+    }
+}
+
 // MARK: - Plan Summary (HomeView list)
 
 struct PlanSummary: Decodable, Identifiable, Hashable {
@@ -35,12 +93,8 @@ struct PlanSummary: Decodable, Identifiable, Hashable {
 
     var formattedDate: String {
         guard let raw = createdAt else { return "" }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: raw) {
-            return date.formatted(.dateTime.day().month(.wide).year())
-        }
-        return raw
+        guard let date = APIDate.parse(raw) else { return "" }
+        return APIDate.displayString(from: date)
     }
 }
 
@@ -64,6 +118,15 @@ struct PlanDetail: Codable, Identifiable {
     let ocrPois:          [String]
     let detectionsCount:  Int
     let processingTime:   Double?
+
+    /// PlanSummary.displayTitle ile aynı kural — paylaşılan dosyaların adı da
+    /// listede görünen başlıkla eşleşsin.
+    var displayTitle: String {
+        if let top = locations.first?.name, !top.isEmpty {
+            return top.prefix(1).uppercased() + top.dropFirst() + " Gezisi"
+        }
+        return "Gezi #\(id)"
+    }
 }
 
 struct LocationPin: Codable, Identifiable {

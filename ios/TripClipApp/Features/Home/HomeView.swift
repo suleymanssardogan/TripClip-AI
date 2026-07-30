@@ -5,7 +5,11 @@ struct HomeView: View {
 
     @Environment(AuthEnvironment.self) private var auth
     @State private var vm           = HomeViewModel()
-    @State private var navPath      = NavigationPath()
+    // NavigationPath değil tipli dizi: analiz bitince yığının tepesindeki
+    // "işleniyor" kaydını tamamlanmış planla YERİNDE değiştirebilmek için
+    // elemanlara erişmemiz gerekiyor (NavigationPath tip silinmiş olduğundan
+    // buna izin vermiyor). Bkz. `showResults(for:)`.
+    @State private var navPath: [PlanSummary] = []
 
     // Camera roll upload state
     @State private var pickerItem:   PhotosPickerItem?
@@ -67,8 +71,8 @@ struct HomeView: View {
                         videoID:   plan.id,
                         apiClient: auth.apiClient,
                         token:     auth.user?.token ?? ""
-                    ) { _ in
-                        Task { await vm.load(auth: auth) }
+                    ) { completedID in
+                        Task { await showResults(for: completedID) }
                     }
                 }
             }
@@ -92,6 +96,30 @@ struct HomeView: View {
         }
     }
 
+    // MARK: - Navigation
+
+    /// Analiz bittiğinde çağrılır: listeyi tazeler ve navigasyon yığınının
+    /// tepesindeki "işleniyor" kaydını tamamlanmış planla değiştirir.
+    ///
+    /// Push/pop yerine yerinde değiştirme yapıyoruz — `navigationDestination`
+    /// zaten `plan.isCompleted` üzerinden dallandığı için aynı yığın seviyesi
+    /// ProcessingView'dan ResultsView'a geçer. Böylece geri tuşu doğrudan
+    /// listeye döner, kullanıcı bitmiş bir işleme ekranına düşmez.
+    private func showResults(for videoID: Int) async {
+        // Başarı ekranı bir an görünsün, ani geçiş olmasın.
+        try? await Task.sleep(for: .seconds(1))
+
+        await vm.load(auth: auth)
+
+        guard
+            let completed = vm.plans.first(where: { $0.id == videoID }),
+            completed.isCompleted,
+            let index = navPath.lastIndex(where: { $0.id == videoID })
+        else { return }
+
+        navPath[index] = completed
+    }
+
     // MARK: - Upload Flow
 
     private func handlePickedItem(_ item: PhotosPickerItem) async {
@@ -106,7 +134,14 @@ struct HomeView: View {
 
             uploadState = .uploading
             let filename = "\(UUID().uuidString).mp4"
-            let token    = auth.user?.token ?? ""
+
+            // Yükleme APIClient.send'in 401-yenile-tekrarla yolundan geçmiyor;
+            // 16MB'ı boşa göndermemek için token'ı önden tazele.
+            guard let token = await auth.validAccessToken() else {
+                uploadState = .failed("Oturum süresi doldu. Lütfen tekrar giriş yapın.")
+                pickerItem  = nil
+                return
+            }
 
             let result = try await auth.apiClient.uploadVideoFile(
                 data: data,

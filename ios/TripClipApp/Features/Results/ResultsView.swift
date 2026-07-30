@@ -7,8 +7,19 @@ struct ResultsView: View {
 
     @Environment(AuthEnvironment.self) private var auth
     @State private var vm          = ResultsViewModel()
-    @State private var shareItems: [Any] = []
-    @State private var showShare   = false
+    @State private var sharePayload: SharePayload?
+    @State private var exportFailed = false
+
+    /// `.sheet(item:)` kullanabilmek için Identifiable sarmalayıcı.
+    ///
+    /// `.sheet(isPresented:)` ile içerik closure'ı, state güncellemesi yayılmadan
+    /// önce değerlendiriliyor ve ilk açılışta paylaşım sayfası HENÜZ BOŞ olan
+    /// diziyi alıyordu — sayfa açılıyor ama içi boş görünüyordu. `.sheet(item:)`
+    /// içeriği tetikleyen değerden kurduğu için bu yarış ortadan kalkıyor.
+    private struct SharePayload: Identifiable {
+        let id = UUID()
+        let url: URL
+    }
 
     var body: some View {
         ZStack {
@@ -30,16 +41,12 @@ struct ResultsView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button {
-                            let pdf = PDFExportService.generate(plan: plan)
-                            shareItems = [pdf]
-                            showShare  = true
+                            share(PDFExportService.exportToFile(plan: plan, title: plan.displayTitle))
                         } label: {
                             Label("PDF İndir", systemImage: "doc.fill")
                         }
                         Button {
-                            let img = TripShareCard.render(plan: plan)
-                            shareItems = [img]
-                            showShare  = true
+                            share(TripShareCard.exportToFile(plan: plan, title: plan.displayTitle))
                         } label: {
                             Label("Story Kartı", systemImage: "square.and.arrow.up")
                         }
@@ -50,10 +57,25 @@ struct ResultsView: View {
                 }
             }
         }
-        .sheet(isPresented: $showShare) {
-            ShareSheet(items: shareItems)
+        .sheet(item: $sharePayload) { payload in
+            ShareSheet(items: [payload.url])
+        }
+        .alert("Dosya oluşturulamadı", isPresented: $exportFailed) {
+            Button("Tamam", role: .cancel) { }
+        } message: {
+            Text("Paylaşım dosyası hazırlanamadı. Lütfen tekrar deneyin.")
         }
         .task { await vm.load(planID: planID, auth: auth, preloaded: preloadedPlan) }
+    }
+
+    /// Dışa aktarım başarısızsa sessizce boş bir paylaşım sayfası açmak yerine
+    /// kullanıcıya söyle.
+    private func share(_ url: URL?) {
+        guard let url else {
+            exportFailed = true
+            return
+        }
+        sharePayload = SharePayload(url: url)
     }
 
     // MARK: - Plan Content
@@ -166,7 +188,7 @@ struct ResultsView: View {
 // MARK: - UIActivityViewController wrapper
 
 private struct ShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
+    let items: [URL]
 
     func makeUIViewController(context: Context) -> UIActivityViewController {
         UIActivityViewController(activityItems: items, applicationActivities: nil)

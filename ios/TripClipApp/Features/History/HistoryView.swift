@@ -91,7 +91,7 @@ private struct HistoryRowView: View {
 
     private var savedDate: String {
         guard let d = record.savedAt else { return "" }
-        return d.formatted(.dateTime.day().month(.wide).year())
+        return APIDate.displayString(from: d)
     }
 
     var body: some View {

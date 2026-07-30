@@ -265,13 +265,33 @@ final class ShareViewController: UIViewController {
         // Butonu devre dışı bırak — double-tap önlemi
         postButton.isEnabled = false
 
-        // ─── KRİTİK: completeRequest SONRA background upload ───────────────────
-        // completionHandler, extension process suspend edilmeden hemen önce çalışır.
-        // Bu pencereyi kullanarak URLSession task'ını başlatıyoruz.
-        // Task başladıktan sonra process ölse bile iOS görevi canlı tutar.
-        extensionContext?.completeRequest(returningItems: []) { [weak self] _ in
+        // Access token 30 dakikada doluyor. Süresi geçmişse burada — yani
+        // completeRequest'ten ÖNCE, process hâlâ canlıyken — yeniliyoruz.
+        // Sonrasında yalnızca başlatılmış background task'lar hayatta kalıyor,
+        // yeni bir ağ isteği yapacak vakit kalmıyor ve upload sessizce 401 alıyordu.
+        spinner.startAnimating()
+        subtitleLabel.text = "Oturum kontrol ediliyor…"
+
+        Task { @MainActor [weak self] in
             guard let self else { return }
 
+            guard await BackgroundUploader.shared.ensureFreshToken() != nil else {
+                self.spinner.stopAnimating()
+                self.state = .error("Oturum süresi doldu. TripClip'i açıp tekrar giriş yapın.")
+                return
+            }
+
+            self.spinner.stopAnimating()
+            self.completeRequestAndEnqueue(url: url, userID: userID)
+        }
+    }
+
+    /// ─── KRİTİK: completeRequest SONRA background upload ───────────────────
+    /// completionHandler, extension process suspend edilmeden hemen önce çalışır.
+    /// Bu pencereyi kullanarak URLSession task'ını başlatıyoruz.
+    /// Task başladıktan sonra process ölse bile iOS görevi canlı tutar.
+    private func completeRequestAndEnqueue(url: URL, userID: Int) {
+        extensionContext?.completeRequest(returningItems: []) { _ in
             BackgroundUploader.shared.enqueue(url: url, userID: userID) { result in
                 if case .failure(let error) = result {
                     // Process zaten kapanıyor, loglayabiliriz sadece

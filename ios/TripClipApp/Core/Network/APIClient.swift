@@ -38,14 +38,19 @@ final class APIClient: APIClientProtocol, @unchecked Sendable {
     func send<T: Decodable>(_ endpoint: Endpoint, token: String? = nil) async throws -> T {
         do {
             return try await performSend(endpoint, token: token)
-        } catch APIError.unauthorized {
+        } catch APIError.unauthorized(let message) {
             // Refresh endpoint'inin kendisi 401 dönerse tekrar refresh denemeye
             // kalkışma — sonsuz döngüyü önler, refresh token da geçersizdir.
             if case .refresh = endpoint {
-                throw APIError.unauthorized
+                throw APIError.unauthorized(message: message)
+            }
+            // Giriş/kayıt 401'i "yanlış şifre" demektir, süresi dolmuş oturum
+            // değil — refresh denemenin anlamı yok, sunucu mesajını geçir.
+            if case .login = endpoint {
+                throw APIError.unauthorized(message: message)
             }
             guard let refreshHandler, let newToken = await refreshHandler() else {
-                throw APIError.unauthorized
+                throw APIError.unauthorized(message: message)
             }
             return try await performSend(endpoint, token: newToken)
         }
@@ -75,19 +80,23 @@ final class APIClient: APIClientProtocol, @unchecked Sendable {
 
         switch statusCode {
         case 200..<300: break
-        case 401: throw APIError.unauthorized
+        case 401:
+            // Sunucu mesajını taşı — core-api hatalı giriş için zaten
+            // "E-posta adresi veya şifre hatalı" döndürüyor.
+            let envelope = try? decoder.decode(ErrorEnvelope.self, from: data)
+            throw APIError.unauthorized(message: envelope?.message)
         case 404: throw APIError.notFound
         case 400, 422:
             let envelope = try? decoder.decode(ErrorEnvelope.self, from: data)
             throw APIError.server(
-                code:    envelope?.error.code    ?? "ERROR",
-                message: envelope?.error.message ?? "Geçersiz istek."
+                code:    envelope?.code    ?? "ERROR",
+                message: envelope?.message ?? "Geçersiz istek."
             )
         default:
             let envelope = try? decoder.decode(ErrorEnvelope.self, from: data)
             throw APIError.server(
-                code:    envelope?.error.code    ?? "ERROR",
-                message: envelope?.error.message ?? "Sunucu hatası (\(statusCode))."
+                code:    envelope?.code    ?? "ERROR",
+                message: envelope?.message ?? "Sunucu hatası (\(statusCode))."
             )
         }
 
@@ -138,9 +147,14 @@ final class APIClient: APIClientProtocol, @unchecked Sendable {
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
         if statusCode >= 400 {
             let envelope = try? decoder.decode(ErrorEnvelope.self, from: responseData)
+            // 401'i ayrı tut: çağıran taraf oturumu tazeleyip tekrar deneyebilsin,
+            // kullanıcı da ham "(401)" yerine anlamlı bir mesaj görsün.
+            if statusCode == 401 {
+                throw APIError.unauthorized(message: envelope?.message)
+            }
             throw APIError.server(
-                code:    envelope?.error.code    ?? "ERROR",
-                message: envelope?.error.message ?? "Yükleme başarısız (\(statusCode))."
+                code:    envelope?.code    ?? "ERROR",
+                message: envelope?.message ?? "Yükleme başarısız (\(statusCode))."
             )
         }
 
@@ -172,12 +186,44 @@ private final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate, @u
 
 // MARK: - Error Envelope
 
+/// Sunucu hata gövdesi — iki farklı şekli de kabul eder.
+///
+/// core-api ve web-bff dokümantasyondaki zarfı kullanıyor:
+///     {"error": {"code": "...", "message": "..."}}
+/// mobile-bff ise düz gönderiyor:
+///     {"code": "...", "message": "..."}
+///
+/// Eskiden yalnızca zarf çözülüyordu, dolayısıyla mobil taraftaki HİÇBİR sunucu
+/// mesajı okunamıyor ve kullanıcı hep jenerik metin görüyordu ("Oturum süresi
+/// doldu", "Geçersiz istek"). İki şekli de desteklemek, BFF hizalanana kadar
+/// (ve sonrasında da) doğru mesajı göstermenin en güvenli yolu.
 private struct ErrorEnvelope: Decodable {
-    struct ErrorBody: Decodable {
-        let code: String
-        let message: String
+    let code: String
+    let message: String
+
+    private enum CodingKeys: String, CodingKey {
+        case error, code, message
     }
-    let error: ErrorBody
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        let source: KeyedDecodingContainer<CodingKeys>
+        if let nested = try? container.nestedContainer(keyedBy: CodingKeys.self, forKey: .error) {
+            source = nested
+        } else {
+            source = container
+        }
+
+        guard let message = try? source.decode(String.self, forKey: .message) else {
+            throw DecodingError.keyNotFound(
+                CodingKeys.message,
+                .init(codingPath: decoder.codingPath, debugDescription: "Hata gövdesinde message yok")
+            )
+        }
+        self.message = message
+        self.code    = (try? source.decode(String.self, forKey: .code)) ?? "ERROR"
+    }
 }
 
 // MARK: - Data helpers

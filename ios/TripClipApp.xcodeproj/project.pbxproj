@@ -29,6 +29,7 @@
 		8ACEA027B149AE74906C2729 /* APIError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A71CAFE212CFE225B5434D /* APIError.swift */; };
 		8C9A5236AC2BA08600CA7055 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B88E418A97C9B8335A0182 /* ShareViewController.swift */; };
 		9B4E8E31E67157E8FB8B698C /* PlanRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDD0E790D6A67CF3AF6AB16D /* PlanRowView.swift */; };
+		9B7CD97AF5500C5452CB3A70 /* JWT.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18955B16C88C0C8D98082272 /* JWT.swift */; };
 		9D7203302EEB74D57AD161DE /* PlanModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26143DBFA5C545A4B9D4C760 /* PlanModels.swift */; };
 		9F64BB29DD6BD8A9A7419EDB /* TravelTipsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2917DDC3423D027754721B5F /* TravelTipsSection.swift */; };
 		A1C5DB090907E4A9DA8B0F17 /* Endpoint.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFCA77B601BF52F62A73B068 /* Endpoint.swift */; };
@@ -48,6 +49,7 @@
 		E00CEE7F93833C0D7EED148E /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 078D0B6788566B732166478A /* HomeViewModel.swift */; };
 		E8C230BC762FF9E4831B86E9 /* AppDelegate+BackgroundSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C5D4C5737D28C75BDF4C80A /* AppDelegate+BackgroundSession.swift */; };
 		F008BA49749ABB595686F4B3 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AED6B7F3B523FDF9A4D46607 /* KeychainStore.swift */; };
+		F6ADC28A15BAB58092FC0AF6 /* JWT.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18955B16C88C0C8D98082272 /* JWT.swift */; };
 		FC4FA733719C851108014441 /* TripShareCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9718E29EE427E8620545B9F9 /* TripShareCard.swift */; };
 		FE4EA46483C084FB9ED91CCF /* ProcessingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2245417A4D703AEFD81A708 /* ProcessingView.swift */; };
 /* End PBXBuildFile section */
@@ -81,6 +83,7 @@
 		078D0B6788566B732166478A /* HomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
 		132C959BE851008CB9C4D30B /* TripMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripMapView.swift; sourceTree = "<group>"; };
 		143A5A8A5C2354EB64A0F946 /* TripClipApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripClipApp.swift; sourceTree = "<group>"; };
+		18955B16C88C0C8D98082272 /* JWT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JWT.swift; sourceTree = "<group>"; };
 		19410676BD43A209514607B7 /* TripClipApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TripClipApp.entitlements; sourceTree = "<group>"; };
 		26143DBFA5C545A4B9D4C760 /* PlanModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanModels.swift; sourceTree = "<group>"; };
 		2917DDC3423D027754721B5F /* TravelTipsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelTipsSection.swift; sourceTree = "<group>"; };
@@ -294,6 +297,7 @@
 			children = (
 				77B16DD309E3B724FBA8CE45 /* BackgroundUploader.swift */,
 				558793C78BE2EFC720EEC7DC /* Config.swift */,
+				18955B16C88C0C8D98082272 /* JWT.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -438,6 +442,7 @@
 				6807A0337CCF24A692AB3531 /* HistoryView.swift in Sources */,
 				BB27274DD95A80DDD2A8E53A /* HomeView.swift in Sources */,
 				E00CEE7F93833C0D7EED148E /* HomeViewModel.swift in Sources */,
+				F6ADC28A15BAB58092FC0AF6 /* JWT.swift in Sources */,
 				F008BA49749ABB595686F4B3 /* KeychainStore.swift in Sources */,
 				3E9004802942DA325016C776 /* LocationCard.swift in Sources */,
 				082059E394ACA22AAD1E394B /* LoginView.swift in Sources */,
@@ -469,6 +474,7 @@
 			files = (
 				471301EF00AF5918CAA667FA /* BackgroundUploader.swift in Sources */,
 				17720540365DE7A6FCEBB257 /* Config.swift in Sources */,
+				9B7CD97AF5500C5452CB3A70 /* JWT.swift in Sources */,
 				8C9A5236AC2BA08600CA7055 /* ShareViewController.swift in Sources */,
 				0D2B5F2FE3D717DD868B8950 /* URLExtractor.swift in Sources */,
 			);

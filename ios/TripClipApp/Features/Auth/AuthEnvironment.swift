@@ -87,6 +87,21 @@ final class AuthEnvironment {
 
     // MARK: - Token Refresh
 
+    /// Yükleme gibi 401-yenile-tekrarla sarmalayıcısından geçmeyen istekler için
+    /// kullanılacak access token'ı döner; süresi dolmak üzereyse önce yeniler.
+    ///
+    /// `APIClient.send` 401'i yakalayıp isteği tekrarlayabiliyor ama
+    /// `uploadVideoFile` ondan geçmiyor — üstelik onlarca MB'lık bir gövdeyi
+    /// 401 alıp yeniden göndermek istemeyiz. Bu yüzden proaktif kontrol.
+    @MainActor
+    func validAccessToken() async -> String? {
+        guard let token = user?.token else { return nil }
+        guard JWT.isExpired(token) else { return token }
+
+        Logger.auth.info("Access token expiring soon — refreshing before request")
+        return await refreshTokens()
+    }
+
     /// 401 alındığında APIClient tarafından çağrılır — refresh token ile yeni
     /// bir access token almayı dener. Başarısızsa oturumu tamamen kapatır.
     @MainActor

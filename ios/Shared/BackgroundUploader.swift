@@ -38,6 +38,7 @@ final class BackgroundUploader: NSObject, @unchecked Sendable {
 
     private enum Keys {
         static let authToken      = "authToken"          // Ana uygulama yazar, extension okur
+        static let refreshToken   = "refreshToken"        // Access token dolduğunda yenilemek için
         static let pendingURL     = "pendingURL"          // Gönderilmek üzere bekleyen URL
         static let pendingVideoID = "pendingVideoID"      // API'den dönen video ID'si
         static let lastUploadDate = "lastUploadDate"
@@ -67,6 +68,59 @@ final class BackgroundUploader: NSObject, @unchecked Sendable {
     /// Ana uygulamanın yazmak için kullandığı setter.
     func storeAuthToken(_ token: String) {
         sharedDefaults.set(token, forKey: Keys.authToken)
+    }
+
+    /// Access token dolduğunda yeni bir tane almak için kullanılır.
+    var refreshToken: String? {
+        sharedDefaults.string(forKey: Keys.refreshToken)
+    }
+
+    // MARK: - Token Tazeleme
+
+    /// Access token'ın süresi dolmak üzereyse refresh token ile yeniler.
+    ///
+    /// Share Extension `APIClient`'ı kullanmıyor, dolayısıyla onun
+    /// 401-yakala-yenile-tekrarla mantığından faydalanamıyor. Ayrıca yenilemenin
+    /// `extensionContext.completeRequest`'ten ÖNCE yapılması şart: sonrasında
+    /// process suspend ediliyor ve yalnızca başlatılmış background task'lar
+    /// hayatta kalıyor, yeni bir ağ isteği yapacak vakit kalmıyor.
+    ///
+    /// - Returns: Kullanılabilir bir access token; oturum yenilenemiyorsa nil.
+    func ensureFreshToken() async -> String? {
+        guard let token = authToken else { return nil }
+        guard JWT.isExpired(token) else { return token }
+
+        guard
+            let refreshToken,
+            let endpoint = URL(string: "\(TripClipConfig.apiBaseURL)/api/mobile/auth/refresh")
+        else { return nil }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(
+            withJSONObject: ["refresh_token": refreshToken]
+        )
+        request.timeoutInterval = 15
+
+        do {
+            // Background session DEĞİL: yanıtı hemen okumamız gerekiyor.
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard
+                (response as? HTTPURLResponse)?.statusCode == 200,
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let newAccess = json["access_token"] as? String
+            else { return nil }
+
+            storeAuthToken(newAccess)
+            if let newRefresh = json["refresh_token"] as? String {
+                sharedDefaults.set(newRefresh, forKey: Keys.refreshToken)
+            }
+            return newAccess
+        } catch {
+            print("[BackgroundUploader] Token yenilenemedi: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Gönderilecek URL'i App Group'a yazar.
