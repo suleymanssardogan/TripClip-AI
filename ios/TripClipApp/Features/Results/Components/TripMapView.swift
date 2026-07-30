@@ -1,6 +1,12 @@
 import SwiftUI
 import MapKit
 
+/// Mekanın temiz adını taşır. `MKPointAnnotation.title` "2. Kaleiçi" gibi
+/// sıra numarasıyla gösterildiği için Apple Maps'e o adı geçirmek istemiyoruz.
+final class TripAnnotation: MKPointAnnotation {
+    var placeName: String = ""
+}
+
 struct TripMapView: UIViewRepresentable {
 
     let locations: [LocationPin]
@@ -21,10 +27,12 @@ struct TripMapView: UIViewRepresentable {
         guard !locations.isEmpty else { return }
 
         // ── Pins ────────────────────────────────────────────────────────────
-        let annotations = locations.map { pin -> MKPointAnnotation in
-            let a = MKPointAnnotation()
+        let annotations = locations.map { pin -> TripAnnotation in
+            let a = TripAnnotation()
             a.coordinate = CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
             a.title      = "\(pin.index). \(pin.name)"
+            a.subtitle   = "Haritada aç"
+            a.placeName  = pin.name
             return a
         }
         map.addAnnotations(annotations)
@@ -94,8 +102,34 @@ struct TripMapView: UIViewRepresentable {
                 marker.markerTintColor = UIColor(red: 0.247, green: 0.851, blue: 0.769, alpha: 1) // Route teal
                 marker.glyphTintColor  = .black
                 marker.canShowCallout  = true
+                // Baloncuktaki yol tarifi butonu — basınca Apple Maps açılır.
+                let button = UIButton(type: .system)
+                button.setImage(UIImage(systemName: "map.fill"), for: .normal)
+                button.sizeToFit()
+                button.accessibilityLabel = "Apple Haritalar'da aç"
+                marker.rightCalloutAccessoryView = button
             }
             return view
+        }
+
+        /// Baloncuktaki butona basıldı → mekanı Apple Haritalar'da aç.
+        func mapView(_ mapView: MKMapView,
+                     annotationView view: MKAnnotationView,
+                     calloutAccessoryControlTapped control: UIControl) {
+            guard let annotation = view.annotation else { return }
+
+            let placemark = MKPlacemark(coordinate: annotation.coordinate)
+            let mapItem   = MKMapItem(placemark: placemark)
+            // Sıra numarasız temiz ad — Apple Maps'te "2. Kaleiçi" görünmesin.
+            mapItem.name = (annotation as? TripAnnotation)?.placeName
+                ?? annotation.title.flatMap { $0 }
+
+            // Yol tarifi modu YOK: Apple Maps mekanı doğrudan göstersin.
+            // Directions modu, konum izni verilmemişse veya mevcut konum
+            // alınamıyorsa (ör. Simulator) rotalayamayıp haritayı alakasız bir
+            // bölgede açıyor. Mekanı göstermek her durumda çalışır, kullanıcı
+            // yol tarifini Maps içinden tek dokunuşla alabilir.
+            mapItem.openInMaps()
         }
     }
 }
