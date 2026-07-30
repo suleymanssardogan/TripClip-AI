@@ -9,6 +9,11 @@ struct ResultsView: View {
     @State private var vm          = ResultsViewModel()
     @State private var sharePayload: SharePayload?
     @State private var exportFailed = false
+    /// Mekan kartına basıldığında haritanın odaklanacağı pin.
+    @State private var focusedPin: LocationPin?
+
+    /// Karta basınca haritaya geri kaydırmak için ScrollView çapası.
+    private static let mapAnchor = "trip-map"
 
     /// `.sheet(item:)` kullanabilmek için Identifiable sarmalayıcı.
     ///
@@ -66,6 +71,7 @@ struct ResultsView: View {
             Text("Paylaşım dosyası hazırlanamadı. Lütfen tekrar deneyin.")
         }
         .task { await vm.load(planID: planID, auth: auth, preloaded: preloadedPlan) }
+        .onDisappear { vm.stopTipsPolling() }
     }
 
     /// Dışa aktarım başarısızsa sessizce boş bir paylaşım sayfası açmak yerine
@@ -82,14 +88,18 @@ struct ResultsView: View {
 
     @ViewBuilder
     private func planContent(_ plan: PlanDetail) -> some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
 
                 if !plan.locations.isEmpty {
-                    TripMapView(locations: plan.locations, route: plan.route)
+                    TripMapView(locations: plan.locations,
+                                route: plan.route,
+                                focusedPin: focusedPin)
                         .frame(height: 260)
                         .clipShape(RoundedRectangle(cornerRadius: 20))
                         .padding(.horizontal, 16)
+                        .id(Self.mapAnchor)
                 }
 
                 statsStrip(plan).padding(.horizontal, 16)
@@ -98,7 +108,18 @@ struct ResultsView: View {
                     sectionHeader("Keşfedilen Mekanlar (\(plan.locations.count))")
                     VStack(spacing: 8) {
                         ForEach(plan.locations) { pin in
-                            LocationCard(pin: pin)
+                            // Karta basınca haritayı o mekana odakla ve yukarı
+                            // kaydır — aşağıdaki bir karta basıldığında harita
+                            // ekran dışında kalırsa hiçbir şey olmamış görünüyor.
+                            Button {
+                                focusedPin = pin
+                                withAnimation {
+                                    proxy.scrollTo(Self.mapAnchor, anchor: .top)
+                                }
+                            } label: {
+                                LocationCard(pin: pin)
+                            }
+                            .buttonStyle(PressableButtonStyle())
                         }
                     }
                     .padding(.horizontal, 16)
@@ -108,6 +129,14 @@ struct ResultsView: View {
                     sectionHeader("Seyahat İpuçları")
                     TravelTipsSection(tips: plan.travelTips)
                         .padding(.horizontal, 16)
+                } else if vm.isWaitingForTips {
+                    // İpuçları analizden sonra ayrı task'ta üretiliyor; bölümü
+                    // sessizce gizlemek yerine hazırlandığını söylüyoruz.
+                    sectionHeader("Seyahat İpuçları")
+                    tipsPlaceholder
+                } else if vm.tipsUnavailable {
+                    sectionHeader("Seyahat İpuçları")
+                    tipsFailedNotice
                 }
 
                 if let transcript = plan.transcription, !transcript.isEmpty {
@@ -122,6 +151,43 @@ struct ResultsView: View {
             }
             .padding(.top, 16)
         }
+        }
+    }
+
+    // MARK: - Ertelenmiş İpuçları Durumları
+
+    private var tipsPlaceholder: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(AppColors.accentText)
+            Text("İpuçları hazırlanıyor…")
+                .font(.system(size: 14))
+                .foregroundStyle(AppColors.textSecondary)
+            Spacer()
+        }
+        .padding(14)
+        .background(AppColors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.border, lineWidth: 1))
+        .padding(.horizontal, 16)
+    }
+
+    private var tipsFailedNotice: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "lightbulb.slash")
+                .font(.system(size: 15))
+                .foregroundStyle(AppColors.textTertiary)
+            Text("İpuçları şu anda alınamadı. Daha sonra tekrar bakabilirsin.")
+                .font(.system(size: 13))
+                .foregroundStyle(AppColors.textSecondary)
+            Spacer()
+        }
+        .padding(14)
+        .background(AppColors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.border, lineWidth: 1))
+        .padding(.horizontal, 16)
     }
 
     // MARK: - Helpers

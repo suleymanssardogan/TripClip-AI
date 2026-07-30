@@ -5,12 +5,17 @@ import MapKit
 /// sıra numarasıyla gösterildiği için Apple Maps'e o adı geçirmek istemiyoruz.
 final class TripAnnotation: MKPointAnnotation {
     var placeName: String = ""
+    /// LocationPin.index — listeden gelen odak isteğini eşleştirmek için.
+    var pinIndex: Int = 0
 }
 
 struct TripMapView: UIViewRepresentable {
 
     let locations: [LocationPin]
     let route:     [RoutePoint]?
+    /// Listeden bir mekana basıldığında buraya gelir; harita o pine zoom yapıp
+    /// baloncuğunu açar. nil ise tüm rotayı kapsayan varsayılan görünüm.
+    var focusedPin: LocationPin? = nil
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -33,6 +38,7 @@ struct TripMapView: UIViewRepresentable {
             a.title      = "\(pin.index). \(pin.name)"
             a.subtitle   = "Haritada aç"
             a.placeName  = pin.name
+            a.pinIndex   = pin.index
             return a
         }
         map.addAnnotations(annotations)
@@ -46,12 +52,33 @@ struct TripMapView: UIViewRepresentable {
             map.addOverlay(polyline)
         }
 
-        // ── Fit region ───────────────────────────────────────────────────────
-        let coords = locations.map {
-            CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+        // ── Görünüm ──────────────────────────────────────────────────────────
+        // Bölgeyi HER güncellemede değiştirmiyoruz; aksi halde alakasız bir
+        // state değişimi kullanıcının kaydırdığı haritayı başa sarıyordu.
+        let coordinator = context.coordinator
+
+        if let focusedPin, focusedPin.index != coordinator.lastFocusedIndex {
+            // Listeden yeni bir mekana basıldı → o mekana zoom yap ve seç.
+            coordinator.lastFocusedIndex = focusedPin.index
+            let center = CLLocationCoordinate2D(latitude: focusedPin.latitude,
+                                                longitude: focusedPin.longitude)
+            map.setRegion(
+                MKCoordinateRegion(
+                    center: center,
+                    span:   MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)
+                ),
+                animated: true
+            )
+            if let match = annotations.first(where: { $0.pinIndex == focusedPin.index }) {
+                map.selectAnnotation(match, animated: true)
+            }
+        } else if !coordinator.didSetInitialRegion {
+            let coords = locations.map {
+                CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+            }
+            map.setRegion(boundingRegion(for: coords), animated: false)
+            coordinator.didSetInitialRegion = true
         }
-        let region = boundingRegion(for: coords)
-        map.setRegion(region, animated: false)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -79,6 +106,11 @@ struct TripMapView: UIViewRepresentable {
     // MARK: - Coordinator (MapKit delegate)
 
     final class Coordinator: NSObject, MKMapViewDelegate {
+
+        /// Son odaklanılan pin — aynı odak için tekrar zoom yapmamak, ve
+        /// odak değişmediğinde kullanıcının kaydırdığı görünümü korumak için.
+        var lastFocusedIndex:    Int?
+        var didSetInitialRegion = false
 
         func mapView(_ mapView: MKMapView,
                      rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
