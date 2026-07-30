@@ -16,6 +16,7 @@ Degradasyon raporu her işlem sonunda loglanır:
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import time
@@ -27,7 +28,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from app.core.redis import set_progress
+from app.core.redis import set_progress, get_redis
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,65 @@ class ServiceResult:
         if self.success:
             return f"{self.status_icon} {self.name:<12} — OK [{dur}]"
         return f"{self.status_icon} {self.name:<12} — HATA: {self.error} [{dur}]"
+
+
+# ── Gemini lokasyon çıktısı için içerik-adresli cache ─────────────────────────
+#
+# Gemini temperature=0'da bile bit-düzeyinde tekrarlanabilir değil (sunucu
+# tarafı batching, kayan nokta toplama sırası, model sürüm yönlendirmesi).
+# Ölçümde aynı video 6 kez işlendiğinde 5 veya 6 lokasyon dönüyordu.
+#
+# Videonun SHA-256'sını anahtar yapıp çıktıyı cache'lemek üç sorunu birden
+# çözüyor: aynı video HER ZAMAN aynı sonucu verir (determinizm), tekrar
+# yükleme Gemini'yi hiç çağırmaz (kota + maliyet), ve idempotency sağlanır.
+
+_GEMINI_CACHE_TTL = 60 * 60 * 24 * 30   # 30 gün
+
+
+def _video_content_hash(video_path: str) -> Optional[str]:
+    """Video dosyasının SHA-256'sı. Okunamazsa None (cache devre dışı kalır)."""
+    try:
+        digest = hashlib.sha256()
+        with open(video_path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except Exception as exc:
+        logger.warning("Video hash hesaplanamadı, cache atlanıyor: %s", exc)
+        return None
+
+
+def _gemini_cache_key(content_hash: str) -> str:
+    # Model adı anahtarın parçası: model değişirse eski çıktı kullanılmasın.
+    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    return f"gemini:locations:{model}:{content_hash}"
+
+
+def _gemini_cache_get(content_hash: Optional[str]) -> Optional[List[Dict]]:
+    if not content_hash:
+        return None
+    try:
+        client = get_redis()
+        if not client:
+            return None
+        raw = client.get(_gemini_cache_key(content_hash))
+        return _json.loads(raw) if raw else None
+    except Exception as exc:
+        logger.debug("Gemini cache okunamadı: %s", exc)
+        return None
+
+
+def _gemini_cache_set(content_hash: Optional[str], locations: List[Dict]) -> None:
+    if not content_hash or not locations:
+        return
+    try:
+        client = get_redis()
+        if not client:
+            return
+        client.setex(_gemini_cache_key(content_hash), _GEMINI_CACHE_TTL,
+                     _json.dumps(locations))
+    except Exception as exc:
+        logger.debug("Gemini cache yazılamadı: %s", exc)
 
 
 def _safe_run(
@@ -378,12 +438,32 @@ class VideoProcessingService:
         if self._use_gemini and self.gemini:
             # ── Gemini modu: frame + transcript → tek API çağrısı ────────────
             set_progress(video_id, "ner", 55)
-            logger.info("🤖 Gemini lokasyon çıkarma başlıyor…")
-            r_gemini = _safe_run(
-                "Gemini(locations)",
-                lambda: self.gemini.extract_locations(frames, transcript_text, video_id=video_id),
-                fallback=[],
-            )
+
+            # Aynı video daha önce işlendiyse Gemini'yi hiç çağırma — hem
+            # sonuç birebir aynı olur (determinizm) hem kota harcanmaz.
+            content_hash = _video_content_hash(video_path)
+            cached_locations = _gemini_cache_get(content_hash)
+
+            if cached_locations is not None:
+                logger.info("⚡ Gemini lokasyon cache hit (%s…) — %d lokasyon",
+                            (content_hash or "")[:12], len(cached_locations))
+                r_gemini = ServiceResult(
+                    name="Gemini(locations,cached)",
+                    data=cached_locations,
+                    success=True,
+                )
+            else:
+                logger.info("🤖 Gemini lokasyon çıkarma başlıyor…")
+                r_gemini = _safe_run(
+                    "Gemini(locations)",
+                    lambda: self.gemini.extract_locations(frames, transcript_text, video_id=video_id),
+                    fallback=[],
+                )
+                # Yalnızca başarılı çıktıyı cache'le — fallback boş listeyi
+                # kalıcılaştırmak, geçici bir 429'u kalıcı bir hataya çevirirdi.
+                if r_gemini.success and not r_gemini.fallback_used:
+                    _gemini_cache_set(content_hash, r_gemini.data or [])
+
             # Gemini artık List[Dict] döndürüyor: [{"name":..,"lat":..,"lng":..,"type":..}]
             gemini_raw: List[Dict] = r_gemini.data or []
             # Geriye dönük uyumluluk: eski string listesi gelirse dönüştür
