@@ -55,18 +55,37 @@ class AudioProcessingService:
 
             segments = result.get("segments", [])
 
-            # ── Müzik / gürültü filtresi ──────────────────────────────────────
+            # ── Müzik / gürültü / halüsinasyon filtresi ───────────────────────
             # Whisper her segment için no_speech_prob üretir (0=konuşma, 1=müzik/sessizlik)
             # Yüksek no_speech_prob → segment büyük ihtimalle şarkı sözü / gürültü
             SPEECH_THRESHOLD = 0.60   # bu değerin altı konuşma kabul edilir
+
+            # no_speech_prob tek başına yetmiyor: konuşma olmayan bir videoda
+            # (yalnızca müzik) 0.594 ölçüldü — eşiğin hemen altı — ve Whisper
+            # oraya tamamen uydurma çok dilli bir metin yazdı
+            # ("PREisions Eagles você o Nike motherfuck III"). Bu dizge NER
+            # tarafından %97 güvenle işletme adı sanılıp gezi planına mekan
+            # olarak eklendi. Aynı dosyanın başka bir çalıştırmasında transkript
+            # boş çıktı, yani bu aşama non-deterministik.
+            #
+            # avg_logprob Whisper'ın kendi güven ölçüsü ve halüsinasyonlarda
+            # belirgin biçimde düşük olur; -1.0 Whisper'ın da kullandığı
+            # varsayılan eşik. Gerçek ama sessiz konuşmanın logprob'u iyidir,
+            # bu yüzden bu kapı meşru segmentleri atmıyor.
+            LOGPROB_THRESHOLD = -1.0
+
             speech_segments = [
                 seg for seg in segments
                 if seg.get("no_speech_prob", 0.0) < SPEECH_THRESHOLD
+                and seg.get("avg_logprob", 0.0) > LOGPROB_THRESHOLD
             ]
 
             skipped = len(segments) - len(speech_segments)
             if skipped:
-                logger.info(f"⚠️ Müzik/gürültü filtresi: {skipped} segment atlandı")
+                logger.info(
+                    "⚠️ Müzik/gürültü/halüsinasyon filtresi: %d/%d segment atlandı",
+                    skipped, len(segments),
+                )
 
             # Sadece konuşma segmentlerinden transcript oluştur
             transcript = " ".join(s["text"].strip() for s in speech_segments).strip()

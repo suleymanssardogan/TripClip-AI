@@ -76,6 +76,11 @@ class ServiceResult:
 
 _GEMINI_CACHE_TTL = 60 * 60 * 24 * 30   # 30 gün
 
+# Gemini lokasyon prompt'unun sürümü. Prompt değiştiğinde ARTIRILMALI, yoksa
+# cache eski çıktıyı servis etmeye devam eder (bkz. _gemini_cache_key).
+# v2: ekran yazıları (OCR) prompt'a eklendi + bozuk yazımı düzeltme talimatı.
+_GEMINI_PROMPT_VERSION = 3
+
 
 def _video_content_hash(video_path: str) -> Optional[str]:
     """Video dosyasının SHA-256'sı. Okunamazsa None (cache devre dışı kalır)."""
@@ -93,7 +98,11 @@ def _video_content_hash(video_path: str) -> Optional[str]:
 def _gemini_cache_key(content_hash: str) -> str:
     # Model adı anahtarın parçası: model değişirse eski çıktı kullanılmasın.
     model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-    return f"gemini:locations:{model}:{content_hash}"
+    # Prompt sürümü de anahtarın parçası. Aksi hâlde prompt iyileştirildiğinde
+    # cache eski (kötü) çıktıyı sonsuza kadar servis ediyor — ekran yazılarını
+    # prompt'a eklediğimizde tam bu oldu, aynı video eski 3 lokasyonu döndürdü.
+    # Prompt her değiştiğinde bu sayı artırılmalı.
+    return f"gemini:locations:v{_GEMINI_PROMPT_VERSION}:{model}:{content_hash}"
 
 
 def _gemini_cache_get(content_hash: Optional[str]) -> Optional[List[Dict]]:
@@ -456,7 +465,13 @@ class VideoProcessingService:
                 logger.info("🤖 Gemini lokasyon çıkarma başlıyor…")
                 r_gemini = _safe_run(
                     "Gemini(locations)",
-                    lambda: self.gemini.extract_locations(frames, transcript_text, video_id=video_id),
+                    lambda: self.gemini.extract_locations(
+                        frames, transcript_text,
+                        video_id=video_id,
+                        # Ekran yazıları: Gemini seyrek frame örneklemesi yüzünden
+                        # bunları göremiyor, OCR ise okuyor. Bkz. extract_locations.
+                        ocr_texts=extracted_texts,
+                    ),
                     fallback=[],
                 )
                 # Yalnızca başarılı çıktıyı cache'le — fallback boş listeyi

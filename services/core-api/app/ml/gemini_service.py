@@ -125,14 +125,30 @@ class GeminiService:
         düşme ihtimalini ortadan kaldırır (üretimde gördüğümüz
         "Gemini JSON parse hatası" fallback'inin kök nedeni).
         """
-        url  = f"{self._endpoint}?key={self.api_key}"
+        # API anahtarı query string'de DEĞİL header'da gider.
+        #
+        # `?key=...` kullanıldığında requests'in HTTPError mesajı tam URL'yi
+        # içeriyor ve anahtar DÜZ METİN olarak loglara düşüyordu (429 hatasında
+        # bizzat gözlendi). Bu log Docker stdout'a, oradan da SENTRY_DSN
+        # ayarlıysa Sentry'ye gidiyor. Header ile anahtar hiçbir hata
+        # mesajında görünmez.
+        url = self._endpoint
         generation_config: Dict = {
             # temperature=0 → greedy decoding. 0.2 ile aynı videodan farklı
             # sayıda mekan çıkıyordu (ölçüm: aynı video 3 kez işlendi, Gemini
             # 9 / 9 / 5 lokasyon döndürdü). Yaratıcılığa ihtiyacımız yok;
             # ipuçlarında da tutarlılık lehine bu ödünç kabul edilebilir.
             "temperature":    0.0,
-            "maxOutputTokens": 2048,
+            # gemini-2.5-flash varsayılan olarak "thinking" yapıyor ve düşünme
+            # token'ları bu bütçeden yeniyor. Eskiden 2048'di; aynı içerikle
+            # doğrudan API'ye (bütçe ayarlamadan, yani model varsayılanı
+            # 65536 ile) yapılan çağrı 12 lokasyon dönerken pipeline 2
+            # dönüyordu. 8192'ye çıkarmak YETMEDİ — ölçüldü, yine 2.
+            #
+            # DOĞRULANMADI: geriye kalan tek kontrolsüz değişken bütçenin
+            # 8192 mi yoksa model varsayılanı mı olduğu. Kullanılmayan token
+            # ücretlendirilmediği için bütçeyi cömert tutmanın maliyeti yok.
+            "maxOutputTokens": 32768,
         }
         if response_schema is not None:
             generation_config["responseMimeType"] = "application/json"
@@ -144,7 +160,10 @@ class GeminiService:
         last_exc = None
         for attempt in range(max_retries):
             try:
-                resp = _requests.post(url, json=body, timeout=timeout)
+                resp = _requests.post(
+                    url, json=body, timeout=timeout,
+                    headers={"x-goog-api-key": self.api_key},
+                )
                 if resp.status_code in (429, 500, 503) and attempt < max_retries - 1:
                     # 429 rate limit → daha uzun bekle
                     wait = [15, 30, 60][attempt] if resp.status_code == 429 else [1, 3, 7][attempt]
@@ -243,6 +262,7 @@ class GeminiService:
         frames: List[str],
         transcript: str = "",
         video_id: Optional[int] = None,
+        ocr_texts: Optional[List[str]] = None,
     ) -> List[Dict]:
         """
         Video frame'leri + ses transkripsiyonundan yer adlarını + koordinatlarını çıkar.
@@ -268,15 +288,21 @@ class GeminiService:
 
         parts: List[Dict] = []
 
-        sampled = self._sample_frames(frames, MAX_FRAMES)
-        loaded  = 0
-        for path in sampled:
-            part = self._frame_part(path)
-            if part:
-                parts.append(part)
-                loaded += 1
+        # Metin girdisi güçlüyse frame göndermeyi atlayabiliriz — GEMINI_SEND_FRAMES=false.
+        # A/B ölçümü için env ile kontrol ediliyor (bkz. aşağıdaki not).
+        send_frames = os.getenv("GEMINI_SEND_FRAMES", "true").lower() != "false"
 
-        logger.info("Gemini lokasyon: %d/%d frame yüklendi", loaded, len(sampled))
+        if send_frames:
+            sampled = self._sample_frames(frames, MAX_FRAMES)
+            loaded  = 0
+            for path in sampled:
+                part = self._frame_part(path)
+                if part:
+                    parts.append(part)
+                    loaded += 1
+            logger.info("Gemini lokasyon: %d/%d frame yüklendi", loaded, len(sampled))
+        else:
+            logger.info("Gemini lokasyon: frame gönderilmiyor (GEMINI_SEND_FRAMES=false)")
 
         transcript_section = (
             f"\n\nSes transkripsiyonu:\n{transcript[:2000]}"
@@ -284,9 +310,41 @@ class GeminiService:
             else "\n\nSes transkripsiyonu: Yok"
         )
 
+        # Ekran yazıları — Gemini'ye MUTLAKA metin olarak da verilir.
+        #
+        # Neden: frame örneklemesi seyrek (95 sn'lik videodan MAX_FRAMES=10, yani
+        # ~9,5 sn'de bir kare) ama Reels'teki mekan adı yazıları 2-3 saniye
+        # duruyor — Gemini onları çoğu zaman hiç görmüyor. OCR ise çok daha fazla
+        # kareyi tarıyor ve adları temiz okuyor ("Metanet Beyran", "TAHMiS
+        # KAHVESI", "BAKIRCILAR CARSIS"). Ölçümde bu isimler OCR çıktısında
+        # vardı, Gemini sonucunda yoktu; bilgi çıkarılıp çöpe atılıyordu.
+        #
+        # OCR parçaları bozuk yazılmış olabilir ("GulluogluBaklava",
+        # "Elmaci Pazarl") — Gemini'nin dünya bilgisi bunları düzeltebiliyor,
+        # bu yüzden ham hâlleriyle veriyoruz.
+        ocr_section = ""
+        if ocr_texts:
+            # Kısa/gürültülü parçaları at, tekrarları tek sefere indir, sırayı koru.
+            seen: set = set()
+            cleaned: List[str] = []
+            for t in ocr_texts:
+                t = (t or "").strip()
+                if len(t) < 3 or t.lower() in seen:
+                    continue
+                seen.add(t.lower())
+                cleaned.append(t)
+            if cleaned:
+                joined = " | ".join(cleaned)[:1500]
+                ocr_section = (
+                    "\n\nEkrandaki yazılar (OCR, yazım hatalı olabilir):\n" + joined
+                )
+
         prompt_text = (
-            "Bu video frame'lerine ve ses transkripsiyonuna bakarak, "
-            "videoda geçen TÜM yer isimlerini bul.\n"
+            "Bu video frame'lerine, ekran yazılarına ve ses transkripsiyonuna "
+            "bakarak videoda geçen TÜM yer isimlerini bul.\n"
+            "Ekran yazıları ve transkript bozuk/eksik yazılmış olabilir "
+            "(OCR ve konuşma tanıma hataları) — tanıdığın bir işletme veya "
+            "mekan adına benziyorsa DOĞRU yazımıyla ekle.\n"
             "Dahil et: şehir, ilçe, mahalle, tarihi alan, müze, plaj, şelale, "
             "kanyon, restoran, kafe, otel, çarşı, pazar, doğal güzellik.\n"
             "Dahil ETME: genel sıfatlar (güzel, harika, muhteşem), "
@@ -298,6 +356,7 @@ class GeminiService:
             '{"name": "Yer Adı", "lat": 37.06, "lng": 37.38, "type": "restaurant"}, '
             '{"name": "Küçük Dükkan", "lat": null, "lng": null, "type": "shop"}'
             "]}"
+            + ocr_section
             + transcript_section
         )
         parts.append({"text": prompt_text})

@@ -90,7 +90,8 @@ services:
       - ALLOWED_ORIGINS=
       - ALLOWED_HOSTS=
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GEMINI_MODEL=gemini-2.5-flash
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - GEMINI_SEND_FRAMES=${GEMINI_SEND_FRAMES:-true}
     volumes:
       - uploads_data:/app/uploads
       - ./services/core-api/app:/app/app
@@ -124,7 +125,8 @@ services:
       - USE_GEMINI=true
       - USE_HYBRID=true
       - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GEMINI_MODEL=gemini-2.5-flash
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - GEMINI_SEND_FRAMES=${GEMINI_SEND_FRAMES:-true}
       - WHISPER_MODEL=base
       - USE_GOOGLE_VISION=false
       - OLLAMA_URL=${OLLAMA_URL:-}
