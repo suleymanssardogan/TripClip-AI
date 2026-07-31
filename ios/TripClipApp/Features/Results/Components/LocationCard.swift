@@ -2,7 +2,21 @@ import SwiftUI
 
 struct LocationCard: View {
 
+    /// Ekranda gösterilen sıra numarası. `pin.index` DEĞİL: o, sunucudaki
+    /// kalıcı durak kimliği ve kullanıcı bir durağı sildiğinde boşluk bırakıyor
+    /// (1, 2, 4, …). Görünen numara her zaman listedeki pozisyondan üretilir.
+    let number: Int
     let pin: LocationPin
+    /// Düzenleme modu kontrolleri. nil ise kart normal görünümde.
+    var edit: EditActions? = nil
+
+    struct EditActions {
+        let canMoveUp:   Bool
+        let canMoveDown: Bool
+        let onMoveUp:    () -> Void
+        let onMoveDown:  () -> Void
+        let onDelete:    () -> Void
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -11,7 +25,7 @@ struct LocationCard: View {
                 Circle()
                     .fill(AppColors.route.opacity(0.15))
                     .overlay(Circle().stroke(AppColors.route.opacity(0.3)))
-                Text("\(pin.index)")
+                Text("\(number)")
                     .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundStyle(AppColors.route)
             }
@@ -28,9 +42,13 @@ struct LocationCard: View {
 
             Spacer()
 
-            Image(systemName: "mappin.circle")
-                .font(.system(size: 16))
-                .foregroundStyle(AppColors.route.opacity(0.6))
+            if let edit {
+                editControls(edit)
+            } else {
+                Image(systemName: "mappin.circle")
+                    .font(.system(size: 16))
+                    .foregroundStyle(AppColors.route.opacity(0.6))
+            }
         }
         .padding(12)
         .background(AppColors.surface)
@@ -39,5 +57,35 @@ struct LocationCard: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(AppColors.border, lineWidth: 1)
         )
+    }
+
+    /// Sürükle-bırak yerine yukarı/aşağı düğmeleri: liste `List` değil
+    /// `LazyVStack` içinde özel kartlarla çiziliyor, `.onMove` kullanılamıyor.
+    private func editControls(_ edit: EditActions) -> some View {
+        HStack(spacing: 4) {
+            Button(action: edit.onMoveUp) {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 30, height: 30)
+            }
+            .disabled(!edit.canMoveUp)
+            .foregroundStyle(edit.canMoveUp ? AppColors.textSecondary : AppColors.textTertiary)
+
+            Button(action: edit.onMoveDown) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 30, height: 30)
+            }
+            .disabled(!edit.canMoveDown)
+            .foregroundStyle(edit.canMoveDown ? AppColors.textSecondary : AppColors.textTertiary)
+
+            Button(action: edit.onDelete) {
+                Image(systemName: "trash")
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 30, height: 30)
+            }
+            .foregroundStyle(AppColors.destructive)
+        }
+        .buttonStyle(.plain)
     }
 }

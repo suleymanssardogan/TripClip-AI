@@ -4,6 +4,7 @@ enum HTTPMethod: String {
     case get    = "GET"
     case post   = "POST"
     case put    = "PUT"
+    case patch  = "PATCH"
     case delete = "DELETE"
 }
 
@@ -22,6 +23,11 @@ enum Endpoint {
     case videoDetail(videoID: Int)
     case videoProgress(videoID: Int)
     case queueUrl(url: String)
+    /// Durak sırası — listede olmayan durak silinmiş sayılır (bkz. mobile-bff
+    /// video_transformer._apply_stop_order). `order` gün başına durak id listesi;
+    /// mobil tek gün kullanıyor, id'ler LocationPin.index (kalıcı kimlik).
+    case updateStopOrder(videoID: Int, order: [[Int]])
+    case deletePlan(videoID: Int)
 
     // Plans
     case publicPlans(city: String?, limit: Int, offset: Int)
@@ -42,6 +48,8 @@ extension Endpoint {
         case .videoDetail(let id):          return "/api/mobile/videos/\(id)"
         case .videoProgress(let id):        return "/api/mobile/videos/\(id)/progress"
         case .queueUrl:                     return "/api/mobile/videos/queue-url"
+        case .updateStopOrder(let id, _):   return "/api/mobile/videos/\(id)/order"
+        case .deletePlan(let id):           return "/api/mobile/videos/\(id)"
         case .publicPlans:                  return "/api/mobile/videos/public"
         case .platformStats:                return "/api/mobile/videos/stats"
         }
@@ -51,6 +59,8 @@ extension Endpoint {
         switch self {
         case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl: return .post
         case .registerDeviceToken: return .put
+        case .updateStopOrder: return .patch
+        case .deletePlan: return .delete
         default: return .get
         }
     }
@@ -78,6 +88,9 @@ extension Endpoint {
 
         case .registerDeviceToken(let token):
             return ["token": token]
+
+        case .updateStopOrder(_, let order):
+            return ["order": order]
 
         default:
             return nil

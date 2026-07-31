@@ -32,10 +32,13 @@ struct TripMapView: UIViewRepresentable {
         guard !locations.isEmpty else { return }
 
         // ── Pins ────────────────────────────────────────────────────────────
-        let annotations = locations.map { pin -> TripAnnotation in
+        // Baloncuktaki numara listedeki POZİSYON; pin.index ise sunucudaki kalıcı
+        // kimlik (durak silinince boşluk bırakır). İkisini karıştırmamak için
+        // gösterim offset'ten, eşleme index'ten geliyor.
+        let annotations = locations.enumerated().map { offset, pin -> TripAnnotation in
             let a = TripAnnotation()
             a.coordinate = CLLocationCoordinate2D(latitude: pin.latitude, longitude: pin.longitude)
-            a.title      = "\(pin.index). \(pin.name)"
+            a.title      = "\(offset + 1). \(pin.name)"
             a.subtitle   = "Haritada aç"
             a.placeName  = pin.name
             a.pinIndex   = pin.index

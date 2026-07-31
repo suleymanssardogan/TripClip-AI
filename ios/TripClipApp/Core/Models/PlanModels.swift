@@ -103,6 +103,11 @@ struct PlanListResponse: Decodable {
     let total: Int
 }
 
+/// Gövdesi anlamlı veri taşımayan yazma uçları (`{"success": true}`).
+struct SuccessResponse: Decodable {
+    let success: Bool
+}
+
 // MARK: - Plan Detail (ResultsView)
 
 struct PlanDetail: Codable, Identifiable {
@@ -111,8 +116,10 @@ struct PlanDetail: Codable, Identifiable {
     let status:           String
     let duration:         Int?
     let createdAt:        String?
-    let locations:        [LocationPin]
-    let route:            [RoutePoint]?
+    // Kullanıcı durakları düzenleyebiliyor (silme/sıralama) — sunucu yanıtı
+    // beklenmeden ekranın güncellenmesi için değiştirilebilir olmalı.
+    var locations:        [LocationPin]
+    var route:            [RoutePoint]?
     let transcription:    String?
     let travelTips:       [TravelTip]
     let ocrPois:          [String]

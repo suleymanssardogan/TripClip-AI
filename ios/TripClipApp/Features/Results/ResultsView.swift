@@ -11,6 +11,8 @@ struct ResultsView: View {
     @State private var exportFailed = false
     /// Mekan kartına basıldığında haritanın odaklanacağı pin.
     @State private var focusedPin: LocationPin?
+    /// Durak düzenleme modu — kartlar sil/taşı kontrollerine dönüşür.
+    @State private var isEditing = false
 
     /// Karta basınca haritaya geri kaydırmak için ScrollView çapası.
     private static let mapAnchor = "trip-map"
@@ -70,6 +72,17 @@ struct ResultsView: View {
         } message: {
             Text("Paylaşım dosyası hazırlanamadı. Lütfen tekrar deneyin.")
         }
+        .alert(
+            "Değişiklik kaydedilemedi",
+            isPresented: Binding(
+                get: { vm.stopEditError != nil },
+                set: { if !$0 { vm.stopEditError = nil } }
+            )
+        ) {
+            Button("Tamam", role: .cancel) { vm.stopEditError = nil }
+        } message: {
+            Text(vm.stopEditError ?? "")
+        }
         .task { await vm.load(planID: planID, auth: auth, preloaded: preloadedPlan) }
         .onDisappear { vm.stopTipsPolling() }
     }
@@ -105,24 +118,33 @@ struct ResultsView: View {
                 statsStrip(plan).padding(.horizontal, 16)
 
                 if !plan.locations.isEmpty {
-                    sectionHeader("Keşfedilen Mekanlar (\(plan.locations.count))")
+                    locationsHeader(plan)
                     VStack(spacing: 8) {
-                        ForEach(plan.locations) { pin in
-                            // Karta basınca haritayı o mekana odakla ve yukarı
-                            // kaydır — aşağıdaki bir karta basıldığında harita
-                            // ekran dışında kalırsa hiçbir şey olmamış görünüyor.
-                            Button {
-                                focusedPin = pin
-                                withAnimation {
-                                    proxy.scrollTo(Self.mapAnchor, anchor: .top)
+                        ForEach(Array(plan.locations.enumerated()), id: \.element.index) { offset, pin in
+                            if isEditing {
+                                LocationCard(
+                                    number: offset + 1,
+                                    pin:    pin,
+                                    edit:   editActions(for: offset, pin: pin, plan: plan)
+                                )
+                            } else {
+                                // Karta basınca haritayı o mekana odakla ve yukarı
+                                // kaydır — aşağıdaki bir karta basıldığında harita
+                                // ekran dışında kalırsa hiçbir şey olmamış görünüyor.
+                                Button {
+                                    focusedPin = pin
+                                    withAnimation {
+                                        proxy.scrollTo(Self.mapAnchor, anchor: .top)
+                                    }
+                                } label: {
+                                    LocationCard(number: offset + 1, pin: pin)
                                 }
-                            } label: {
-                                LocationCard(pin: pin)
+                                .buttonStyle(PressableButtonStyle())
                             }
-                            .buttonStyle(PressableButtonStyle())
                         }
                     }
                     .padding(.horizontal, 16)
+                    .disabled(vm.isSavingStops)
                 }
 
                 if !plan.travelTips.isEmpty {
@@ -188,6 +210,52 @@ struct ResultsView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.border, lineWidth: 1))
         .padding(.horizontal, 16)
+    }
+
+    // MARK: - Durak Düzenleme
+
+    private func locationsHeader(_ plan: PlanDetail) -> some View {
+        HStack {
+            Text("Keşfedilen Mekanlar (\(plan.locations.count))")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(AppColors.textSecondary)
+                .textCase(.uppercase)
+                .tracking(0.8)
+
+            Spacer()
+
+            if vm.isSavingStops {
+                ProgressView().controlSize(.small).tint(AppColors.accentText)
+            } else {
+                Button(isEditing ? "Bitti" : "Düzenle") {
+                    withAnimation { isEditing.toggle() }
+                }
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(AppColors.accentText)
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    private func editActions(for offset: Int, pin: LocationPin, plan: PlanDetail) -> LocationCard.EditActions {
+        LocationCard.EditActions(
+            canMoveUp:   offset > 0,
+            canMoveDown: offset < plan.locations.count - 1,
+            onMoveUp: {
+                Task { await vm.moveStops(from: [offset], to: offset - 1, auth: auth) }
+            },
+            onMoveDown: {
+                // SwiftUI'nin move semantiği: aşağı taşırken hedef, elemanın
+                // kendisi çıkarıldıktan SONRAKİ pozisyon olduğu için +2 gerekir.
+                Task { await vm.moveStops(from: [offset], to: offset + 2, auth: auth) }
+            },
+            onDelete: {
+                // Silinen durak haritada odaktaysa odağı bırak, yoksa harita
+                // artık var olmayan bir pine zoom yapmayı sürdürür.
+                if focusedPin?.index == pin.index { focusedPin = nil }
+                Task { await vm.deleteStop(pin, auth: auth) }
+            }
+        )
     }
 
     // MARK: - Helpers

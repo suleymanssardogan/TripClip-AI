@@ -16,6 +16,10 @@ struct HomeView: View {
     @State private var uploadState:  UploadState     = .idle
     @State private var uploadPct:    Double          = 0
 
+    /// Silme onayı bekleyen plan. Silme geri alınamıyor, o yüzden tek dokunuşla
+    /// değil onaydan sonra gidiyor.
+    @State private var planPendingDeletion: PlanSummary?
+
     private enum UploadState {
         case idle
         case loading         // loading from Photos library
@@ -78,6 +82,30 @@ struct HomeView: View {
             }
         }
         .task { await vm.load(auth: auth) }
+        // Detaydan köke dönüldüğünde listeyi tazele: kullanıcı orada durak
+        // silmiş/sıralamış olabilir ve kart eski sayıyı ("12 mekan") göstermeye
+        // devam ediyordu.
+        .onChange(of: navPath.count) { old, new in
+            guard new == 0, old > 0 else { return }
+            Task { await vm.load(auth: auth) }
+        }
+        .confirmationDialog(
+            "Bu planı silmek istiyor musun?",
+            isPresented: Binding(
+                get: { planPendingDeletion != nil },
+                set: { if !$0 { planPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Sil", role: .destructive) {
+                guard let plan = planPendingDeletion else { return }
+                planPendingDeletion = nil
+                Task { await vm.deletePlan(plan, auth: auth) }
+            }
+            Button("Vazgeç", role: .cancel) { planPendingDeletion = nil }
+        } message: {
+            Text("Plan ve yüklenen video kalıcı olarak silinir. Bu işlem geri alınamaz.")
+        }
         .onChange(of: pickerItem) { _, item in
             guard let item else { return }
             Task { await handlePickedItem(item) }
@@ -269,6 +297,16 @@ struct HomeView: View {
                         PlanRowView(plan: plan)
                     }
                     .buttonStyle(PressableButtonStyle())
+                    // Liste `List` değil `LazyVStack` (özel kart tasarımı için),
+                    // dolayısıyla `.swipeActions` kullanılamıyor — uzun basma
+                    // menüsü aynı işi tasarımı bozmadan yapıyor.
+                    .contextMenu {
+                        Button(role: .destructive) {
+                            planPendingDeletion = plan
+                        } label: {
+                            Label("Planı Sil", systemImage: "trash")
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 16)

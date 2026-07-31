@@ -32,6 +32,8 @@ docker-compose.override.yml
 *.xcworkspace/!default.workspace
 xcuserdata/
 DerivedData/
+# xcodebuild -derivedDataPath ile üretilen yerel build çıktısı
+dd-signed/
 *.moved-aside
 *.hmap
 *.ipa

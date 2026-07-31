@@ -62,6 +62,88 @@ final class ResultsViewModel {
         }
     }
 
+    // MARK: - Durak Düzenleme
+
+    /// Sunucuya sıra yazılırken true — düzenleme arayüzü kilitlenir.
+    private(set) var isSavingStops = false
+    /// Kaydetme başarısızsa kullanıcıya gösterilecek mesaj.
+    var stopEditError: String?
+
+    /// Son kaydın bittiği an. Tek bir dokunuşun iki kez tetiklendiği ölçüldü
+    /// (aynı taşıma için 64 ms arayla iki istek). Silme idempotent olduğu için
+    /// zararsızdı ama taşıma iki kez uygulanıp sırayı sessizce bozuyordu —
+    /// kullanıcı ne olduğunu göremediği için en kötü hata türü.
+    private var lastStopWriteAt: ContinuousClock.Instant?
+    /// İnsanın kasıtlı olarak iki kez basamayacağı kadar kısa bir pencere;
+    /// gerçek ardışık dokunuşlar (300 ms+) etkilenmiyor.
+    private static let stopWriteCooldown: Duration = .milliseconds(250)
+
+    /// Durağı listeden çıkarır ve kalan sırayı sunucuya yazar.
+    ///
+    /// Silme ve sıralama aynı alanda (`stop_order`) taşınıyor: gönderdiğimiz
+    /// listede olmayan durak silinmiş sayılır. Bu yüzden id olarak
+    /// `LocationPin.index` gider — ekranda görünen sıra numarası değil, o
+    /// dizi pozisyonundan üretilir.
+    func deleteStop(_ pin: LocationPin, auth: AuthEnvironment) async {
+        guard let current = plan else { return }
+        var remaining = current.locations
+        remaining.removeAll { $0.index == pin.index }
+        await persistStops(remaining, auth: auth)
+    }
+
+    /// Sürükle-bırak ile yeni sırayı uygular ve sunucuya yazar.
+    func moveStops(from source: IndexSet, to destination: Int, auth: AuthEnvironment) async {
+        guard let current = plan else { return }
+        var reordered = current.locations
+        reordered.move(fromOffsets: source, toOffset: destination)
+        await persistStops(reordered, auth: auth)
+    }
+
+    /// Yerel state'i iyimser günceller, sonra sunucuya yazar; hata olursa geri alır.
+    private func persistStops(_ locations: [LocationPin], auth: AuthEnvironment) async {
+        guard var current = plan, let token = auth.user?.token else { return }
+        guard !isSavingStops else { return }
+        // Yazma sırasında gelen kopya isteği yukarıdaki guard yakalıyor; istek
+        // 30 ms'de bitince guard'ın penceresi kapanıyor, bu yüzden bitiş
+        // sonrasını da kısa bir süre koruyoruz.
+        if let last = lastStopWriteAt,
+           ContinuousClock.now - last < Self.stopWriteCooldown {
+            return
+        }
+
+        let snapshot = current
+        current.locations = locations
+        // Rota çizgisi de kullanıcının sırasını izlemeli, yoksa liste bir şey
+        // çizgi başka bir şey gösterir. Sunucu da bir sonraki okumada aynısını
+        // üretiyor (mobile-bff _route_from_locations).
+        current.route = locations.count > 1
+            ? locations.map { RoutePoint(latitude: $0.latitude, longitude: $0.longitude, name: $0.name) }
+            : nil
+        plan = current
+
+        isSavingStops = true
+        defer {
+            isSavingStops  = false
+            lastStopWriteAt = ContinuousClock.now
+        }
+
+        do {
+            let _: SuccessResponse = try await auth.apiClient.send(
+                .updateStopOrder(videoID: current.id, order: [locations.map(\.index)]),
+                token: token
+            )
+            PersistenceController.shared.save(planDetail: current)
+        } catch let apiError as APIError {
+            if apiError.isUnauthorized { auth.handleUnauthorized(); return }
+            plan = snapshot
+            stopEditError = apiError.localizedDescription
+            Logger.network.warning("Stop order save failed: \(apiError.localizedDescription)")
+        } catch {
+            plan = snapshot
+            stopEditError = "Değişiklik kaydedilemedi."
+        }
+    }
+
     // MARK: - Ertelenmiş İpuçları
 
     /// Ekrandan çıkıldığında yoklamayı durdurur (bkz. ResultsView.onDisappear).
