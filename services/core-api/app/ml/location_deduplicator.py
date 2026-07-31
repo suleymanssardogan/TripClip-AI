@@ -39,8 +39,51 @@ def normalize_place_name(name: Optional[str]) -> str:
     return " ".join(text.split())
 
 
+# Türkçe iyelik/tamlama ekleri. Sondaki kelimeye takılıyor:
+#   "Mermerli Plajı" / "Mermerli Plaj"   → mermerli plaj
+#   "Düden Şelalesi" / "Düden Şelale"    → duden sela… (ikisi de aynı köke iner)
+# Uzun ek önce denenmeli, yoksa "si" yerine "i" soyulur.
+_TR_POSSESSIVE_SUFFIXES = ("sı", "si", "su", "sü", "ı", "i", "u", "ü")
+
+# Kökün anlamsız kalmasını önleyen alt sınırlar. "Kaş" gibi kısa adlara
+# dokunmuyoruz; sondaki sesli harf orada ekin değil kökün parçası.
+_STEM_MIN_WORD_LEN = 5
+_STEM_MIN_ROOT_LEN = 3
+
+
+def place_name_stem(name: Optional[str]) -> str:
+    """
+    Normalize edilmiş adın son kelimesindeki Türkçe iyelik ekini düşürür.
+
+    `normalize_place_name` tam eşleşme için; bu ise "Plajı" ile "Plaj"ı aynı
+    kovaya koymak için. Tek başına birleştirme ölçütü DEĞİL — çağıran taraf
+    mesafeyle birlikte kullanıyor, çünkü kök eşleşmesi tam ad eşleşmesinden
+    daha zayıf bir sinyal (bkz. deduplicate_locations).
+    """
+    normalized = normalize_place_name(name)
+    if not normalized:
+        return ""
+
+    words = normalized.split()
+    last = words[-1]
+    if len(last) < _STEM_MIN_WORD_LEN:
+        return normalized
+
+    for suffix in _TR_POSSESSIVE_SUFFIXES:
+        if last.endswith(suffix) and len(last) - len(suffix) >= _STEM_MIN_ROOT_LEN:
+            words[-1] = last[: -len(suffix)]
+            break
+
+    return " ".join(words)
+
+
 class LocationDeduplicator:
     """Deduplicate enriched locations based on coordinates and normalized names"""
+
+    # Kök eşleşmesinin geçerli sayıldığı azami mesafe. Aynı adın iki yazımı
+    # geocoder'a göre birkaç yüz metre kayabiliyor; farklı ilçelerdeki aynı
+    # isimli mekanlar ise bunun çok ötesinde.
+    STEM_MATCH_RADIUS_KM = 1.0
 
     def __init__(self, distance_threshold_km: float = 5.0):
         """
@@ -85,6 +128,7 @@ class LocationDeduplicator:
         deduplicated = []
         seen_coords = []
         seen_names = set()
+        seen_stems = []   # (stem, lat, lng) — kök eşleşmesi mesafeyle birlikte aranıyor
 
         # Sort by importance (if available)
         sorted_locations = sorted(
@@ -118,7 +162,33 @@ class LocationDeduplicator:
                 )
                 is_duplicate = True
 
-            # Mesafe kontrolü — Gemini kaynaklı kayıtlarda UYGULANMAZ.
+            # ── 2) Aynı kök + yakın konum = aynı mekan ───────────────────────
+            #
+            # "Mermerli Plajı" ve "Mermerli Plaj" 276 m arayla iki ayrı durak
+            # olarak listeleniyordu: tam ad anahtarları iyelik eki yüzünden
+            # farklı, mesafe de Gemini modundaki 1 m eşiğinin üstünde.
+            #
+            # Kök eşleşmesi tam ad eşleşmesinden zayıf bir sinyal, o yüzden tek
+            # başına değil mesafeyle birlikte kullanılıyor. İkisi bir aradayken
+            # güvenli: "Güllüoğlu Baklava" ile "Elmacı Pazarı" aynı noktada ama
+            # kökleri farklı; "Kaş Halk Plajı" ile "Kaputaş Plajı" kökleri
+            # farklı. Yalnızca gerçekten aynı adın iki yazımı yakalanıyor.
+            stem_key = place_name_stem(location.get('original_name'))
+
+            if not is_duplicate and stem_key:
+                for seen_stem, seen_lat, seen_lng in seen_stems:
+                    if seen_stem != stem_key:
+                        continue
+                    distance = self.calculate_distance(lat, lng, seen_lat, seen_lng)
+                    if distance < self.STEM_MATCH_RADIUS_KM:
+                        logger.info(
+                            f"Duplicate found: {location.get('original_name')} "
+                            f"(stem match: '{stem_key}', {distance*1000:.0f}m)"
+                        )
+                        is_duplicate = True
+                        break
+
+            # ── 3) Mesafe — Gemini kaynaklı kayıtlarda UYGULANMAZ ────────────
             #
             # Gemini farklı isim döndürdüyse farklı mekandır; koordinatın aynı
             # olması bunu çürütmez. İki ayrı sebeple aynı koordinat çıkıyor:
@@ -130,12 +200,12 @@ class LocationDeduplicator:
             #      videosunda Ciğerci Aziz Usta, Safi Künefe ve Gümrük Hanı
             #      aynı koordinatı alıp üçü birden silinmişti.
             #
-            # Mesafe hiçbir eşikte bu ikisini ayırt edemez — iç içe mekan
-            # normal bir durum. Ad bazlı eşleşme (yukarıda) bu kayıtlarda
-            # çalışmaya devam ediyor, gerçek tekrarları o yakalıyor.
+            # Mesafe hiçbir eşikte bu ikisini ayırt edemez — iç içe mekan normal
+            # bir durum. Yukarıdaki ad ve kök eşleşmeleri bu kayıtlarda çalışmaya
+            # devam ediyor, gerçek tekrarları onlar yakalıyor.
             #
-            # Nominatim'den gelen kayıtlarda mesafe korunuyor: orada aynı mekan
-            # farklı yazımlarla iki kez dönebiliyor ve koordinat ayırt edici.
+            # Nominatim kayıtlarında mesafe korunuyor: orada aynı mekan farklı
+            # yazımlarla iki kez dönebiliyor ve koordinat ayırt edici.
             source = place_data.get("source") or ""
             trust_name_only = source.startswith("gemini_")
 
@@ -156,6 +226,8 @@ class LocationDeduplicator:
                 seen_coords.append((lat, lng))
                 if name_key:
                     seen_names.add(name_key)
+                if stem_key:
+                    seen_stems.append((stem_key, lat, lng))
 
         logger.info(f"✅ Deduplication: {len(enriched_locations)} → {len(deduplicated)} locations")
         return deduplicated

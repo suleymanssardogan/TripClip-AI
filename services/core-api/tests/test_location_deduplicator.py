@@ -4,7 +4,7 @@ dedup, ve get_location_summary şekli için testler.
 """
 import pytest
 
-from app.ml.location_deduplicator import LocationDeduplicator, normalize_place_name
+from app.ml.location_deduplicator import LocationDeduplicator, normalize_place_name, place_name_stem
 
 
 @pytest.fixture
@@ -241,3 +241,47 @@ def test_nominatim_kayitlarinda_mesafe_dedupu_korunur():
     ]
     result = LocationDeduplicator(distance_threshold_km=0.001).deduplicate_locations(locs)
     assert len(result) == 1
+
+
+# ── Türkçe iyelik eki: kök eşleşmesi + yakınlık ──────────────────────────────
+
+def test_stem_iyelik_ekini_dusurur():
+    assert place_name_stem("Mermerli Plajı") == place_name_stem("Mermerli Plaj")
+    assert place_name_stem("Elmacı Pazarı")  == "elmaci pazar"
+    assert place_name_stem("Bakırcılar Çarşısı") == "bakircilar carsi"
+
+
+def test_stem_kisa_adlara_dokunmaz():
+    """'Kaş'taki sesli harf ek değil kökün parçası."""
+    assert place_name_stem("Kaş") == "kas"
+    assert place_name_stem("Urfa") == "urfa"
+    assert place_name_stem("Patara") == "patara"
+
+
+def test_mermerli_plaj_ikilisi_birlesir():
+    locs = [
+        _gemini_loc("Mermerli Plajı", 36.8830, 30.7060),
+        _gemini_loc("Mermerli Plaj",  36.8832, 30.7029),
+    ]
+    result = LocationDeduplicator(distance_threshold_km=0.001).deduplicate_locations(locs)
+    assert len(result) == 1
+
+
+def test_ayni_kok_uzaktaysa_birlesmez():
+    """Farklı ilçelerdeki aynı isimli mekanlar ayrı kalmalı."""
+    locs = [
+        _gemini_loc("Merkez Plajı", 36.8830, 30.7060),
+        _gemini_loc("Merkez Plaj",  36.2000, 29.6380),   # ~120 km
+    ]
+    result = LocationDeduplicator(distance_threshold_km=0.001).deduplicate_locations(locs)
+    assert len(result) == 2
+
+
+def test_ic_ice_mekanlar_kok_farkliysa_korunur():
+    """Güllüoğlu/Elmacı aynı noktada ama kökleri farklı — ikisi de kalmalı."""
+    locs = [
+        _gemini_loc("Elmacı Pazarı", 37.0640, 37.3800),
+        _gemini_loc("Güllüoğlu Baklava", 37.0640, 37.3800),
+    ]
+    result = LocationDeduplicator(distance_threshold_km=0.001).deduplicate_locations(locs)
+    assert len(result) == 2
