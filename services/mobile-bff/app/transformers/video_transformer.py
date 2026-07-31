@@ -37,8 +37,18 @@ def to_mobile_detail(raw: Dict[str, Any]) -> Dict[str, Any]:
     rag_data   = (ai.get("rag") or {}).get("travel_tips") or {}
 
     locations = _shape_locations(nominatim.get("deduplicated_locations") or [])
-    route      = _shape_route(route_data)
-    tips       = _shape_tips(rag_data)
+    tips      = _shape_tips(rag_data)
+
+    # Kullanıcı durakları düzenlediyse onun sırası TSP çıktısını ezer — rota da
+    # kullanıcının sırasını izlemeli, yoksa liste bir şey, çizgi başka bir şey
+    # gösterir.
+    stop_order = raw.get("stop_order")
+    reordered  = _apply_stop_order(locations, stop_order)
+    if reordered is not None:
+        locations = reordered
+        route     = _route_from_locations(locations)
+    else:
+        route = _shape_route(route_data)
 
     return {
         "id":           raw.get("id"),
@@ -80,6 +90,50 @@ def _shape_locations(locs: List[Dict]) -> List[Dict]:
             "importance": place.get("importance", 0.5),
         })
     return result
+
+
+def _apply_stop_order(
+    locations: List[Dict],
+    stop_order: Any,
+) -> Optional[List[Dict]]:
+    """
+    Kullanıcının kaydettiği durak sırasını uygular. Düzenleme yoksa None döner
+    (çağıran o zaman AI'nin varsayılan sırasını kullanır).
+
+    `stop_order` gün başına id listesi: [[1, 3, 2], [5, 4]]. Mobil tek gün
+    kullanıyor ama web çok günlü kaydedebiliyor, o yüzden düzleştiriyoruz.
+
+    Listede olmayan bir durak kullanıcı tarafından SİLİNMİŞ sayılır — silme ve
+    sıralama tek alanda taşınıyor, ayrı bir kolona ihtiyaç kalmıyor.
+
+    `index` alanı bilerek yeniden numaralandırılmıyor: o, deduplicated_locations
+    içindeki kalıcı kimlik ve istemci bir sonraki düzenlemede aynı id'leri geri
+    göndermek zorunda. Ekranda gösterilen sıra numarası istemcide dizi
+    pozisyonundan üretilir.
+    """
+    if not stop_order or not isinstance(stop_order, list):
+        return None
+
+    by_index = {loc["index"]: loc for loc in locations}
+    ordered  = [
+        by_index[stop_id]
+        for day in stop_order if isinstance(day, list)
+        for stop_id in day if stop_id in by_index
+    ]
+
+    # Bozuk/eskimiş bir sıra (ör. yeniden işlenmiş video) yüzünden kullanıcıya
+    # boş bir plan göstermeyiz — böyle bir durumda varsayılana düşeriz.
+    return ordered or None
+
+
+def _route_from_locations(locations: List[Dict]) -> Optional[List[Dict]]:
+    """Kullanıcının durak sırasını harita polyline'ına çevirir."""
+    if len(locations) < 2:
+        return None
+    return [
+        {"latitude": loc["latitude"], "longitude": loc["longitude"], "name": loc["name"]}
+        for loc in locations
+    ]
 
 
 def _shape_route(route_data: Dict) -> Optional[List[Dict]]:

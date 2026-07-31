@@ -52,7 +52,39 @@ class Video(Base):
     # sessizce bozuk sonuç üretip COMPLETED olarak işaretlenmesini önlemek için.
     degradation = Column(JSON, nullable=True)
     # Kullanıcının editor'de belirlediği durak sırası: gün başına ID listesi.
+    # Yalnızca sıralamayı değil, HANGİ durakların kaldığını da belirler —
+    # bkz. visible_locations().
     stop_order = Column(JSON, nullable=True)
+
+
+def visible_locations(video: "Video") -> list:
+    """
+    Kullanıcıya gösterilecek durak listesi.
+
+    `deduplicated_locations` AI'nin ürettiği ham sonuç; kullanıcı durakları
+    yeniden sıralayıp silebiliyor ve bu düzenleme `stop_order` içinde 1-tabanlı
+    id'lerle saklanıyor. Listede olmayan id silinmiş sayılır.
+
+    Ham veri hiç değiştirilmiyor: düzenleme geri alınabilir olsun ve yeniden
+    işlemeye gerek kalmasın diye silme yıkıcı değil.
+
+    Özet (liste kartı) ile detay ekranının aynı sayıyı göstermesi bu tek
+    fonksiyona bağlı — iki yerde ayrı ayrı hesaplandığında kart "12 mekan"
+    derken detay 11 gösteriyordu.
+    """
+    locations = video.deduplicated_locations or []
+    order = video.stop_order
+    if not locations or not order or not isinstance(order, list):
+        return locations
+
+    ordered = [
+        locations[stop_id - 1]
+        for day in order if isinstance(day, list)
+        for stop_id in day
+        if isinstance(stop_id, int) and 1 <= stop_id <= len(locations)
+    ]
+    # Eskimiş/bozuk bir sıra yüzünden planı boş göstermeyiz.
+    return ordered or locations
     
 
     

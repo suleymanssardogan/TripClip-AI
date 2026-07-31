@@ -211,6 +211,23 @@ def update_stop_order(
     return {"success": True}
 
 
+@router.delete("/{video_id}")
+def delete_video(
+    video_id: int,
+    service: VideoService = Depends(get_video_service),
+    x_user_id: Optional[int] = Header(default=None),
+):
+    """Planı ve yüklenen video dosyasını kalıcı olarak siler. Yalnızca sahibi."""
+    if x_user_id is None:
+        from fastapi import HTTPException as _HTTPException
+        raise _HTTPException(
+            status_code=401,
+            detail={"code": "UNAUTHORIZED", "message": "Kimlik doğrulama gerekli."},
+        )
+    service.delete_video(video_id, x_user_id)
+    return {"success": True}
+
+
 # ── URL Queue Endpoint (Share Extension için) ─────────────────────────────────
 #
 # GÜVENLİK: Bu URL doğrudan yt-dlp'ye (Celery worker, `_download_url`) geçer.

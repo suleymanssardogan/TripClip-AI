@@ -6,7 +6,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.domain.repositories.video_repository import AbstractVideoRepository
-from app.models.video import Video, VideoStatus
+from app.models.video import Video, VideoStatus, visible_locations
 
 
 class SqlVideoRepository(AbstractVideoRepository):
@@ -47,7 +47,9 @@ class SqlVideoRepository(AbstractVideoRepository):
 
     @staticmethod
     def _to_plan_dict(v: Video) -> Dict[str, Any]:
-        locs = v.deduplicated_locations or []
+        # Kullanıcının sildiği/sıraladığı hâli — ham liste değil, yoksa kart
+        # detaydan farklı bir sayı gösterir.
+        locs = visible_locations(v)
         return {
             "id": v.id,
             "filename": v.filename,
@@ -183,3 +185,17 @@ class SqlVideoRepository(AbstractVideoRepository):
         self._db.commit()
         self._db.refresh(video)
         return video
+
+    def delete(self, video_id: int, user_id: int) -> Optional[str]:
+        """
+        Videoyu kalıcı olarak siler. Silinen kaydın file_path'ini döner ki
+        çağıran katman diskteki dosyayı da temizleyebilsin.
+        Video bulunamazsa veya user_id sahibi değilse None döner.
+        """
+        video = self.get_by_id(video_id)
+        if not video or video.user_id != user_id:
+            return None
+        file_path = video.file_path
+        self._db.delete(video)
+        self._db.commit()
+        return file_path

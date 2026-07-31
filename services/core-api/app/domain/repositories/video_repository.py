@@ -51,3 +51,8 @@ class AbstractVideoRepository(ABC):
     def update_stop_order(self, video_id: int, user_id: int, order: List[List[int]]):
         """Kullanıcının editor'de belirlediği durak sırasını kaydeder. Video yoksa/sahibi değilse None döner."""
         ...
+
+    @abstractmethod
+    def delete(self, video_id: int, user_id: int) -> Optional[str]:
+        """Videoyu siler ve file_path'ini döner. Video yoksa/sahibi değilse None döner."""
+        ...

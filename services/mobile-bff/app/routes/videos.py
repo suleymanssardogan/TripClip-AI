@@ -90,6 +90,52 @@ async def get_video_detail(
         return to_mobile_detail(resp.json())
 
 
+class StopOrderRequest(BaseModel):
+    """Durak sırası — gün başına kalıcı durak id'si listesi.
+
+    Listede olmayan durak silinmiş sayılır, bkz. video_transformer._apply_stop_order.
+    """
+    order: list[list[int]]
+
+
+@router.patch("/{video_id}/order")
+async def update_stop_order(
+    video_id: int,
+    body: StopOrderRequest,
+    user_id: int = Depends(get_current_user_id),
+):
+    """Kullanıcının düzenlediği durak sırasını kaydeder (silme de buradan)."""
+    rid = str(uuid.uuid4())[:8]
+    async with mobile_error_wrapper(request_id=rid):
+        async with internal_client(15.0) as client:
+            resp = await client.patch(
+                f"{CORE_API_URL}/internal/videos/{video_id}/order",
+                json={"order": body.order},
+                headers={"x-user-id": str(user_id)},
+            )
+        if resp.status_code >= 400:
+            raise_from_response(resp, request_id=rid)
+    return {"success": True}
+
+
+@router.delete("/{video_id}")
+async def delete_video(
+    video_id: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    """Planı kalıcı olarak siler."""
+    rid = str(uuid.uuid4())[:8]
+    async with mobile_error_wrapper(request_id=rid):
+        async with internal_client(15.0) as client:
+            resp = await client.delete(
+                f"{CORE_API_URL}/internal/videos/{video_id}",
+                headers={"x-user-id": str(user_id)},
+            )
+        if resp.status_code >= 400:
+            raise_from_response(resp, request_id=rid)
+    return {"success": True}
+
+
 class URLQueueRequest(BaseModel):
     url: str
     source: str = "instagram_share_extension"

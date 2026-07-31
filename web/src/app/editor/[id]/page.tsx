@@ -111,11 +111,18 @@ export default function EditorPage() {
     const built     = buildDays(locations, tips).map(d => d.events);
 
     function applyOrder(ids: number[][]): boolean {
-      const flat = built.flat();
+      const flat  = built.flat();
+      const known = new Set(flat.map(e => e.id));
+      // Eskimiş sıra (video yeniden işlenmiş, id'ler kaymış) → varsayılana dön.
+      if (ids.flat().some(id => !known.has(id))) return false;
+
       const reordered = ids.map(dayIds =>
         dayIds.map(id => flat.find(e => e.id === id)).filter(Boolean) as Event[]
       );
-      if (reordered.flat().length !== flat.length) return false;
+      // Eksik id'ler kullanıcının SİLDİĞİ duraklardır — silme de sıralamayla
+      // aynı alanda taşınıyor, o yüzden eksikliği hata sayıp durakları geri
+      // getirmiyoruz. Yalnızca hiç durak kalmadıysa varsayılana düşeriz.
+      if (reordered.flat().length === 0) return false;
       setTimeout(() => setDayEvents(reordered), 0);
       return true;
     }

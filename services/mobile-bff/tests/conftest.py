@@ -72,11 +72,15 @@ def mock_core_api():
     """
     with mock.patch("httpx.AsyncClient.post", new_callable=mock.AsyncMock) as mock_post, \
          mock.patch("httpx.AsyncClient.get", new_callable=mock.AsyncMock) as mock_get, \
-         mock.patch("httpx.AsyncClient.put", new_callable=mock.AsyncMock) as mock_put:
+         mock.patch("httpx.AsyncClient.put", new_callable=mock.AsyncMock) as mock_put, \
+         mock.patch("httpx.AsyncClient.patch", new_callable=mock.AsyncMock) as mock_patch, \
+         mock.patch("httpx.AsyncClient.delete", new_callable=mock.AsyncMock) as mock_delete:
         holder = mock.Mock()
         holder.post = mock_post
         holder.get = mock_get
         holder.put = mock_put
+        holder.patch = mock_patch
+        holder.delete = mock_delete
         yield holder
 
 

@@ -3,6 +3,11 @@ Video endpoint testleri: stats, public feed, kullanıcı videoları, detay
 """
 import io
 
+# Düzenleme/silme testleri kaydı doğrudan DB'de kurup sonucu yine DB'den
+# doğruluyor — endpoint üzerinden video oluşturmak tüm ML pipeline'ını
+# tetiklerdi.
+from conftest import TestingSessionLocal
+
 
 # ─── İstatistik ─────────────────────────────────────────────────────────────
 
@@ -247,3 +252,210 @@ def test_get_video_without_user_id_returns_404_for_non_completed(client):
     # Anonim erişim → video tamamlanmadığı için 404
     resp = client.get(f"/internal/videos/{video_id}")
     assert resp.status_code == 404
+
+# ─── Durak Düzenleme (PATCH /order) ─────────────────────────────────────────
+#
+# stop_order hem sıralamayı hem de HANGİ durakların kaldığını taşıyor: listede
+# olmayan durak silinmiş sayılır (bkz. mobile-bff _apply_stop_order). Bu yüzden
+# id'lerin gerçekten var olan duraklara işaret etmesi kritik — aksi hâlde okuma
+# tarafındaki eşleme sessizce durak kaybeder ya da çoğaltır.
+
+def _make_video_with_locations(user_id: int, count: int = 3) -> int:
+    """Test DB'sine `count` duraklı, tamamlanmış bir video ekler ve id'sini döner."""
+    from app.models.video import Video, VideoStatus
+
+    db = TestingSessionLocal()
+    try:
+        video = Video(
+            filename="order.mp4",
+            file_path="/tmp/does-not-exist-order.mp4",
+            status=VideoStatus.COMPLETED,
+            user_id=user_id,
+            deduplicated_locations=[
+                {"original_name": f"Durak {i}", "place_data": {}} for i in range(1, count + 1)
+            ],
+        )
+        db.add(video)
+        db.commit()
+        db.refresh(video)
+        return video.id
+    finally:
+        db.close()
+
+
+def _stop_order_of(video_id: int):
+    from app.models.video import Video
+
+    db = TestingSessionLocal()
+    try:
+        return db.query(Video).filter(Video.id == video_id).first().stop_order
+    finally:
+        db.close()
+
+
+def test_update_stop_order_persists(client, bff_headers, registered_user):
+    """Geçerli sıra kaydedilmeli."""
+    vid = _make_video_with_locations(registered_user["user_id"], 3)
+    resp = client.patch(
+        f"/internal/videos/{vid}/order",
+        json={"order": [[3, 1, 2]]},
+        headers=bff_headers,
+    )
+    assert resp.status_code == 200
+    assert _stop_order_of(vid) == [[3, 1, 2]]
+
+
+def test_update_stop_order_allows_subset_as_deletion(client, bff_headers, registered_user):
+    """Eksik id silme anlamına gelir — reddedilmemeli."""
+    vid = _make_video_with_locations(registered_user["user_id"], 3)
+    resp = client.patch(
+        f"/internal/videos/{vid}/order",
+        json={"order": [[1, 3]]},
+        headers=bff_headers,
+    )
+    assert resp.status_code == 200
+    assert _stop_order_of(vid) == [[1, 3]]
+
+
+def test_update_stop_order_rejects_unknown_stop(client, bff_headers, registered_user):
+    """Var olmayan durak numarası → 400, kayıt değişmemeli."""
+    vid = _make_video_with_locations(registered_user["user_id"], 3)
+    resp = client.patch(
+        f"/internal/videos/{vid}/order",
+        json={"order": [[1, 2, 99]]},
+        headers=bff_headers,
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "INVALID_STOP_ORDER"
+    assert _stop_order_of(vid) is None
+
+
+def test_update_stop_order_rejects_duplicate_stop(client, bff_headers, registered_user):
+    """Aynı durak iki kez sıralanamaz — okuma tarafında çoğalmasını önler."""
+    vid = _make_video_with_locations(registered_user["user_id"], 3)
+    resp = client.patch(
+        f"/internal/videos/{vid}/order",
+        json={"order": [[1, 1, 2]]},
+        headers=bff_headers,
+    )
+    assert resp.status_code == 400
+    assert _stop_order_of(vid) is None
+
+
+def test_update_stop_order_requires_user_header(client, registered_user):
+    vid = _make_video_with_locations(registered_user["user_id"], 2)
+    resp = client.patch(f"/internal/videos/{vid}/order", json={"order": [[1, 2]]})
+    assert resp.status_code == 401
+
+
+def test_update_stop_order_rejects_other_users_video(client, registered_user):
+    """Başkasının planını düzenlemek → 403."""
+    vid = _make_video_with_locations(registered_user["user_id"], 2)
+    resp = client.patch(
+        f"/internal/videos/{vid}/order",
+        json={"order": [[2, 1]]},
+        headers={"x-user-id": str(registered_user["user_id"] + 12345)},
+    )
+    assert resp.status_code == 403
+
+
+def test_update_stop_order_nonexistent_video(client, bff_headers):
+    resp = client.patch(
+        "/internal/videos/999999/order",
+        json={"order": [[1]]},
+        headers=bff_headers,
+    )
+    assert resp.status_code == 404
+
+
+# ─── Plan Silme (DELETE) ────────────────────────────────────────────────────
+
+def test_delete_video_removes_record(client, bff_headers, registered_user):
+    vid = _make_video_with_locations(registered_user["user_id"], 2)
+    resp = client.delete(f"/internal/videos/{vid}", headers=bff_headers)
+    assert resp.status_code == 200
+    assert client.get(f"/internal/videos/{vid}").status_code == 404
+
+
+def test_delete_video_survives_missing_file(client, bff_headers, registered_user):
+    """file_path diskte yoksa silme yine başarılı olmalı — DB kaydı asıl olan."""
+    vid = _make_video_with_locations(registered_user["user_id"], 1)
+    resp = client.delete(f"/internal/videos/{vid}", headers=bff_headers)
+    assert resp.status_code == 200
+
+
+def test_delete_video_requires_user_header(client, registered_user):
+    vid = _make_video_with_locations(registered_user["user_id"], 1)
+    resp = client.delete(f"/internal/videos/{vid}")
+    assert resp.status_code == 401
+    assert _stop_order_of(vid) is None   # kayıt hâlâ duruyor
+
+
+def test_delete_video_rejects_other_user(client, registered_user):
+    vid = _make_video_with_locations(registered_user["user_id"], 1)
+    resp = client.delete(
+        f"/internal/videos/{vid}",
+        headers={"x-user-id": str(registered_user["user_id"] + 12345)},
+    )
+    assert resp.status_code == 403
+
+
+def test_delete_nonexistent_video(client, bff_headers):
+    resp = client.delete("/internal/videos/999999", headers=bff_headers)
+    assert resp.status_code == 404
+
+
+# ─── Özet ile detay tutarlılığı ─────────────────────────────────────────────
+#
+# Liste kartındaki mekan sayısı ham `deduplicated_locations`'tan geliyordu, yani
+# kullanıcı bir durak silince kart "12 mekan" derken detay 11 gösteriyordu.
+
+def test_summary_count_reflects_user_deletion(client, bff_headers, registered_user):
+    uid = registered_user["user_id"]
+    vid = _make_video_with_locations(uid, 3)
+
+    before = client.get(f"/internal/videos/user/{uid}").json()["plans"]
+    assert next(p for p in before if p["id"] == vid)["locations_count"] == 3
+
+    client.patch(
+        f"/internal/videos/{vid}/order",
+        json={"order": [[1, 3]]},
+        headers=bff_headers,
+    )
+
+    after = client.get(f"/internal/videos/user/{uid}").json()["plans"]
+    assert next(p for p in after if p["id"] == vid)["locations_count"] == 2
+
+
+def test_summary_top_location_follows_user_order(client, bff_headers, registered_user):
+    """Başlık ilk duraktan üretiliyor — sıralama değişince başlık da değişmeli."""
+    uid = registered_user["user_id"]
+    vid = _make_video_with_locations(uid, 3)
+
+    client.patch(
+        f"/internal/videos/{vid}/order",
+        json={"order": [[3, 1, 2]]},
+        headers=bff_headers,
+    )
+
+    plans = client.get(f"/internal/videos/user/{uid}").json()["plans"]
+    assert next(p for p in plans if p["id"] == vid)["top_location"] == "Durak 3"
+
+
+def test_visible_locations_falls_back_on_stale_order():
+    """Tamamen geçersiz bir sıra planı boş göstermemeli."""
+    from app.models.video import Video, visible_locations
+
+    v = Video(filename="x.mp4", file_path="/tmp/x.mp4")
+    v.deduplicated_locations = [{"original_name": "A"}, {"original_name": "B"}]
+    v.stop_order = [[97, 98]]
+    assert len(visible_locations(v)) == 2
+
+
+def test_visible_locations_without_order_is_raw_list():
+    from app.models.video import Video, visible_locations
+
+    v = Video(filename="x.mp4", file_path="/tmp/x.mp4")
+    v.deduplicated_locations = [{"original_name": "A"}, {"original_name": "B"}]
+    v.stop_order = None
+    assert [loc["original_name"] for loc in visible_locations(v)] == ["A", "B"]

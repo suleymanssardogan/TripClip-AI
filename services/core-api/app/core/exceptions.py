@@ -103,6 +103,17 @@ class FileTooLargeException(TripClipException):
         )
 
 
+class InvalidStopOrderException(TripClipException):
+    """Kaydedilmek istenen durak sırası tutarsız.
+
+    `stop_order` hem sıralamayı hem hangi durakların kaldığını taşıdığı için
+    bilinmeyen ya da tekrarlanan bir id okuma tarafında sessizce durak
+    kaybettirir/çoğaltır — istekte reddetmek tek güvenli davranış.
+    """
+    def __init__(self, message: str):
+        super().__init__(message, code="INVALID_STOP_ORDER", status_code=400)
+
+
 class DailyQuotaExceededException(TripClipException):
     def __init__(self, user_id: int, limit: int):
         super().__init__(

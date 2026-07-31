@@ -18,8 +18,12 @@ from app.application.dto.video_dto import (
     VideoDetailResponse,
     PlanSummary,
 )
-from app.models.video import VideoStatus
-from app.core.exceptions import VideoNotFoundException, PermissionDeniedException
+from app.models.video import VideoStatus, visible_locations
+from app.core.exceptions import (
+    VideoNotFoundException,
+    PermissionDeniedException,
+    InvalidStopOrderException,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -151,20 +155,24 @@ class VideoService:
 
     def get_user_videos(self, user_id: int) -> PlanListResponse:
         videos = self._repo.get_by_user(user_id)
-        plans = [
-            PlanSummary(
+
+        def _summary(v) -> PlanSummary:
+            # Kullanıcının düzenlediği hâli — ham AI listesi değil. Aksi hâlde
+            # liste kartı "12 mekan" derken detay ekranı 11 gösteriyordu.
+            locs = visible_locations(v)
+            return PlanSummary(
                 id=v.id,
                 filename=v.filename,
                 status=v.status.value if v.status else "unknown",
                 duration=v.duration,
                 created_at=v.created_at.isoformat() if v.created_at else None,
-                locations_count=len(v.deduplicated_locations) if v.deduplicated_locations else 0,
-                top_location=(v.deduplicated_locations or [{}])[0].get("original_name") if v.deduplicated_locations else None,
+                locations_count=len(locs),
+                top_location=locs[0].get("original_name") if locs else None,
                 ocr_preview=(v.extracted_texts or [])[:3],
                 processing_time=v.processing_time,
             )
-            for v in videos
-        ]
+
+        plans = [_summary(v) for v in videos]
         return PlanListResponse(plans=plans, total=len(plans))
 
     def get_video_detail(self, video_id: int, requesting_user_id: Optional[int] = None) -> VideoDetailResponse:
@@ -214,10 +222,49 @@ class VideoService:
     # ── Editor ────────────────────────────────────────────────────────────────
 
     def update_stop_order(self, video_id: int, user_id: int, order: list[list[int]]) -> None:
-        """Editor'de kullanıcının belirlediği durak sırasını kaydeder. Sahiplik repo katmanında doğrulanır."""
-        video = self._repo.update_stop_order(video_id, user_id, order)
-        if video is None:
+        """
+        Editor'de kullanıcının belirlediği durak sırasını kaydeder.
+        Sahiplik repo katmanında doğrulanır.
+
+        `order` hem sıralamayı hem de HANGİ durakların kalacağını belirler:
+        listede olmayan bir durak kullanıcı tarafından silinmiş sayılır. Bu
+        yüzden id'lerin gerçekten var olan duraklara işaret etmesi ve
+        tekrarlanmaması şart — aksi halde okuma tarafındaki eşleme sessizce
+        durak kaybeder ya da çoğaltır.
+        """
+        existing = self._repo.get_by_id(video_id)
+        if existing is None:
+            raise VideoNotFoundException(video_id)
+        if existing.user_id != user_id:
+            raise PermissionDeniedException("Bu videoyu düzenleme yetkiniz yok.")
+
+        valid_ids = set(range(1, len(existing.deduplicated_locations or []) + 1))
+        flat = [stop_id for day in order for stop_id in day]
+
+        unknown = sorted(set(flat) - valid_ids)
+        if unknown:
+            raise InvalidStopOrderException(f"Geçersiz durak numarası: {unknown}.")
+        if len(flat) != len(set(flat)):
+            raise InvalidStopOrderException("Aynı durak birden fazla kez sıralanamaz.")
+
+        self._repo.update_stop_order(video_id, user_id, order)
+
+    def delete_video(self, video_id: int, user_id: int) -> None:
+        """
+        Videoyu ve diskteki dosyasını kalıcı olarak siler.
+
+        Dosya silme best-effort: DB kaydı gittikten sonra dosya kalırsa bu
+        yalnızca yer kaybıdır, ama dosya silinip DB kaydı kalsaydı kullanıcı
+        açılmayan bir plan görürdü. O yüzden sıra bu şekilde.
+        """
+        file_path = self._repo.delete(video_id, user_id)
+        if file_path is None:
             existing = self._repo.get_by_id(video_id)
             if existing is None:
                 raise VideoNotFoundException(video_id)
-            raise PermissionDeniedException("Bu videoyu düzenleme yetkiniz yok.")
+            raise PermissionDeniedException("Bu videoyu silme yetkiniz yok.")
+
+        try:
+            Path(file_path).unlink(missing_ok=True)
+        except OSError as exc:
+            logger.warning("Video dosyası silinemedi | video_id=%s | %s", video_id, exc)
