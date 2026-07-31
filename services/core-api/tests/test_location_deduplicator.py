@@ -184,3 +184,60 @@ def test_get_location_summary_reflects_deduplication(dedup):
     ]
     summary = dedup.get_location_summary(locations)
     assert summary["total_locations"] == 1
+
+
+# ── Gemini kaynaklı kayıtlarda mesafe kontrolü uygulanmaz ────────────────────
+
+def _gemini_loc(name, lat, lng, source="gemini_coords"):
+    return {
+        "original_name": name,
+        "place_data": {"location": {"lat": lat, "lng": lng},
+                       "importance": 0.15, "source": source},
+    }
+
+
+def test_gemini_ayni_koordinatta_farkli_isimler_korunur():
+    """Güllüoğlu, Elmacı Pazarı'nın İÇİNDE — aynı nokta, ayrı durak."""
+    locs = [
+        _gemini_loc("Elmacı Pazarı", 37.0640, 37.3800),
+        _gemini_loc("Güllüoğlu Baklava", 37.0640, 37.3800),
+    ]
+    result = LocationDeduplicator(distance_threshold_km=0.001).deduplicate_locations(locs)
+    assert {r["original_name"] for r in result} == {"Elmacı Pazarı", "Güllüoğlu Baklava"}
+
+
+def test_gemini_sehir_merkezi_fallbacki_mekanlari_yutmaz():
+    """Gemini bilmediği mekanlara şehir koordinatını verince hepsi kaybolmamalı."""
+    locs = [
+        _gemini_loc("Urfa", 37.1597, 37.9008),
+        _gemini_loc("Ciğerci Aziz Usta", 37.1597, 37.9008),
+        _gemini_loc("Safi Künefe", 37.1597, 37.9008),
+        _gemini_loc("Gümrük Hanı", 37.1597, 37.9008),
+    ]
+    result = LocationDeduplicator(distance_threshold_km=0.001).deduplicate_locations(locs)
+    assert len(result) == 4
+
+
+def test_gemini_ayni_isim_yine_birlesir():
+    """Mesafe muafiyeti ad bazlı dedup'ı devre dışı bırakmamalı."""
+    locs = [
+        _gemini_loc("Balıklıgöl", 37.1597, 37.9008),
+        {"original_name": "balikligol",
+         "place_data": {"location": {"lat": 37.1477, "lng": 38.7846}, "importance": 0.25}},
+    ]
+    result = LocationDeduplicator(distance_threshold_km=0.001).deduplicate_locations(locs)
+    assert len(result) == 1
+    # İyi geocode edilmiş olan (yüksek importance) kalmalı
+    assert result[0]["original_name"] == "balikligol"
+
+
+def test_nominatim_kayitlarinda_mesafe_dedupu_korunur():
+    """Muafiyet yalnızca gemini_* kaynaklı kayıtlar için."""
+    locs = [
+        {"original_name": "Kaleiçi",
+         "place_data": {"location": {"lat": 36.8841, "lng": 30.7079}, "importance": 0.5}},
+        {"original_name": "Kaleici Marina",
+         "place_data": {"location": {"lat": 36.8841, "lng": 30.7079}, "importance": 0.4}},
+    ]
+    result = LocationDeduplicator(distance_threshold_km=0.001).deduplicate_locations(locs)
+    assert len(result) == 1

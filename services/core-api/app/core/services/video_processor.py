@@ -704,21 +704,22 @@ class VideoProcessingService:
         else:
             dedup_threshold = 2.0    # 2 km   — klasik pipeline için
 
-        # Fallback lokasyonları (aynı koordinat) dedup'a sokma, sonradan ekle
-        geocoded_locs = [l for l in enriched_locations
-                         if (l.get("place_data") or {}).get("source") != "gemini_city_fallback"]
-        fallback_locs = [l for l in enriched_locations
-                         if (l.get("place_data") or {}).get("source") == "gemini_city_fallback"]
-
+        # Gemini kaynaklı kayıtlar artık dedup'tan MUAF DEĞİL — sadece mesafe
+        # kontrolünden muaf (bkz. LocationDeduplicator.deduplicate_locations).
+        #
+        # Eskiden gemini_city_fallback kayıtları dedup'a hiç sokulmuyordu ve
+        # sonradan ham hâlleriyle ekleniyordu; bu, ad bazlı eşleşmeyi de
+        # atlıyordu. Artık hepsi deduplicator'dan geçiyor, böylece aynı adın
+        # iki kez listeye girmesi engelleniyor.
         from app.ml.location_deduplicator import LocationDeduplicator
         deduplicator = LocationDeduplicator(distance_threshold_km=dedup_threshold)
 
         r_dedup = _safe_run(
             "Dedup",
-            lambda: deduplicator.deduplicate_locations(geocoded_locs),
-            fallback=geocoded_locs,
+            lambda: deduplicator.deduplicate_locations(enriched_locations),
+            fallback=enriched_locations,
         )
-        deduplicated_locations: List = r_dedup.data + fallback_locs
+        deduplicated_locations: List = r_dedup.data
 
         r_loc_summary = _safe_run(
             "LocSummary",

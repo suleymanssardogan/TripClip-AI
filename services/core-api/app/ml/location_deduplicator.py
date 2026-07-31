@@ -118,8 +118,28 @@ class LocationDeduplicator:
                 )
                 is_duplicate = True
 
-            # Check if this location is too close to any already added
-            if not is_duplicate:
+            # Mesafe kontrolü — Gemini kaynaklı kayıtlarda UYGULANMAZ.
+            #
+            # Gemini farklı isim döndürdüyse farklı mekandır; koordinatın aynı
+            # olması bunu çürütmez. İki ayrı sebeple aynı koordinat çıkıyor:
+            #
+            #   1. Mekanlar gerçekten iç içe. "Güllüoğlu Baklava" ile "Elmacı
+            #      Pazarı" aynı noktada, çünkü Güllüoğlu çarşının İÇİNDE.
+            #      Gezgin için ikisi ayrı durak; birleştirmek bilgi kaybı.
+            #   2. Gemini bilmediği küçük mekana şehir merkezini veriyor. urfa
+            #      videosunda Ciğerci Aziz Usta, Safi Künefe ve Gümrük Hanı
+            #      aynı koordinatı alıp üçü birden silinmişti.
+            #
+            # Mesafe hiçbir eşikte bu ikisini ayırt edemez — iç içe mekan
+            # normal bir durum. Ad bazlı eşleşme (yukarıda) bu kayıtlarda
+            # çalışmaya devam ediyor, gerçek tekrarları o yakalıyor.
+            #
+            # Nominatim'den gelen kayıtlarda mesafe korunuyor: orada aynı mekan
+            # farklı yazımlarla iki kez dönebiliyor ve koordinat ayırt edici.
+            source = place_data.get("source") or ""
+            trust_name_only = source.startswith("gemini_")
+
+            if not is_duplicate and not trust_name_only:
                 for seen_lat, seen_lng in seen_coords:
                     distance = self.calculate_distance(lat, lng, seen_lat, seen_lng)
 
