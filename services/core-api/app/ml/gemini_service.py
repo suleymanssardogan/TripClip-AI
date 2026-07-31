@@ -134,11 +134,23 @@ class GeminiService:
         # mesajında görünmez.
         url = self._endpoint
         generation_config: Dict = {
-            # temperature=0 → greedy decoding. 0.2 ile aynı videodan farklı
-            # sayıda mekan çıkıyordu (ölçüm: aynı video 3 kez işlendi, Gemini
-            # 9 / 9 / 5 lokasyon döndürdü). Yaratıcılığa ihtiyacımız yok;
-            # ipuçlarında da tutarlılık lehine bu ödünç kabul edilebilir.
-            "temperature":    0.0,
+            # temperature=0 DENENDİ VE GERİ ALINDI.
+            #
+            # Non-determinizmi çözmek için 0.2'den 0.0'a çekilmişti. Tutarlılık
+            # geldi ama DÜŞÜK DEĞERDE sabitlendi — greedy decoding'de model JSON
+            # dizisini erken kapatmayı "en olası" buluyor:
+            #
+            #   antalya-gezilecek-yerler.mp4, aynı dosya, tek fark temperature
+            #     0.2 → 9 isim → dedup sonrası 14 mekan
+            #     0.0 → 5 isim → dedup sonrası 12 mekan
+            #   Kesilen liste ilk 5'in aynısı; kaybolanlar: Çamlık Koyu,
+            #   Kaş Halk Plajı, Kaputaş Plajı, Döşemealtı Halı Tarlası.
+            #
+            # Determinizm artık video içerik hash'iyle cache'ten geliyor
+            # (video_processor._gemini_cache_key) — aynı video her zaman aynı
+            # sonucu veriyor. Modeli kısıtlamaya gerek yok, o yüzden recall
+            # lehine 0.2'ye dönüldü.
+            "temperature":    0.2,
             # gemini-2.5-flash varsayılan olarak "thinking" yapıyor ve düşünme
             # token'ları bu bütçeden yeniyor. Eskiden 2048'di; aynı içerikle
             # doğrudan API'ye (bütçe ayarlamadan, yani model varsayılanı

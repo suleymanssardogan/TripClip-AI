@@ -66,9 +66,13 @@ class ServiceResult:
 
 # ── Gemini lokasyon çıktısı için içerik-adresli cache ─────────────────────────
 #
-# Gemini temperature=0'da bile bit-düzeyinde tekrarlanabilir değil (sunucu
-# tarafı batching, kayan nokta toplama sırası, model sürüm yönlendirmesi).
-# Ölçümde aynı video 6 kez işlendiğinde 5 veya 6 lokasyon dönüyordu.
+# Gemini bit-düzeyinde tekrarlanabilir değil (sunucu tarafı batching, kayan
+# nokta toplama sırası, model sürüm yönlendirmesi) ve seed sunmuyor.
+#
+# Determinizmi temperature=0 ile almaya çalışmak PAHALIYA MAL OLDU: tutarlılık
+# geldi ama sonuç düşük değerde sabitlendi (antalya videosunda 9 isim yerine 5).
+# Doğru yer burası — çıktıyı içerik hash'iyle sabitlemek, modeli kısıtlamak
+# değil. Bkz. gemini_service._call içindeki temperature notu.
 #
 # Videonun SHA-256'sını anahtar yapıp çıktıyı cache'lemek üç sorunu birden
 # çözüyor: aynı video HER ZAMAN aynı sonucu verir (determinizm), tekrar
@@ -79,7 +83,7 @@ _GEMINI_CACHE_TTL = 60 * 60 * 24 * 30   # 30 gün
 # Gemini lokasyon prompt'unun sürümü. Prompt değiştiğinde ARTIRILMALI, yoksa
 # cache eski çıktıyı servis etmeye devam eder (bkz. _gemini_cache_key).
 # v2: ekran yazıları (OCR) prompt'a eklendi + bozuk yazımı düzeltme talimatı.
-_GEMINI_PROMPT_VERSION = 3
+_GEMINI_PROMPT_VERSION = 4
 
 
 def _video_content_hash(video_path: str) -> Optional[str]:
