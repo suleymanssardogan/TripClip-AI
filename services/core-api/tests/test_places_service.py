@@ -108,3 +108,96 @@ def test_ocr_fallback_variants_includes_first_word_alone(service):
 def test_ocr_fallback_variants_empty_for_single_short_word(service):
     # Tek kelime ve kısa → ne trailing-char ne first-word varyantı üretilebilir
     assert service._ocr_fallback_variants("Ev") == []
+
+
+# ─── Bölge çözümleme (resolve_region) ─────────────────────────────────────────
+#
+# Bölge sınırı ARAMADAN ÖNCE çıkarılıyor. Eski sıralama — önce bölgesiz ara,
+# sonra baskın ile göre düzelt — Gaziantep videosunda "Efendioğlu"nu Osmaniye'de
+# bir eczaneye (100 km) bağlamış ve 180 km penceresine girdiği için kabul etmişti.
+
+def test_bbox_from_nominatim_reorders_axes():
+    # Nominatim ["lat_min","lat_max","lon_min","lon_max"] sırasıyla döner;
+    # bizim tüm bbox tüketicilerimiz (viewbox, _within_bbox) lat/lon çiftlerini
+    # (lat_min, lon_min, lat_max, lon_max) sırasında bekliyor.
+    assert PlacesService._bbox_from_nominatim(["36.5", "37.5", "37.0", "38.0"]) == \
+        (36.5, 37.0, 37.5, 38.0)
+
+
+def test_bbox_from_nominatim_returns_none_on_malformed_input():
+    for bad in (None, [], ["1", "2", "3"], ["a", "b", "c", "d"]):
+        assert PlacesService._bbox_from_nominatim(bad) is None, bad
+
+
+def test_within_bbox_true_when_no_bbox(service):
+    assert service._within_bbox({"location": {"lat": 0, "lng": 0}}, None) is True
+
+
+def test_within_bbox_rejects_point_outside(service):
+    bbox = (36.5, 37.0, 37.5, 38.0)          # kabaca Gaziantep çevresi
+    osmaniye = {"location": {"lat": 37.0813, "lng": 36.2626}}
+    assert service._within_bbox(osmaniye, bbox) is False
+
+
+def test_within_bbox_accepts_point_inside(service):
+    bbox = (36.5, 37.0, 37.5, 38.0)
+    metanet = {"location": {"lat": 37.0609, "lng": 37.3882}}
+    assert service._within_bbox(metanet, bbox) is True
+
+
+def test_resolve_region_pads_degenerate_point_bbox(service, monkeypatch):
+    # Nominatim bir şehri NOKTA olarak döndürdüğünde boundingbox neredeyse
+    # sıfırdır. Pay eklenmezse hiçbir mekan kutuya girmez ve bölge kısıtı
+    # aramaların tamamını öldürür.
+    monkeypatch.setattr(service, "search_place", lambda *a, **k: {
+        "name": "Gaziantep",
+        "location": {"lat": 37.0628, "lng": 37.3793},
+        "boundingbox": ["37.0628", "37.0629", "37.3793", "37.3794"],
+    })
+    region = service.resolve_region(city="Gaziantep", country_code="tr")
+    lat_min, lon_min, lat_max, lon_max = region["bbox"]
+    assert lat_max - lat_min >= 2 * PlacesService.REGION_BBOX_MIN_HALF_DEG
+    assert lon_max - lon_min >= 2 * PlacesService.REGION_BBOX_MIN_HALF_DEG
+    assert region["center"] == (37.0628, 37.3793)
+
+
+def test_resolve_region_keeps_wide_bbox_and_adds_margin(service, monkeypatch):
+    # Gerçek bir il sınırı asgari kutudan genişse daraltılmamalı; POI'ler idari
+    # sınırın hemen dışında kalabildiği için üstüne pay ekleniyor.
+    monkeypatch.setattr(service, "search_place", lambda *a, **k: {
+        "name": "Antalya",
+        "location": {"lat": 36.9, "lng": 30.7},
+        "boundingbox": ["36.0", "37.5", "29.3", "32.0"],
+    })
+    lat_min, lon_min, lat_max, lon_max = service.resolve_region(city="Antalya")["bbox"]
+    pad = PlacesService.REGION_BBOX_PAD_DEG
+    assert lat_min == pytest.approx(36.0 - pad)
+    assert lon_max == pytest.approx(32.0 + pad)
+
+
+def test_resolve_region_returns_none_when_unresolvable(service, monkeypatch):
+    # Çözülemezse çağıran bölgesiz aramaya devam etmeli — çökmemeli.
+    monkeypatch.setattr(service, "search_place", lambda *a, **k: None)
+    assert service.resolve_region(city="Bilinmeyen Yer") is None
+    assert service.resolve_region() is None   # sorgu boş
+
+
+def test_resolve_region_appends_parent_context(service, monkeypatch):
+    # "Kemer" ülke genelinde tekil değil (Antalya/Kemer ve Muğla/Seydikemer).
+    # Üst bölge sorguya eklenmeli ki Nominatim doğru olanı öne alsın.
+    seen = {}
+    monkeypatch.setattr(service, "search_place",
+                        lambda q, **k: seen.update(q=q, kw=k) or None)
+    service.resolve_region(city="Kemer", country="Türkiye",
+                           country_code="tr", parent="Antalya")
+    assert seen["q"] == "Kemer, Antalya, Türkiye"
+    assert seen["kw"]["prefer_area"] is True
+
+
+def test_resolve_region_drops_parent_when_same_as_city(service, monkeypatch):
+    # "Antalya, Antalya, Türkiye" anlamsız — üst bölge şehirle aynıysa düşmeli.
+    seen = {}
+    monkeypatch.setattr(service, "search_place",
+                        lambda q, **k: seen.update(q=q) or None)
+    service.resolve_region(city="Antalya", country="Türkiye", parent="antalya")
+    assert seen["q"] == "Antalya, Türkiye"

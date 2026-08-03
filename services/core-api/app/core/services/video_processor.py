@@ -537,6 +537,7 @@ class VideoProcessingService:
             extracted_locations = []
             gemini_region: Dict = {}
             gemini_raw: List[Dict] = []
+            regions: Dict = {}
 
             if transcript_text:
                 r_ner = _safe_run(
@@ -586,16 +587,45 @@ class VideoProcessingService:
                 hint = (item.get("city") or gemini_city_hint or "").strip()
                 by_city.setdefault(hint, []).append(item["name"])
 
+            # Her grubun sınırı ARAMADAN ÖNCE çözülüyor. Bu, "önce yanlış bul
+            # sonra düzelt" (_fix_geographic_outliers) sıralamasının yerine
+            # geçiyor — bkz. PlacesService.resolve_region'daki gerekçe.
+            r_regions = _safe_run(
+                "RegionResolve",
+                lambda: {
+                    hint: self.places.resolve_region(
+                        city=hint or None,
+                        country=gemini_region.get("country"),
+                        country_code=gemini_country_code,
+                        # Videonun baskın şehri üst bağlam olarak veriliyor:
+                        # ilçe adları ülke genelinde tekil değil.
+                        parent=gemini_city_hint,
+                    )
+                    for hint in by_city
+                },
+                fallback={},
+            )
+            regions: Dict = r_regions.data or {}
+            degradation_log.append(r_regions)
+
             ner_enriched: List = []
             for hint, names in by_city.items():
+                region  = regions.get(hint) or {}
+                bbox    = region.get("bbox")
+                if not bbox:
+                    # Bölge çözülemedi → kısıtsız ara. Kötü ama hiç aramamaktan
+                    # iyi; sonuçlar aşağıdaki outlier filtresine kalıyor.
+                    logger.warning("⚠️ '%s' için bölge sınırı yok, arama kısıtsız yapılacak",
+                                   hint or "bölgesiz")
                 r_ner_geo = _safe_run(
                     f"Geocoding(NER,{hint or 'bölgesiz'})",
                     # Varsayılan argümanlar geç bağlanmayı (late binding) önlüyor:
                     # lambda döngü bittikten sonra çağrılırsa son grubu değil
                     # kendi grubunu kullansın.
-                    lambda names=names, hint=hint: self.places.enrich_locations(
+                    lambda names=names, hint=hint, bbox=bbox: self.places.enrich_locations(
                         names,
                         use_overpass=True,
+                        city_bbox=bbox,
                         city_hint=hint or None,
                         country_code=gemini_country_code,
                     ),
@@ -616,8 +646,13 @@ class VideoProcessingService:
             ner_enriched: List = r_ner_geo.data
             degradation_log.append(r_ner_geo)
 
-        # City bounding box (Overpass isabetini artırır)
-        city_bbox = self._extract_city_bbox(ner_enriched)
+        # City bounding box (Overpass isabetini artırır).
+        # Çözülmüş bölge sınırı varsa onu kullan — `_extract_city_bbox` ilk
+        # lokasyonun etrafına körlemesine ±2° (~220 km) koyuyor ve o lokasyon
+        # yanlış geocode edilmişse kutu da yanlış yere oturuyor.
+        primary_region = next((r for r in (regions or {}).values() if r and r.get("bbox")), None) \
+            if self._use_gemini else None
+        city_bbox = (primary_region or {}).get("bbox") or self._extract_city_bbox(ner_enriched)
         # City hint: "Nohut Durumu Gaziantep" gibi qualifier aramaları için
         city_hint = self._extract_city_hint(ner_enriched)
         if city_hint:
@@ -645,16 +680,27 @@ class VideoProcessingService:
             enriched_names = {
                 e["original_name"].lower().strip() for e in ner_enriched
             }
-            # NOT: buradaki fallback'e bilerek ner_enriched[0] atanmıyor. Sıradaki ilk
-            # eleman şehir/kasaba olmayabilir (örn. bir ülke adı veya yanlış geocode
-            # edilmiş bir POI) — o zaman gerçekte alakasız bir koordinata pin basmak
-            # yerine, bu lokasyonu tamamen atlıyoruz (aşağıdaki `if city_coords:` kontrolü).
+            # Yaklaşık pin için ŞEHİR MERKEZİ tercih ediliyor, bölge merkezi
+            # değil. `primary_region` artık idari sınırdan geliyor (arama
+            # kutusunu geniş tutmak için, bkz. prefer_area) ve onun merkezi
+            # ilin coğrafi ağırlık noktası — Gaziantep'te şehrin 11 km
+            # güneyine düşüyor. Kullanıcıya "yaklaşık" bir pin gösterecekse
+            # en makul nokta şehrin kendisi.
+            #
+            # NOT: bilerek ner_enriched[0] alınmıyor. Sıradaki ilk eleman şehir
+            # olmayabilir (örn. ülke adı veya yanlış geocode edilmiş bir POI) —
+            # o zaman alakasız bir koordinata pin basmak yerine bu lokasyonu
+            # tamamen atlıyoruz (aşağıdaki `if city_coords:`).
             city_entry = next(
                 (e for e in ner_enriched
                  if (e.get("place_data") or {}).get("type") in ("city", "town", "administrative")),
                 None,
             )
             city_coords = (city_entry or {}).get("place_data", {}).get("location") if city_entry else None
+
+            if not city_coords and primary_region and primary_region.get("center"):
+                r_lat, r_lng = primary_region["center"]
+                city_coords = {"lat": r_lat, "lng": r_lng}
             fallback_city = gemini_city_hint or city_hint or ""
 
             approximate = 0
@@ -1071,7 +1117,7 @@ class VideoProcessingService:
                     new_km = _haversine(centroid_lat, centroid_lng, new_lat, new_lng)
                     if new_km <= MAX_OUTLIER_KM:
                         logger.info(
-                            "  ✅ '%s' düzeltildi: %s → %s (%.0fkm)",
+                            "  ✅ '%s' taşındı: %s → %s (%.0fkm)",
                             name, _get_province(loc),
                             (new_place.get("address_details") or {}).get("province", "?"),
                             new_km,
@@ -1081,6 +1127,15 @@ class VideoProcessingService:
                         logger.info("  ⚠️ '%s' yeni sonuç da uzak (%.0fkm) — orijinal korundu", name, new_km)
             else:
                 logger.info("  ⚠️ '%s' yeniden sorgu sonuç vermedi — orijinal korundu", name)
+
+            # Buraya düşen her kayıt şüpheli: ya bölge dışında bir eşleşmeydi ya
+            # da yeniden sorguyla başka bir ile taşındı. İkisi de "gazetteer'da
+            # DOĞRU kaydı bulduk" demek değil — Gaziantep videosunda "Efendioğlu"
+            # bu yolla Osmaniye'deki bir eczaneye bağlanmıştı ve `exact`
+            # görünüyordu. Etiket artık bunu saklamıyor.
+            pd = loc.get("place_data")
+            if pd is not None and not (pd.get("source") or "").startswith("gemini_"):
+                loc = {**loc, "place_data": {**pd, "precision": "uncertain"}}
 
             result.append(loc)
 

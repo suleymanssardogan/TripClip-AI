@@ -128,7 +128,7 @@ class LocationDeduplicator:
         deduplicated = []
         seen_coords = []
         seen_names = set()
-        seen_stems = []   # (stem, lat, lng) — kök eşleşmesi mesafeyle birlikte aranıyor
+        seen_stems = []   # (stem, lat, lng, approx) — kök eşleşmesi mesafeyle birlikte aranıyor
 
         # Sort by importance (if available)
         sorted_locations = sorted(
@@ -175,10 +175,27 @@ class LocationDeduplicator:
             # farklı. Yalnızca gerçekten aynı adın iki yazımı yakalanıyor.
             stem_key = place_name_stem(location.get('original_name'))
 
+            # Konumu "yaklaşık" olan kayıtta koordinat mekanı temsil etmiyor —
+            # gazetteer ismi bulamadığı için oraya şehir merkezi konmuş. Böyle
+            # bir kayıt mesafe testine sokulamaz: "Kleopatra Plajı" (yaklaşık,
+            # Antalya merkezi) ile "Kleopatra Plaj" (çözülmüş, 120 km ötede)
+            # aynı mekan olduğu hâlde mesafe yüzünden ayrı duraklar olarak
+            # listeleniyordu. Taraflardan biri yaklaşıksa kök eşleşmesi tek
+            # başına yeter; liste importance'a göre sıralı olduğu için elenen
+            # her zaman yaklaşık olan olur.
+            is_approx = place_data.get("precision") == "approximate"
+
             if not is_duplicate and stem_key:
-                for seen_stem, seen_lat, seen_lng in seen_stems:
+                for seen_stem, seen_lat, seen_lng, seen_approx in seen_stems:
                     if seen_stem != stem_key:
                         continue
+                    if is_approx or seen_approx:
+                        logger.info(
+                            f"Duplicate found: {location.get('original_name')} "
+                            f"(stem match: '{stem_key}', yaklaşık konum — mesafe aranmadı)"
+                        )
+                        is_duplicate = True
+                        break
                     distance = self.calculate_distance(lat, lng, seen_lat, seen_lng)
                     if distance < self.STEM_MATCH_RADIUS_KM:
                         logger.info(
@@ -228,7 +245,7 @@ class LocationDeduplicator:
                 if name_key:
                     seen_names.add(name_key)
                 if stem_key:
-                    seen_stems.append((stem_key, lat, lng))
+                    seen_stems.append((stem_key, lat, lng, is_approx))
 
         logger.info(f"✅ Deduplication: {len(enriched_locations)} → {len(deduplicated)} locations")
         return deduplicated

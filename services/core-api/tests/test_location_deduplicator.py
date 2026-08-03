@@ -285,3 +285,39 @@ def test_ic_ice_mekanlar_kok_farkliysa_korunur():
     ]
     result = LocationDeduplicator(distance_threshold_km=0.001).deduplicate_locations(locs)
     assert len(result) == 2
+
+
+# ─── Yaklaşık konumlu kayıtlar: kök eşleşmesinde mesafe aranmaz ────────────────
+#
+# antalya videosu: "Kleopatra Plaj" gazetteer'dan çözüldü, "Kleopatra Plajı"
+# çözülemeyip Antalya merkezine yaklaşık olarak kondu. İkisi 120 km arayla
+# göründüğü için mesafe testi kök eşleşmesini bloke ediyor, aynı mekan iki ayrı
+# durak olarak listeleniyordu.
+
+def _loc(name, lat, lng, importance=0.5, precision="exact", source=None):
+    place = {"name": name, "location": {"lat": lat, "lng": lng},
+             "importance": importance, "precision": precision}
+    if source:
+        place["source"] = source
+    return {"original_name": name, "place_data": place}
+
+
+def test_approximate_entry_merges_with_resolved_stem_match_regardless_of_distance():
+    dedup = LocationDeduplicator(distance_threshold_km=0.001)
+    result = dedup.deduplicate_locations([
+        _loc("Kleopatra Plaj", 36.4797, 30.5167, importance=0.5),
+        _loc("Kleopatra Plajı", 36.8866, 30.7030, importance=0.08,
+             precision="approximate", source="gemini_unresolved"),
+    ])
+    assert [l["original_name"] for l in result] == ["Kleopatra Plaj"]
+
+
+def test_two_resolved_places_with_same_stem_but_far_apart_stay_separate():
+    # Mesafe muafiyeti YALNIZCA yaklaşık kayıtlar için. İki gerçek gazetteer
+    # kaydı aynı köke sahip olsa da farklı ilçelerdeyse ayrı mekanlardır.
+    dedup = LocationDeduplicator(distance_threshold_km=0.001)
+    result = dedup.deduplicate_locations([
+        _loc("Merkez Plajı", 36.20, 29.64),
+        _loc("Merkez Plaj", 36.88, 30.70),
+    ])
+    assert len(result) == 2

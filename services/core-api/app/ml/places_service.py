@@ -231,7 +231,8 @@ class PlacesService:
     def search_place(self, location_name: str, country: str = "Turkey",
                      city_bbox: Optional[Tuple] = None,
                      city_hint: Optional[str] = None,
-                     country_code: Optional[str] = None) -> Optional[Dict]:
+                     country_code: Optional[str] = None,
+                     prefer_area: bool = False) -> Optional[Dict]:
         """
         Nominatim ile yer ara.
         city_bbox verilirse Nominatim'in viewbox/bounded özelliği devreye girer:
@@ -252,7 +253,11 @@ class PlacesService:
         bbox_suffix = f"|{city_bbox}" if city_bbox else ""
         hint_suffix = f"|{city_hint}" if city_hint else ""
         cc_suffix = f"|{country_code}" if country_code else ""
-        key = self._cache_key("nom", location_name + bbox_suffix + hint_suffix + cc_suffix)
+        area_suffix = "|area" if prefer_area else ""
+        # Prefix "nom2": dönen kayda `boundingbox` eklendi. Eski "nom" kayıtları
+        # bu alanı içermiyor ve resolve_region onlarla bölge sınırı çıkaramıyor;
+        # anahtarı değiştirmek 7 günlük TTL'i beklemeden temiz başlangıç veriyor.
+        key = self._cache_key("nom2", location_name + bbox_suffix + hint_suffix + cc_suffix + area_suffix)
         cached = self._cache_get(key)
         if cached:
             if cached.get("__not_found__"):
@@ -303,6 +308,16 @@ class PlacesService:
                 center_lat = (city_bbox[0] + city_bbox[2]) / 2
                 center_lng = (city_bbox[1] + city_bbox[3]) / 2
 
+            # prefer_area: bölge sorgusunda adı eşleşen EN GENİŞ alan seçilir.
+            #
+            # Varsayılan puanlama importance'a bakıyor ve "Antalya" sorgusunda
+            # ŞEHİR (imp 0.659, 0.32° kutu) İL SINIRINI (imp 0.610, 1.53° kutu)
+            # yeniyordu. Şehir kutusundan türetilen bölge sınırı Alanya'yı ve
+            # Gazipaşa'yı dışarıda bırakıyor, oysa ikisi de Antalya'da — o
+            # mekanlar "bölge dışı" sanılıp eleniyordu. Bölge sorgusunda
+            # istediğimiz şey tam olarak en geniş idari alan.
+            query_core = self.ascii_fold(self.tr_lower(location_name.split(",")[0].strip()))
+
             for p in results:
                 try:
                     lat_val = float(p.get("lat", 0))
@@ -311,7 +326,34 @@ class PlacesService:
                     continue
 
                 importance = float(p.get("importance", 0) or 0)
-                
+
+                if prefer_area:
+                    # Ad eşleşmesi şart: "Alanya" sorgusu Nominatim'de bulanık
+                    # eşleşmeyle "Antalya"yı da döndürebiliyor; alan ölçütü tek
+                    # başına o zaman yanlış (ve çok geniş) bölgeyi seçerdi.
+                    #
+                    # Eşleşme KADEMELİ, çünkü düz "içeriyor" testi de yetmiyor:
+                    # "Kemer" sorgusunda Muğla'daki SEYDİKEMER ilçesi hem adı
+                    # içeriyor hem daha genişti, seçildi ve Antalya/Kemer'deki
+                    # Göynük Kanyonu bu kutunun dışında kalıp çözülemedi.
+                    # Tam eşleşme her zaman kısmi eşleşmeyi yener.
+                    first_seg = self.ascii_fold(
+                        self.tr_lower((p.get("display_name") or "").split(",")[0].strip())
+                    )
+                    if query_core and first_seg == query_core:
+                        match_rank = 2
+                    elif query_core and (query_core in first_seg or first_seg in query_core):
+                        match_rank = 1
+                    else:
+                        match_rank = 0
+                    rb = self._bbox_from_nominatim(p.get("boundingbox"))
+                    area = (rb[2] - rb[0]) * (rb[3] - rb[1]) if rb else 0.0
+                    score = (match_rank, area, importance)
+                    if score > best_score:
+                        best_score = score
+                        best_place = p
+                    continue
+
                 # 1. İl/şehir eşleşmesi (city_hint ile)
                 prov_match = 0
                 if city_hint:
@@ -355,6 +397,10 @@ class PlacesService:
                 "class":           place.get("class"),
                 "importance":      place.get("importance"),
                 "address_details": place.get("address", {}),
+                # Nominatim'in sınır kutusu: ["lat_min","lat_max","lon_min","lon_max"].
+                # Bir bölge (şehir/il/ülke) çözülürken bu kutu sonraki aramaları
+                # sınırlamak için kullanılıyor — bkz. resolve_region.
+                "boundingbox":     place.get("boundingbox"),
             }
             self._cache_set(key, data)
             return data
@@ -362,6 +408,116 @@ class PlacesService:
         except Exception as e:
             logger.error(f"Nominatim error for '{location_name}': {e}")
             return None
+
+    # ─────────────────────────────────────────────────────────────
+    # Bölge çözümleme — aramadan ÖNCE
+    # ─────────────────────────────────────────────────────────────
+    #
+    # Eskiden sıralama şöyleydi: önce mekanları bölgesiz ara, sonra baskın ili
+    # tespit edip uzak düşenleri düzelt (_fix_geographic_outliers). Yani önce
+    # yanlış cevabı üret, sonra tamir et. Bu sıralamanın iki kusuru var:
+    #
+    #   1. Tamir her zaman mümkün değil. "Efendioğlu" bölgesiz arandığında
+    #      Tekirdağ'ı buldu; düzeltme Osmaniye'deki bir ECZANEYE çekti (100 km)
+    #      ve 180 km penceresine girdiği için kabul edildi. Gaziantep sınırı
+    #      baştan verilseydi ikisi de hiç dönmezdi.
+    #   2. "Baskın il" tek bir değer — çok şehirli bir gezide ikinci şehrin
+    #      mekanları outlier sanılıp birinciye çekiliyor.
+    #
+    # Artık bölge aramadan önce çözülüyor ve Nominatim'e viewbox+bounded olarak
+    # veriliyor. Her şehir grubu KENDİ sınırını alıyor (bkz. video_processor),
+    # yani çok şehirli video doğal olarak destekleniyor.
+
+    # Sınır kutusu payı: POI'ler idari sınırın hemen dışında kalabiliyor
+    # (sahil, havalimanı, il sınırındaki köy).
+    REGION_BBOX_PAD_DEG = 0.25          # ~28 km
+    # Asgari yarı-genişlik. Nominatim bir şehri NOKTA olarak döndürdüğünde
+    # boundingbox neredeyse sıfır olur; pay eklenmezse hiçbir mekan içine
+    # girmez ve bölge kısıtı tüm aramaları öldürür.
+    REGION_BBOX_MIN_HALF_DEG = 1.0      # ~111 km
+
+    @staticmethod
+    def _bbox_from_nominatim(raw) -> Optional[Tuple[float, float, float, float]]:
+        """Nominatim ["lat_min","lat_max","lon_min","lon_max"] → bizim
+        (lat_min, lon_min, lat_max, lon_max) sıramıza çevirir."""
+        if not raw or len(raw) != 4:
+            return None
+        try:
+            lat_min, lat_max, lon_min, lon_max = (float(v) for v in raw)
+        except (TypeError, ValueError):
+            return None
+        return (lat_min, lon_min, lat_max, lon_max)
+
+    def resolve_region(self, city: Optional[str] = None,
+                       country: Optional[str] = None,
+                       country_code: Optional[str] = None,
+                       parent: Optional[str] = None) -> Optional[Dict]:
+        """
+        Bölge adını (şehir ve/veya ülke) sınır kutusuna çevirir.
+
+        parent: üst bölge (videonun baskın şehri/ili). İlçe adları ülke
+        genelinde tekil değil — "Kemer" hem Antalya'da hem Muğla'da (Seydikemer)
+        var ve yanlışını seçmek o ilçedeki tüm mekanları çözümsüz bırakıyor.
+        Sorguya üst bölgeyi eklemek Nominatim'in doğru olanı öne almasını sağlar.
+
+        Döndürür: {"name", "center": (lat, lng), "bbox": (lat_min, lon_min, lat_max, lon_max)}
+        Çözülemezse None — çağıran o zaman bölgesiz aramaya devam eder
+        (kısıtsız arama kötü ama hiç sonuç almamaktan iyi).
+        """
+        if parent and city and self.ascii_fold(self.tr_lower(parent)) == \
+                self.ascii_fold(self.tr_lower(city)):
+            parent = None   # "Antalya, Antalya, Türkiye" anlamsız
+        query = ", ".join(p for p in (city, parent, country) if p)
+        if not query:
+            return None
+
+        data = self.search_place(query, country_code=country_code, prefer_area=True)
+        if not data:
+            logger.info("🌍 Bölge çözülemedi: '%s'", query)
+            return None
+
+        loc = data.get("location") or {}
+        lat, lng = loc.get("lat"), loc.get("lng")
+        if lat is None or lng is None:
+            return None
+
+        bbox = self._bbox_from_nominatim(data.get("boundingbox"))
+        if bbox:
+            lat_min, lon_min, lat_max, lon_max = bbox
+        else:
+            lat_min = lat_max = lat
+            lon_min = lon_max = lng
+
+        pad       = self.REGION_BBOX_PAD_DEG
+        min_half  = self.REGION_BBOX_MIN_HALF_DEG
+        lat_min, lat_max = lat_min - pad, lat_max + pad
+        lon_min, lon_max = lon_min - pad, lon_max + pad
+        # Kutu merkez etrafında min_half'tan darsa genişlet.
+        lat_min = min(lat_min, lat - min_half)
+        lat_max = max(lat_max, lat + min_half)
+        lon_min = min(lon_min, lng - min_half)
+        lon_max = max(lon_max, lng + min_half)
+
+        region = {
+            "name":   data.get("name") or query,
+            "center": (lat, lng),
+            "bbox":   (lat_min, lon_min, lat_max, lon_max),
+        }
+        logger.info("🌍 Bölge çözüldü: '%s' → merkez=(%.3f, %.3f) sınır=(%.2f,%.2f)-(%.2f,%.2f)",
+                    query, lat, lng, lat_min, lon_min, lat_max, lon_max)
+        return region
+
+    @staticmethod
+    def _within_bbox(place_data: Dict, bbox: Optional[Tuple]) -> bool:
+        """Bulunan yer sınır kutusunun içinde mi? bbox yoksa her zaman True."""
+        if not bbox:
+            return True
+        loc = place_data.get("location") or {}
+        lat, lng = loc.get("lat"), loc.get("lng")
+        if lat is None or lng is None:
+            return True
+        lat_min, lon_min, lat_max, lon_max = bbox
+        return lat_min <= lat <= lat_max and lon_min <= lng <= lon_max
 
     # ─────────────────────────────────────────────────────────────
     # Overpass — kafe / restoran / işletme araması
@@ -728,18 +884,25 @@ out center 3;
                 location = restored
 
             # ── 1. Nominatim — önce bbox'lı ara (yanlış şehir engeli)
-            # Bbox boş dönerse unbounded tekrar dene + _within_city_area ile validate et.
-            # use_overpass=True olan çağrılarda (OCR/POI yolu) bu unbounded retry
-            # atlanır — adım 2'deki Overpass zaten bbox içinde işletme/POI arayacak,
-            # ekstra bir throttled Nominatim çağrısı harcamaya değmez. NER yolunda
-            # (use_overpass=False, Overpass hiç denenmez) unbounded retry tek fallback
-            # olduğu için korunur.
+            #
+            # Bbox boş dönerse kısıtsız tekrar denenir, ama sonuç sınır kutusuyla
+            # DOĞRULANIR. Bu doğrulama eskiden 180 km'lik bir daireydi
+            # (_within_city_area) ve Gaziantep videosunda Osmaniye'deki bir
+            # eczaneyi (100 km) kabul ediyordu. Gerçek bölge sınırı artık
+            # elimizde olduğuna göre daireye gerek yok.
+            #
+            # Kısıtsız deneme eskiden use_overpass=True yolunda atlanıyordu
+            # ("Overpass zaten bbox içinde arar"). Artık atlanmıyor: bölge kısıtı
+            # devreye girdiği için bounded arama daha sık boş dönüyor ve Overpass
+            # devresi çoğu zaman açık (community endpoint'ler timeout veriyor).
             place_data = self.search_place(location, city_bbox=city_bbox, city_hint=city_hint, country_code=country_code)
-            if not place_data and city_bbox and not use_overpass:
-                place_data = self.search_place(location, city_bbox=None, city_hint=city_hint, country_code=country_code)
-                if place_data and not self._within_city_area(place_data, city_center):
-                    logger.info(f"🚫 Unbounded fallback yanlış şehir, atlandı: '{location}'")
-                    place_data = None
+            if not place_data and city_bbox:
+                retry = self.search_place(location, city_bbox=None, city_hint=city_hint, country_code=country_code)
+                if retry and self._within_bbox(retry, city_bbox):
+                    place_data = retry
+                elif retry:
+                    logger.info(f"🚫 Kısıtsız arama bölge dışında, atlandı: '{location}' → "
+                                f"{(retry.get('address_details') or {}).get('province', '?')}")
 
             if place_data:
                 osm_class  = place_data.get("class", "")
@@ -809,7 +972,10 @@ out center 3;
             if city_hint and len(location.split()) >= 2:
                 city_qualified = f"{location} {city_hint}"
                 cq_data = self.search_place(city_qualified, city_bbox=None, city_hint=city_hint, country_code=country_code)
-                if cq_data and self._within_city_area(cq_data, city_center):
+                # Bölge sınırı varsa onunla, yoksa eski 180 km daire ile doğrula.
+                in_region = (self._within_bbox(cq_data, city_bbox) if city_bbox
+                             else self._within_city_area(cq_data, city_center)) if cq_data else False
+                if in_region:
                     logger.info(f"🏙️ Şehir qualifier ile bulundu: '{city_qualified}'")
                     cq_data["category"] = self._categorize(
                         cq_data.get("class", ""), cq_data.get("type", "")
