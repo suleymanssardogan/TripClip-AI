@@ -63,7 +63,8 @@ def test_sample_frames_caps_at_n_when_over_limit(service):
 # ─── extract_locations — idempotency cache ────────────────────────────────────
 
 def test_extract_locations_returns_cached_result_without_calling_api(service):
-    cached = [{"name": "Cached Yer", "lat": None, "lng": None, "type": "place"}]
+    cached = {"region": {"city": "Antalya", "country": "Türkiye", "country_code": "tr"},
+              "locations": [{"name": "Cached Yer", "type": "place", "city": "Antalya"}]}
     with mock.patch.object(service, "_cache_get", return_value=cached), \
          mock.patch.object(service, "_call") as mock_call:
         result = service.extract_locations(frames=[], transcript="", video_id=42)
@@ -72,12 +73,13 @@ def test_extract_locations_returns_cached_result_without_calling_api(service):
     mock_call.assert_not_called()
 
 
-def test_extract_locations_filters_invalid_names_and_coerces_coords(service):
+def test_extract_locations_parses_region_and_filters_invalid_names(service):
     raw_response = (
-        '{"locations": ['
-        '{"name": "Kaputaş Plajı", "lat": "36.19", "lng": "29.69", "type": "beach"}, '
-        '{"name": "ab", "lat": null, "lng": null, "type": "place"}, '
-        '{"name": "Bişirici Kebap", "lat": "bozuk", "lng": null, "type": "restaurant"}'
+        '{"region": {"city": "Gaziantep", "country": "Türkiye", "country_code": "TR"}, '
+        '"locations": ['
+        '{"name": "Metanet Lokantası", "type": "restaurant", "city": "Gaziantep"}, '
+        '{"name": "ab", "type": "place"}, '
+        '{"name": "Elmacı Pazarı", "type": "market"}'
         ']}'
     )
     with mock.patch.object(service, "_call", return_value=raw_response), \
@@ -85,18 +87,54 @@ def test_extract_locations_filters_invalid_names_and_coerces_coords(service):
          mock.patch.object(service, "_cache_set") as mock_cache_set:
         result = service.extract_locations(frames=[], transcript="", video_id=1)
 
-    names = [loc["name"] for loc in result]
-    assert "Kaputaş Plajı" in names
-    assert "Bişirici Kebap" in names
+    names = [loc["name"] for loc in result["locations"]]
+    assert "Metanet Lokantası" in names
+    assert "Elmacı Pazarı" in names
     assert "ab" not in names  # 2 karakter → 3-80 aralığı dışında, filtrelenmeli
 
-    kaputas = next(loc for loc in result if loc["name"] == "Kaputaş Plajı")
-    assert kaputas["lat"] == pytest.approx(36.19)  # string → float coerce edilmeli
+    assert result["region"]["city"] == "Gaziantep"
+    assert result["region"]["country_code"] == "tr"   # normalize edilmeli
 
-    bisirici = next(loc for loc in result if loc["name"] == "Bişirici Kebap")
-    assert bisirici["lat"] is None  # parse edilemeyen koordinat → None'a düşmeli, hata fırlatmamalı
+    # Şehri verilmeyen mekan None ile gelir — çağıran o zaman region.city'ye düşer.
+    elmaci = next(l for l in result["locations"] if l["name"] == "Elmacı Pazarı")
+    assert elmaci["city"] is None
 
     mock_cache_set.assert_called_once()
+
+
+# ─── normalize_extraction ─────────────────────────────────────────────────────
+#
+# Gemini'nin koordinatları güvenilmezdi (Şanlıurfa ~79 km sapma, beş mekan tek
+# nokta), o yüzden artık koordinat İSTEMİYORUZ. Model yine de gönderirse
+# yutulmalı — konumu çözmek gazetteer'ın işi.
+
+def test_normalize_extraction_drops_model_supplied_coordinates(service):
+    result = service.normalize_extraction(
+        {"locations": [{"name": "Balıklıgöl", "lat": 37.15, "lng": 38.79, "type": "lake"}]}
+    )
+    assert result["locations"] == [{"name": "Balıklıgöl", "type": "lake", "city": None}]
+
+
+def test_normalize_extraction_accepts_bare_string_list(service):
+    # _line_fallback (JSON parse kurtarma yolu) düz string listesi üretir.
+    result = service.normalize_extraction(["Göbeklitepe", "ab", "Balıklıgöl"])
+    assert [l["name"] for l in result["locations"]] == ["Göbeklitepe", "Balıklıgöl"]
+    assert result["region"] == {"city": None, "country": None, "country_code": None}
+
+
+def test_normalize_extraction_rejects_malformed_country_code(service):
+    # Nominatim countrycodes yalnızca ISO alpha-2 kabul eder; "Türkiye" ya da
+    # "TUR" gönderilirse arama sıfır sonuç döndürür — sessizce düşürülmeli.
+    for bad in ("Türkiye", "TUR", "t1", ""):
+        result = service.normalize_extraction({"region": {"country_code": bad}, "locations": []})
+        assert result["region"]["country_code"] is None, bad
+
+
+def test_normalize_extraction_handles_garbage_input(service):
+    for junk in (None, "düz metin", 42, {"locations": "liste değil"}):
+        result = service.normalize_extraction(junk)
+        assert result == {"region": {"city": None, "country": None, "country_code": None},
+                          "locations": []}
 
 
 # ─── Ağ hatalarında sessizce boş dönmek yerine fırlatma ────────────────────────

@@ -188,24 +188,25 @@ class LocationDeduplicator:
                         is_duplicate = True
                         break
 
-            # ── 3) Mesafe — Gemini kaynaklı kayıtlarda UYGULANMAZ ────────────
+            # ── 3) Mesafe — koordinatı ANLAMSIZ olan kayıtlarda UYGULANMAZ ──
             #
-            # Gemini farklı isim döndürdüyse farklı mekandır; koordinatın aynı
-            # olması bunu çürütmez. İki ayrı sebeple aynı koordinat çıkıyor:
+            # `gemini_` önekli kaynaklarda koordinat mekanı temsil etmiyor:
             #
-            #   1. Mekanlar gerçekten iç içe. "Güllüoğlu Baklava" ile "Elmacı
-            #      Pazarı" aynı noktada, çünkü Güllüoğlu çarşının İÇİNDE.
-            #      Gezgin için ikisi ayrı durak; birleştirmek bilgi kaybı.
-            #   2. Gemini bilmediği küçük mekana şehir merkezini veriyor. urfa
-            #      videosunda Ciğerci Aziz Usta, Safi Künefe ve Gümrük Hanı
-            #      aynı koordinatı alıp üçü birden silinmişti.
+            #   · gemini_unresolved — coğrafi veritabanı ismi bulamadı, kayda
+            #     şehir merkezi konuldu ve "yaklaşık" işaretlendi. Böyle bir
+            #     videoda onlarca mekan AYNI noktayı paylaşır; mesafe kontrolü
+            #     hepsini tek mekana indirirdi. urfa videosunda tam bu oldu:
+            #     Ciğerci Aziz Usta, Safi Künefe ve Gümrük Hanı birlikte silindi.
             #
-            # Mesafe hiçbir eşikte bu ikisini ayırt edemez — iç içe mekan normal
-            # bir durum. Yukarıdaki ad ve kök eşleşmeleri bu kayıtlarda çalışmaya
-            # devam ediyor, gerçek tekrarları onlar yakalıyor.
+            # Ayrıca iç içe mekanlar için mesafe hiçbir eşikte doğru cevabı
+            # veremez: "Güllüoğlu Baklava" Elmacı Pazarı'nın İÇİNDE, yani aynı
+            # noktada — ama gezgin için iki ayrı durak.
             #
-            # Nominatim kayıtlarında mesafe korunuyor: orada aynı mekan farklı
-            # yazımlarla iki kez dönebiliyor ve koordinat ayırt edici.
+            # Bu kayıtlarda ad ve kök eşleşmesi (1 ve 2) çalışmaya devam ediyor;
+            # gerçek tekrarları onlar yakalıyor.
+            #
+            # Gazetteer kaynaklı kayıtlarda (Nominatim/Overpass) mesafe
+            # korunuyor: orada koordinat gerçek ve ayırt edici.
             source = place_data.get("source") or ""
             trust_name_only = source.startswith("gemini_")
 

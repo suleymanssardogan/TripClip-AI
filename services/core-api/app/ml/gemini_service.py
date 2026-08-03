@@ -27,25 +27,58 @@ logger = logging.getLogger(__name__)
 MAX_FRAMES = 10   # Gemini'ye gönderilecek max frame sayısı
 API_BASE   = "https://generativelanguage.googleapis.com/v1beta/models"
 
+# extract_locations çıktı sözleşmesinin sürümü. Sözleşme değişince ARTIR —
+# cache anahtarlarına girdiği için eski formattaki kayıtlar okunmaz.
+#   v1: {"name", "lat", "lng", "type"} listesi
+#   v2: {"region": {...}, "locations": [{"name", "type", "city"}]} — koordinat yok
+_EXTRACTION_SCHEMA_VERSION = 2
+
 # ─────────────────────────────────────────────────────────────
 # Structured output şemaları (Gemini responseSchema — JSON mode)
 # ─────────────────────────────────────────────────────────────
+
+# Gemini'den KOORDİNAT İSTENMİYOR — bilerek.
+#
+# Ölçülen: model yer adlarını çıkarmakta iyi ama konumlarını bilmiyor.
+#   · Şanlıurfa'ya ~79 km batıda bir nokta verdi
+#   · urfa videosunda beş ayrı mekana AYNI koordinatı verdi (Ciğerci Aziz Usta,
+#     Safi Künefe, Gümrük Hanı…) — hepsi şehir merkeziydi
+# Bu koordinatlar `gemini_coords` kaynağıyla doğrudan plana giriyordu, yani
+# kullanıcı uydurma bir noktaya yönlendiriliyordu.
+#
+# Yeni sözleşme: Gemini SADECE metin üretir (ad + tür + hangi şehirde).
+# Konumu coğrafi veritabanı (Nominatim/Overpass) çözer. Model, aramayı
+# yönlendirecek bölge bilgisini verir — bu onun gerçekten bildiği şey.
 _LOCATIONS_SCHEMA = {
     "type": "OBJECT",
     "properties": {
+        # Videonun geçtiği bölge — geocoding'i doğru ülkeye/şehre kilitler.
+        # Eskiden bu bilgi Türkiye şehirlerinden oluşan HARDCODE bir listeyle
+        # tahmin ediliyordu (video_processor._detect_city_from_list); dünyanın
+        # herhangi bir yerinden gelen bir Reels'te o liste hiçbir işe yaramıyordu.
+        "region": {
+            "type": "OBJECT",
+            "properties": {
+                "city":         {"type": "STRING", "nullable": True},
+                "country":      {"type": "STRING", "nullable": True},
+                "country_code": {"type": "STRING", "nullable": True},
+            },
+        },
         "locations": {
             "type": "ARRAY",
             "items": {
                 "type": "OBJECT",
                 "properties": {
                     "name": {"type": "STRING"},
-                    "lat":  {"type": "NUMBER", "nullable": True},
-                    "lng":  {"type": "NUMBER", "nullable": True},
                     "type": {"type": "STRING"},
+                    # Mekanın bulunduğu şehir/ilçe. Tek videoda birden fazla
+                    # şehir gezilebiliyor, o yüzden region.city'ye ek olarak
+                    # mekan bazında da soruluyor.
+                    "city": {"type": "STRING", "nullable": True},
                 },
                 "required": ["name"],
             },
-        }
+        },
     },
     "required": ["locations"],
 }
@@ -266,6 +299,70 @@ class GeminiService:
         raise json.JSONDecodeError("Gemini yanıtı parse edilemedi", text, 0)
 
     # ─────────────────────────────────────────────────────────────
+    # Çıktı normalizasyonu
+    # ─────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def normalize_extraction(data) -> Dict:
+        """
+        Ham Gemini çıktısını (veya cache'ten okunan eski bir kaydı) tek bir
+        sözleşmeye indirger:
+
+            {"region": {"city", "country", "country_code"},
+             "locations": [{"name", "type", "city"}]}
+
+        Kabul ettiği girdiler:
+          · yeni format (dict, region + locations)
+          · v1 format (koordinatlı dict listesi) — lat/lng ATILIR
+          · düz string listesi (_line_fallback çıktısı)
+
+        Doğrulama tek noktada toplandı: responseSchema ihlal edilse veya
+        parse kurtarma yollarından biri devreye girse bile pipeline'a her
+        zaman aynı şekil geliyor.
+        """
+        if isinstance(data, list):
+            data = {"locations": data}
+        if not isinstance(data, dict):
+            data = {}
+
+        raw_region = data.get("region")
+        if not isinstance(raw_region, dict):
+            raw_region = {}
+
+        def _clean(value, max_len: int = 80) -> Optional[str]:
+            if not isinstance(value, str):
+                return None
+            value = value.strip()
+            return value if 0 < len(value) <= max_len else None
+
+        # ISO 3166-1 alpha-2 bekliyoruz; Nominatim'in countrycodes parametresi
+        # başka bir şey kabul etmiyor, uydurma bir değer tüm aramaları boşa
+        # düşürürdü.
+        country_code = _clean(raw_region.get("country_code"), max_len=2)
+        region = {
+            "city":         _clean(raw_region.get("city")),
+            "country":      _clean(raw_region.get("country")),
+            "country_code": country_code.lower() if country_code and country_code.isalpha() else None,
+        }
+
+        locations: List[Dict] = []
+        for item in data.get("locations") or []:
+            if isinstance(item, str):
+                item = {"name": item}
+            if not isinstance(item, dict):
+                continue
+            name = _clean(item.get("name"))
+            if not name or len(name) < 3:
+                continue
+            locations.append({
+                "name": name,
+                "type": _clean(item.get("type")) or "place",
+                "city": _clean(item.get("city")),
+            })
+
+        return {"region": region, "locations": locations}
+
+    # ─────────────────────────────────────────────────────────────
     # Lokasyon çıkarma
     # ─────────────────────────────────────────────────────────────
 
@@ -275,28 +372,35 @@ class GeminiService:
         transcript: str = "",
         video_id: Optional[int] = None,
         ocr_texts: Optional[List[str]] = None,
-    ) -> List[Dict]:
+    ) -> Dict:
         """
-        Video frame'leri + ses transkripsiyonundan yer adlarını + koordinatlarını çıkar.
+        Video frame'leri + ses transkripsiyonundan yer ADLARINI çıkar.
+
+        KOORDİNAT DÖNDÜRMEZ (bkz. _LOCATIONS_SCHEMA'daki gerekçe). Bu aşama
+        pipeline'ın "çıkarma" adımı; "çözümleme" adımı (isim → gerçek konum)
+        PlacesService'in işi.
 
         Döndürür:
-          [
-            {"name": "Kaputaş Plajı", "lat": 36.19, "lng": 29.69, "type": "beach"},
-            {"name": "Bişirici Kebap", "lat": None, "lng": None, "type": "restaurant"},
-            ...
-          ]
-        Koordinat bilinmiyorsa lat/lng = None — uygulama yine de mekanı listeler.
+          {
+            "region": {"city": "Gaziantep", "country": "Türkiye", "country_code": "tr"},
+            "locations": [
+              {"name": "Metanet Lokantası", "type": "restaurant", "city": "Gaziantep"},
+              {"name": "Elmacı Pazarı",     "type": "market",     "city": "Gaziantep"},
+            ],
+          }
 
         video_id verilirse sonuç Redis'e cache'lenir — Celery task retry
         ederse (autoretry_for) aynı video için Gemini'ye tekrar gidip tekrar
         ücretlendirilmez.
         """
-        cache_key = f"gemini:locations:{video_id}" if video_id is not None else None
+        # Cache anahtarına şema sürümü giriyor: sözleşme değiştiğinde eski
+        # (koordinatlı, region'sız) çıktılar okunmasın.
+        cache_key = f"gemini:locations:v{_EXTRACTION_SCHEMA_VERSION}:{video_id}" if video_id is not None else None
         if cache_key:
             cached = self._cache_get(cache_key)
             if cached is not None:
                 logger.info("⚡ Gemini cache hit (locations) video_id=%s", video_id)
-                return cached
+                return self.normalize_extraction(cached)
 
         parts: List[Dict] = []
 
@@ -361,12 +465,19 @@ class GeminiService:
             "kanyon, restoran, kafe, otel, çarşı, pazar, doğal güzellik.\n"
             "Dahil ETME: genel sıfatlar (güzel, harika, muhteşem), "
             "sosyal medya kullanıcı adları, hashtag, emoji.\n\n"
-            "Her mekan için biliyorsan yaklaşık koordinat ver (lat/lng).\n"
-            "Bilmiyorsan null bırak — mekan yine de listeye eklenecek.\n\n"
+            "KOORDİNAT VERME. Konumu ayrı bir coğrafi veritabanı çözecek — "
+            "senden istenen o aramayı besleyecek DOĞRU METİN.\n"
+            "Bu yüzden:\n"
+            "- name: mekanın haritada aranabilecek tam ve doğru adı "
+            "(kısaltma değil, lakap değil).\n"
+            "- city: mekanın bulunduğu şehir/ilçe. Bilmiyorsan null bırak.\n"
+            "- region: videonun geçtiği baskın bölge — şehir, ülke ve ISO "
+            "3166-1 alpha-2 ülke kodu (tr, es, jp, ge…).\n\n"
             "SADECE JSON döndür, başka açıklama yok:\n"
-            '{"locations": ['
-            '{"name": "Yer Adı", "lat": 37.06, "lng": 37.38, "type": "restaurant"}, '
-            '{"name": "Küçük Dükkan", "lat": null, "lng": null, "type": "shop"}'
+            '{"region": {"city": "Gaziantep", "country": "Türkiye", "country_code": "tr"}, '
+            '"locations": ['
+            '{"name": "Metanet Lokantası", "type": "restaurant", "city": "Gaziantep"}, '
+            '{"name": "Elmacı Pazarı", "type": "market", "city": "Gaziantep"}'
             "]}"
             + ocr_section
             + transcript_section
@@ -374,50 +485,22 @@ class GeminiService:
         parts.append({"text": prompt_text})
 
         try:
-            raw  = self._call(parts, timeout=60, response_schema=_LOCATIONS_SCHEMA)
-            data = self._parse_json(raw)
-            raw_locs = data.get("locations", [])
+            raw    = self._call(parts, timeout=60, response_schema=_LOCATIONS_SCHEMA)
+            result = self.normalize_extraction(self._parse_json(raw))
 
-            # Eski format (string listesi) geriye dönük uyumluluk
-            if raw_locs and isinstance(raw_locs[0], str):
-                locs = [
-                    {"name": l.strip(), "lat": None, "lng": None, "type": "place"}
-                    for l in raw_locs if isinstance(l, str) and 3 <= len(l.strip()) <= 80
-                ]
-            else:
-                locs = []
-                for item in raw_locs:
-                    if not isinstance(item, dict):
-                        continue
-                    name = (item.get("name") or "").strip()
-                    if not (3 <= len(name) <= 80):
-                        continue
-                    lat = item.get("lat")
-                    lng = item.get("lng")
-                    # Sayısal doğrulama
-                    try:
-                        lat = float(lat) if lat is not None else None
-                        lng = float(lng) if lng is not None else None
-                    except (TypeError, ValueError):
-                        lat = lng = None
-                    locs.append({
-                        "name": name,
-                        "lat":  lat,
-                        "lng":  lng,
-                        "type": item.get("type", "place"),
-                    })
-
-            names = [l["name"] for l in locs]
-            logger.info("✅ Gemini: %d lokasyon → %s", len(locs), names)
+            names = [l["name"] for l in result["locations"]]
+            logger.info("✅ Gemini: %d lokasyon (bölge: %s) → %s",
+                        len(names), result["region"].get("city") or "?", names)
             if cache_key:
-                self._cache_set(cache_key, locs)
-            return locs
+                self._cache_set(cache_key, result)
+            return result
 
         except json.JSONDecodeError:
             logger.warning("Gemini JSON parse hatası, fallback")
             raw_text = raw if 'raw' in dir() else ""
-            return [{"name": n, "lat": None, "lng": None, "type": "place"}
-                    for n in self._line_fallback(raw_text)]
+            return self.normalize_extraction(
+                {"locations": self._line_fallback(raw_text)}
+            )
         except Exception as e:
             # Burada []  döndürülüp yutulursa video_processor._safe_run bunu
             # "başarılı, 0 lokasyon" ile ayırt edemez ve degradation raporu

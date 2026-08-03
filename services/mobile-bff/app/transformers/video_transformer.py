@@ -88,6 +88,12 @@ def _shape_locations(locs: List[Dict]) -> List[Dict]:
             "latitude":  lat,
             "longitude": lng,
             "importance": place.get("importance", 0.5),
+            # Konum kalitesi: "exact" = coğrafi veritabanından çözüldü,
+            # "approximate" = isim bulunamadı, pin şehir merkezinde.
+            # İstemci bunu kullanıcıya göstermeli — yaklaşık bir pini kesin
+            # sanıp yola çıkmak tatil planında en pahalı hata.
+            # Eski kayıtlarda alan yok; onlar zamanında kesin sayılıyordu.
+            "precision": place.get("precision", "exact"),
         })
     return result
 

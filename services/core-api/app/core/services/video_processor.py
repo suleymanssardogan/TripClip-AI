@@ -83,7 +83,8 @@ _GEMINI_CACHE_TTL = 60 * 60 * 24 * 30   # 30 gün
 # Gemini lokasyon prompt'unun sürümü. Prompt değiştiğinde ARTIRILMALI, yoksa
 # cache eski çıktıyı servis etmeye devam eder (bkz. _gemini_cache_key).
 # v2: ekran yazıları (OCR) prompt'a eklendi + bozuk yazımı düzeltme talimatı.
-_GEMINI_PROMPT_VERSION = 4
+# v5: koordinat istemi kaldırıldı, yerine bölge (region) + mekan başına şehir.
+_GEMINI_PROMPT_VERSION = 5
 
 
 def _video_content_hash(video_path: str) -> Optional[str]:
@@ -109,7 +110,7 @@ def _gemini_cache_key(content_hash: str) -> str:
     return f"gemini:locations:v{_GEMINI_PROMPT_VERSION}:{model}:{content_hash}"
 
 
-def _gemini_cache_get(content_hash: Optional[str]) -> Optional[List[Dict]]:
+def _gemini_cache_get(content_hash: Optional[str]) -> Optional[Dict]:
     if not content_hash:
         return None
     try:
@@ -123,15 +124,16 @@ def _gemini_cache_get(content_hash: Optional[str]) -> Optional[List[Dict]]:
         return None
 
 
-def _gemini_cache_set(content_hash: Optional[str], locations: List[Dict]) -> None:
-    if not content_hash or not locations:
+def _gemini_cache_set(content_hash: Optional[str], extraction: Dict) -> None:
+    # Boş çıkarım cache'lenmez — geçici bir 429'u 30 günlük bir hataya çevirirdi.
+    if not content_hash or not (extraction or {}).get("locations"):
         return
     try:
         client = get_redis()
         if not client:
             return
         client.setex(_gemini_cache_key(content_hash), _GEMINI_CACHE_TTL,
-                     _json.dumps(locations))
+                     _json.dumps(extraction))
     except Exception as exc:
         logger.debug("Gemini cache yazılamadı: %s", exc)
 
@@ -483,14 +485,17 @@ class VideoProcessingService:
                 if r_gemini.success and not r_gemini.fallback_used:
                     _gemini_cache_set(content_hash, r_gemini.data or [])
 
-            # Gemini artık List[Dict] döndürüyor: [{"name":..,"lat":..,"lng":..,"type":..}]
-            gemini_raw: List[Dict] = r_gemini.data or []
-            # Geriye dönük uyumluluk: eski string listesi gelirse dönüştür
-            if gemini_raw and isinstance(gemini_raw[0], str):
-                gemini_raw = [{"name": s, "lat": None, "lng": None, "type": "place"}
-                              for s in gemini_raw]
+            # Gemini artık {"region": {...}, "locations": [{"name","type","city"}]}
+            # döndürüyor — koordinat YOK. normalize_extraction eski formatları
+            # (koordinatlı liste, düz string listesi) da bu şekle indirger.
+            gemini_result = self.gemini.normalize_extraction(r_gemini.data)
+            gemini_region = gemini_result["region"]
+            gemini_raw: List[Dict] = gemini_result["locations"]
             degradation_log.append(r_gemini)
-            logger.info("🤖 Gemini: %d lokasyon", len(gemini_raw))
+            logger.info("🤖 Gemini: %d lokasyon, bölge=%s/%s",
+                        len(gemini_raw),
+                        gemini_region.get("city") or "?",
+                        gemini_region.get("country_code") or "?")
 
             # ── HİBRİT: BERT NER ile transkripti de tara, sonuçları birleştir ──
             if self._use_hybrid and transcript_text:
@@ -510,8 +515,10 @@ class VideoProcessingService:
                 for loc in bert_locations:
                     if loc.lower().strip() not in gemini_names_lc:
                         gemini_raw.append({
-                            "name": loc, "lat": None, "lng": None,
-                            "type": "place", "source": "bert_ner",
+                            "name": loc, "type": "place",
+                            # BERT sadece isim verir; şehri bilmiyoruz →
+                            # çözümleme videonun genel bölgesine düşer.
+                            "city": None, "source": "bert_ner",
                         })
                         added_count += 1
                 if added_count:
@@ -528,6 +535,8 @@ class VideoProcessingService:
             # ── Klasik pipeline: NER (audio) + OCR NER ───────────────────────
             set_progress(video_id, "ner", 55)
             extracted_locations = []
+            gemini_region: Dict = {}
+            gemini_raw: List[Dict] = []
 
             if transcript_text:
                 r_ner = _safe_run(
@@ -550,49 +559,45 @@ class VideoProcessingService:
         # ─────────────────────────────────────────────────────────────────────
         set_progress(video_id, "geocoding", 65)
 
-        # NER lokasyonlarını zenginleştir
-        gemini_city_hint = (
-            self._detect_city_from_list(extracted_locations)
-            if self._use_gemini else None
-        )
-        if gemini_city_hint:
-            logger.info("🏙️ Gemini pre-geocoding city hint: '%s'", gemini_city_hint)
+        # Bölge ipucu artık Gemini'den geliyor. Eskiden `_detect_city_from_list`
+        # ile HARDCODE bir Türkiye şehirleri kümesine bakılıyordu; Barselona ya
+        # da Tiflis'ten gelen bir Reels'te o liste hiçbir zaman eşleşmiyordu ve
+        # geocoding bölgesiz — yani dünya genelinde ilk benzeyen isme — kalıyordu.
+        gemini_city_hint    = gemini_region.get("city")
+        gemini_country_code = gemini_region.get("country_code")
+        if self._use_gemini:
+            logger.info("🌍 Gemini bölge: şehir='%s' ülke='%s' (%s)",
+                        gemini_city_hint or "?",
+                        gemini_region.get("country") or "?",
+                        gemini_country_code or "?")
 
-        # ── Gemini modunda: koordinat gelen mekanları direkt ekle ─────────────
-        # Koordinat gelmeyen mekanlar için Nominatim / city_fallback devreye girer.
+        # ── ÇÖZÜMLEME (resolve): isim → gerçek konum ─────────────────────────
+        #
+        # Gemini artık koordinat vermiyor (bkz. gemini_service._LOCATIONS_SCHEMA).
+        # HER isim coğrafi veritabanından çözülüyor — böylece plandaki her
+        # koordinatın arkasında gerçek bir gazetteer kaydı oluyor.
+        #
+        # Aramalar mekanın kendi şehrine göre gruplanır: tek bir videoda birden
+        # fazla şehir gezilebiliyor ve hepsini tek bir city_hint'e zorlamak
+        # (eski davranış) ikinci şehirdeki mekanları yanlış yere çekiyordu.
         if self._use_gemini and gemini_raw:
-            ner_enriched: List = []
-            nominatim_needed: List[str] = []
-
+            by_city: Dict[str, List[str]] = {}
             for item in gemini_raw:
-                name = item["name"]
-                lat, lng = item.get("lat"), item.get("lng")
-                if lat is not None and lng is not None:
-                    # Gemini koordinat verdi → direkt kullan
-                    ner_enriched.append({
-                        "original_name": name,
-                        "place_data": {
-                            "name":       name,
-                            "address":    name,
-                            "location":   {"lat": lat, "lng": lng},
-                            "type":       item.get("type", "place"),
-                            "class":      "place",
-                            "importance": 0.15,
-                            "source":     "gemini_coords",
-                        },
-                    })
-                    logger.info("📍 Gemini koordinat: '%s' → (%.4f, %.4f)", name, lat, lng)
-                else:
-                    nominatim_needed.append(name)
+                hint = (item.get("city") or gemini_city_hint or "").strip()
+                by_city.setdefault(hint, []).append(item["name"])
 
-            # Koordinatsızlar için Nominatim dene
-            if nominatim_needed:
+            ner_enriched: List = []
+            for hint, names in by_city.items():
                 r_ner_geo = _safe_run(
-                    "Geocoding(NER)",
-                    lambda: self.places.enrich_locations(
-                        nominatim_needed,
+                    f"Geocoding(NER,{hint or 'bölgesiz'})",
+                    # Varsayılan argümanlar geç bağlanmayı (late binding) önlüyor:
+                    # lambda döngü bittikten sonra çağrılırsa son grubu değil
+                    # kendi grubunu kullansın.
+                    lambda names=names, hint=hint: self.places.enrich_locations(
+                        names,
                         use_overpass=True,
-                        city_hint=gemini_city_hint,
+                        city_hint=hint or None,
+                        country_code=gemini_country_code,
                     ),
                     fallback=[],
                 )
@@ -625,9 +630,17 @@ class VideoProcessingService:
         # Vision landmarks → zenginleştirilmiş formata çevir
         vision_enriched = self._convert_vision_landmarks(vision_landmarks)
 
-        # ── Gemini modu: geocode edilemeyen lokasyonları şehir koordinatıyla ekle ──
-        # Nominatim'de olmayan restoranlar/mekanlar için şehir merkezini kullan.
-        # Böylece "7 Mekan" görünür, haritada şehir konumuna pin düşer.
+        # ── ÇÖZÜLEMEYEN MEKANLAR ─────────────────────────────────────────────
+        #
+        # Coğrafi veritabanı bu isimleri bulamadı (Nominatim'in POI kapsamı
+        # zayıf: "Ciğerci Aziz Usta", "Safi Künefe" hiç yok). Mekanı LİSTEDEN
+        # ATMIYORUZ — video gerçekten oradan bahsediyor, kullanıcı görmeli.
+        #
+        # Ama koordinatını da UYDURMUYORUZ. Şehir merkezine düşen pin artık
+        # precision="approximate" ile işaretleniyor ve arayüz bunu kullanıcıya
+        # söyleyebiliyor. Tatil planında sessizce yanlış bir noktaya
+        # yönlendirmek "bulamadım" demekten daha zararlı: kullanıcı 30 km
+        # öteye gidiyor ve hatayı ancak oraya varınca anlıyor.
         if self._use_gemini and extracted_locations:
             enriched_names = {
                 e["original_name"].lower().strip() for e in ner_enriched
@@ -644,9 +657,12 @@ class VideoProcessingService:
             city_coords = (city_entry or {}).get("place_data", {}).get("location") if city_entry else None
             fallback_city = gemini_city_hint or city_hint or ""
 
+            approximate = 0
+            dropped: List[str] = []
+
             for loc in extracted_locations:
                 if loc.lower().strip() in enriched_names:
-                    continue  # zaten geocode edildi
+                    continue  # zaten çözüldü
                 if loc.lower().strip() == fallback_city.lower().strip():
                     continue  # şehrin kendisi, tekrar ekleme
                 if city_coords:
@@ -659,12 +675,38 @@ class VideoProcessingService:
                             "type":       "point_of_interest",
                             "class":      "amenity",
                             "importance": 0.08,
-                            "source":     "gemini_city_fallback",
+                            # `gemini_` öneki dedup'ta "adı güven, koordinatı
+                            # güvenme" kuralını tetikliyor — bu kayıtların hepsi
+                            # AYNI koordinatta olduğu için mesafe kontrolü
+                            # hepsini tek mekana indirirdi.
+                            # Bkz. LocationDeduplicator.deduplicate_locations.
+                            "source":     "gemini_unresolved",
+                            "precision":  "approximate",
                         },
                     })
-                    logger.info("📍 Şehir fallback ile eklendi: '%s' → %s", loc, fallback_city)
+                    approximate += 1
+                    logger.info("📍 Çözülemedi, yaklaşık konum: '%s' → %s merkezi",
+                                loc, fallback_city)
+                else:
+                    dropped.append(loc)
+
+            if approximate:
+                logger.warning(
+                    "⚠️ %d mekan coğrafi veritabanında bulunamadı — "
+                    "şehir merkezi koordinatıyla 'yaklaşık' işaretlendi", approximate)
+            if dropped:
+                logger.warning(
+                    "⚠️ %d mekan hem çözülemedi hem de şehir merkezi bilinmiyor, "
+                    "listeye alınmadı: %s", len(dropped), dropped)
 
         enriched_locations = ner_enriched + ocr_enriched + vision_enriched
+
+        # Konum kalitesi etiketi. Yukarıda "approximate" olarak işaretlenmemiş
+        # her kayıt gerçek bir gazetteer eşleşmesinden geliyor (Nominatim,
+        # Overpass, Vision landmark) — setdefault mevcut etiketi ezmez.
+        for entry in enriched_locations:
+            (entry.get("place_data") or {}).setdefault("precision", "exact")
+
         logger.info("Enriched toplam: %d NER + %d OCR + %d Vision = %d",
                     len(ner_enriched), len(ocr_enriched),
                     len(vision_enriched), len(enriched_locations))
@@ -690,27 +732,27 @@ class VideoProcessingService:
 
         # ─────────────────────────────────────────────────────────────────────
         # ── 7. Deduplication ─────────────────────────────────────────────────
-        # Gemini city_fallback lokasyonları aynı koordinata sahip olduğundan
-        # dedup'dan ayrı tutuyoruz — yoksa 7→1 olur.
         # ─────────────────────────────────────────────────────────────────────
         set_progress(video_id, "dedup", 85)
 
-        # Gemini modunda: koordinatlar birbirine çok yakın (aynı çarşı/semt içinde)
-        # 2km threshold hepsini tek mekan sayar → Gemini modunda 0.05km (50m) kullan.
-        # Sadece tam aynı adreste olanları birleştirsin.
-        # Klasik pipeline: 2km threshold korunur (NER+OCR+Vision tekrarlarını temizler).
-        if self._use_gemini:
-            dedup_threshold = 0.001  # 1 metre — sadece birebir aynı koordinat (Gemini farklı isim = farklı mekan)
-        else:
-            dedup_threshold = 2.0    # 2 km   — klasik pipeline için
-
-        # Gemini kaynaklı kayıtlar artık dedup'tan MUAF DEĞİL — sadece mesafe
-        # kontrolünden muaf (bkz. LocationDeduplicator.deduplicate_locations).
+        # Gemini modunda mesafe eşiği çok küçük tutuluyor: şehir merkezindeki
+        # mekanlar birbirine yüzlerce metre uzaklıkta ve hepsi ayrı duraklar
+        # (Elmacı Pazarı ↔ Gümrük Hanı gibi). Gerçek tekrarları ad ve kök
+        # eşleşmesi yakalıyor, mesafe değil.
+        # Klasik pipeline: 2km korunur (NER+OCR+Vision aynı yeri tekrar üretir).
         #
-        # Eskiden gemini_city_fallback kayıtları dedup'a hiç sokulmuyordu ve
-        # sonradan ham hâlleriyle ekleniyordu; bu, ad bazlı eşleşmeyi de
-        # atlıyordu. Artık hepsi deduplicator'dan geçiyor, böylece aynı adın
-        # iki kez listeye girmesi engelleniyor.
+        # NOT: koordinatlar artık Gemini'den değil gazetteer'dan geliyor, yani
+        # bu eşik yeniden değerlendirilebilir — ama tek seferde tek değişken:
+        # önce çözümleme ayrımının etkisi ölçülsün.
+        if self._use_gemini:
+            dedup_threshold = 0.001  # 1 metre
+        else:
+            dedup_threshold = 2.0    # 2 km
+
+        # Çözülemeyen kayıtlar (source="gemini_unresolved") mesafe kontrolünden
+        # muaf — hepsi aynı şehir merkezi koordinatını paylaştığı için mesafe
+        # onları tek mekana indirirdi. Ad ve kök eşleşmesi onlarda da çalışır.
+        # Bkz. LocationDeduplicator.deduplicate_locations.
         from app.ml.location_deduplicator import LocationDeduplicator
         deduplicator = LocationDeduplicator(distance_threshold_km=dedup_threshold)
 
@@ -721,9 +763,18 @@ class VideoProcessingService:
         )
         deduplicated_locations: List = r_dedup.data
 
+        # `deduplicated_locations` veriliyor, ham liste değil: özet kullanıcının
+        # gördüğü duraklarla birebir aynı olmalı. (get_location_summary kendi
+        # içinde tekrar dedup çalıştırır — saf hesaplama, zaten temiz veride
+        # sonucu değiştirmez.)
+        #
+        # Buraya eskiden tanımsız bir `geocoded_locs` veriliyordu; NameError'ı
+        # _safe_run yutup fallback={} döndürdüğü için location_summary sessizce
+        # hep boş kaydediliyordu. Pipeline'ın "hata yutma" tasarımının bedeli:
+        # bir yazım hatası aylarca sessiz veri kaybı olarak yaşayabiliyor.
         r_loc_summary = _safe_run(
             "LocSummary",
-            lambda: deduplicator.get_location_summary(geocoded_locs),
+            lambda: deduplicator.get_location_summary(deduplicated_locations),
             fallback={},
         )
         location_summary: Dict = r_loc_summary.data
@@ -1080,26 +1131,13 @@ class VideoProcessingService:
             return None
         return votes.most_common(1)[0][0]
 
-    @staticmethod
-    def _detect_city_from_list(locations: List[str]) -> Optional[str]:
-        """
-        Gemini lokasyon listesinden şehir adını önceden tespit et.
-        Geocoding'den ÖNCE çağrılır → city_hint olarak kullanılır.
-        Örn: ['Gaziantep', 'Bişirici Kebap', ...] → 'Gaziantep'
-        """
-        _tr_cities = {
-            "gaziantep", "antalya", "istanbul", "ankara", "izmir", "bursa",
-            "adana", "konya", "mersin", "kayseri", "eskişehir", "eskisehir",
-            "trabzon", "diyarbakır", "diyarbakir", "samsun", "malatya",
-            "kahramanmaraş", "kahramanmaras", "erzurum", "kocaeli", "gebze",
-            "denizli", "pamukkale", "bodrum", "muğla", "mugla", "fethiye",
-            "alanya", "kapadokya", "cappadocia", "nevşehir", "nevsehir",
-            "mardin", "şanlıurfa", "sanliurfa", "urfa", "hatay", "antakya",
-        }
-        for loc in locations:
-            if loc.lower().strip() in _tr_cities:
-                return loc
-        return None
+    # `_detect_city_from_list` KALDIRILDI.
+    #
+    # Geocoding öncesi şehir ipucunu 37 Türkiye şehrinden oluşan hardcode bir
+    # kümeyle tahmin ediyordu. Dünyanın herhangi bir yerinden gelen bir Reels'te
+    # (Barselona, Kyoto, Tiflis) hiçbir zaman eşleşmiyor ve arama bölgesiz
+    # kalıyordu. Yerine Gemini'nin döndürdüğü `region` kullanılıyor —
+    # bkz. gemini_service._LOCATIONS_SCHEMA.
 
     # ─────────────────────────────────────────────────────────────────────────
     # OCR filtre pipeline (ayrı metod — test edilebilir)
