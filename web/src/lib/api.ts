@@ -158,10 +158,74 @@ export async function login(email: string, password: string) {
 }
 
 export async function register(email: string, password: string, username?: string) {
-  return request<AuthTokens>(
+  const result = await request<AuthTokens>(
     "/auth/register",
     { method: "POST", body: JSON.stringify({ email, password, username }) }
   );
+  trackReferralJoinIfPresent();
+  return result;
+}
+
+// ─── Analytics ─────────────────────────────────────────────────────────────
+//
+// Shared-trip büyüme hunisi (bkz. docs/analytics/shared-trip-events.md).
+
+/**
+ * Bir event'i ateşler. Kasıtlı olarak request() ÜZERİNDEN GİTMEZ: request()'in
+ * 401 → refresh → /login yönlendirme mantığı bir analytics çağrısı için asla
+ * tetiklenmemeli — best-effort bir arka plan isteği kullanıcıyı /login'e
+ * göndermemeli. logout()/refreshAccessToken() ile aynı gerekçeyle ham fetch
+ * kullanılıyor (bkz. yukarısı).
+ */
+export function trackAnalyticsEvent(
+  event: string,
+  tripId: number,
+  source?: string,
+  metadata?: Record<string, unknown>,
+): void {
+  const token = getToken();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  fetch(`${BASE_URL}/analytics/events`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ event, trip_id: tripId, source, metadata }),
+  }).catch(() => { /* best-effort — analytics hiçbir zaman kullanıcı deneyimini etkilemez */ });
+}
+
+const REFERRAL_STORAGE_KEY = "tripclip_referral";
+const REFERRAL_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 gün — bu süreden eski bir ziyaret artık ilişkilendirilmez
+
+interface ReferralMarker {
+  tripId: number;
+  ts: number;
+}
+
+/**
+ * Bir paylaşım sayfası ziyaretini işaretler — kullanıcı sonradan kayıt olursa
+ * `shared_trip_joined` bu ziyaretle ilişkilendirilebilsin diye (bkz.
+ * trackReferralJoinIfPresent, register() içinde çağrılır).
+ */
+export function markShareReferral(tripId: number): void {
+  if (typeof window === "undefined") return;
+  try {
+    const marker: ReferralMarker = { tripId, ts: Date.now() };
+    localStorage.setItem(REFERRAL_STORAGE_KEY, JSON.stringify(marker));
+  } catch { /* localStorage kullanılamıyor olabilir (gizli sekme vb.) — sessizce vazgeç */ }
+}
+
+function trackReferralJoinIfPresent(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = localStorage.getItem(REFERRAL_STORAGE_KEY);
+    if (!raw) return;
+    localStorage.removeItem(REFERRAL_STORAGE_KEY);
+
+    const marker: ReferralMarker = JSON.parse(raw);
+    if (Date.now() - marker.ts > REFERRAL_TTL_MS) return;
+    trackAnalyticsEvent("shared_trip_joined", marker.tripId, "share_page_referral");
+  } catch { /* bozuk/eksik veri — sessizce vazgeç */ }
 }
 
 // ─── Videos ────────────────────────────────────────────────────────────────

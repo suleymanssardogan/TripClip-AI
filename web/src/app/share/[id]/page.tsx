@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   Map as MapIcon,
@@ -19,7 +19,7 @@ import {
 import Navbar from "@/components/Navbar";
 import QRShareCard from "@/components/QRShareCard";
 import { useParams, useRouter } from "next/navigation";
-import { getPlan, type VideoDetail } from "@/lib/api";
+import { getPlan, trackAnalyticsEvent, markShareReferral, type VideoDetail } from "@/lib/api";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 
@@ -55,6 +55,11 @@ export default function SharePage() {
   const [error,   setError]   = useState("");
   const [copied,  setCopied]  = useState(false);
 
+  // React StrictMode efekti geliştirmede iki kez çalıştırır — event'in yalnızca
+  // bir kez ateşlenmesini garanti eder (bkz. spesifikasyonun "prevent duplicate
+  // events" gereksinimi, sunucu tarafında karşılığı yok çünkü bu istemci-taraflı bir mount).
+  const openedTracked = useRef(false);
+
   useEffect(() => {
     const id = Number(params.id);
     if (!id || isNaN(id)) {
@@ -70,6 +75,13 @@ export default function SharePage() {
           setVideo(res);
           setLoading(false);
         }, 0);
+        // Yalnızca sayfa gerçekten yüklendiğinde "açıldı" sayılır — 404/hata
+        // durumunda kullanıcı paylaşılan içeriği hiç görmedi.
+        if (!openedTracked.current) {
+          openedTracked.current = true;
+          trackAnalyticsEvent("shared_trip_opened", id, "direct_link");
+          markShareReferral(id);
+        }
       })
       .catch(e => {
         setTimeout(() => {
@@ -112,10 +124,11 @@ export default function SharePage() {
     { label: "Şehir",        value: String(locations.length > 0 ? new Set(locations.map(l => l.place_data?.name?.split(",")[0])).size : "—") },
   ];
 
-  function handleShare() {
+  function handleShare(source: string) {
     navigator.clipboard.writeText(window.location.href).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      trackAnalyticsEvent("shared_trip_link_copied", Number(params.id), source);
     });
   }
 
@@ -165,7 +178,7 @@ export default function SharePage() {
                 <MapIcon className="w-5 h-5" /> Google Maps&apos;te Aç
               </Button>
               <Button
-                variant="outline" onClick={handleShare}
+                variant="outline" onClick={() => handleShare("hero_button")}
                 className="rounded-full px-8 py-4 bg-surface/80 backdrop-blur-xl"
               >
                 <Share2 className="w-5 h-5" /> {copied ? "Kopyalandı ✓" : "Linki Paylaş"}
@@ -249,6 +262,7 @@ export default function SharePage() {
             <QRShareCard
               url={typeof window !== "undefined" ? window.location.href : ""}
               title={`${tripTitle} • QR Paylaş`}
+              onCopy={() => trackAnalyticsEvent("shared_trip_link_copied", Number(params.id), "qr_card")}
             />
 
             {/* AI insights card */}
@@ -311,7 +325,7 @@ export default function SharePage() {
 
             {/* Quick share tip */}
             <Card
-              onClick={handleShare}
+              onClick={() => handleShare("sidebar_card")}
               className="p-6 flex items-center gap-4 cursor-pointer hover:border-border-strong transition-colors"
             >
               <div className="w-12 h-12 rounded-md bg-accent/10 border border-accent/20 flex items-center justify-center text-accent-text">

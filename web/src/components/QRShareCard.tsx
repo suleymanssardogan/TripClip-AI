@@ -7,13 +7,17 @@ import { QrCode, Copy, Check, Smartphone, Download } from "lucide-react";
 interface Props {
   url: string;
   title?: string;
+  /** Link kopyalandığında çağrılır — analytics event'i bilerek bu bileşenin
+   *  dışında (çağıran tarafta) ateşlenir, QRShareCard analytics'ten habersiz
+   *  kalır ve her yerde yeniden kullanılabilir. */
+  onCopy?: () => void;
 }
 
 /**
  * QR kod paylaşım kartı.
  * QR görseli api.qrserver.com tarafından sunulur (zero install).
  */
-export default function QRShareCard({ url, title = "Telefonla Paylaş" }: Props) {
+export default function QRShareCard({ url, title = "Telefonla Paylaş", onCopy }: Props) {
   const [copied, setCopied] = useState(false);
 
   // Hydration sırasında URL'i client'tan al — SSR'de window yok
@@ -42,6 +46,7 @@ export default function QRShareCard({ url, title = "Telefonla Paylaş" }: Props)
     navigator.clipboard.writeText(safeUrl).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      onCopy?.();
     });
   }
 
