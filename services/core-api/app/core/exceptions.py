@@ -152,6 +152,47 @@ class InvalidTripStopOrderException(TripClipException):
         super().__init__(message, code="INVALID_TRIP_STOP_ORDER", status_code=400)
 
 
+# ── Trip Sharing ──────────────────────────────────────────────────────────────
+
+class InvalidShareRequestException(TripClipException):
+    """Geçersiz role/expires_at/max_uses değeri — davet oluşturulmadan reddedilir."""
+    def __init__(self, message: str):
+        super().__init__(message, code="INVALID_SHARE_REQUEST", status_code=400)
+
+
+class ShareNotFoundException(TripClipException):
+    def __init__(self, share_id: int):
+        super().__init__(
+            f"Davet bulunamadı (ID: {share_id})",
+            code="SHARE_NOT_FOUND",
+            status_code=404,
+            details={"share_id": share_id},
+        )
+
+
+class ShareTokenInvalidException(TripClipException):
+    """Token hiç yok, süresi dolmuş, iptal edilmiş, kullanım sınırına ulaşmış
+    ya da zaten yanıtlanmış — hepsi istemciye aynı, ayrım yapmayan mesajla
+    dönülür (bkz. docs/trip-sharing.md "Security decisions": bir token'ın NEDEN
+    geçersiz olduğunu söylemek, geçerli bir token'ı ayırt etmeye çalışan biri
+    için bir sinyal olur)."""
+    def __init__(self):
+        super().__init__(
+            "Bu davet linki artık geçerli değil.",
+            code="SHARE_TOKEN_INVALID",
+            status_code=404,
+        )
+
+
+class CannotJoinOwnTripException(TripClipException):
+    def __init__(self):
+        super().__init__(
+            "Kendi gezinize collaborator olarak katılamazsınız.",
+            code="CANNOT_JOIN_OWN_TRIP",
+            status_code=400,
+        )
+
+
 # ── Analytics ─────────────────────────────────────────────────────────────────
 
 class InvalidAnalyticsEventException(TripClipException):

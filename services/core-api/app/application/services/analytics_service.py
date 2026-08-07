@@ -32,6 +32,7 @@ class AnalyticsService:
         user_id: Optional[int] = None,
         source: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        kind: str = "video",
     ) -> None:
         """
         Bir event'i kaydeder. Best-effort ve KESİNLİKLE fırlatmaz: MongoAnalyticsClient
@@ -40,10 +41,17 @@ class AnalyticsService:
         requests" gereksinimi gereği kendi katmanında da garanti eder —
         çağıran taraf (Celery task, VideoService, HTTP beacon'ın background
         task'ı) bu çağrının asla patlamayacağına koşulsuz güvenebilir.
+
+        `kind`: "video" (varsayılan, geriye dönük uyumluluk) | "trip". `trip_id`
+        alanı iki farklı varlık uzayını paylaşıyor — bkz.
+        docs/shared-trip-analytics.md "Scope": Video/Plan paylaşımı için
+        trip_id bir Video.id, Trip Builder paylaşımı için bir Trip.id'dir.
+        `kind` olmadan bu iki uzay Mongo'da ayırt edilemezdi.
         """
         document = {
             "event":     event.value,
             "trip_id":   trip_id,
+            "kind":      kind,
             "user_id":   user_id,
             "platform":  platform,
             "source":    source,
