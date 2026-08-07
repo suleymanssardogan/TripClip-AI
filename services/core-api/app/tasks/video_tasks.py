@@ -96,6 +96,34 @@ def _notify_push(db, video_id: int, completed: bool) -> None:
     except Exception:
         logger.exception("📵 Push bildirimi başarısız (best-effort) | video_id=%s", video_id)
 
+
+def _track_trip_created(db, video_id: int) -> None:
+    """
+    Video COMPLETED olduğunda `shared_trip_created` event'ini kaydeder — bu,
+    videonun paylaşım sayfasının (web `/share/[id]`) erişilebilir hale geldiği
+    andır (bkz. docs/analytics/shared-trip-events.md). Best-effort: analytics
+    yazımı başarısız olsa bile pipeline sonucunu ETKİLEMEZ, aynı fail-open
+    deseni _notify_push ile paylaşılıyor.
+    """
+    try:
+        from app.infrastructure.repositories.sql_video_repository import SqlVideoRepository
+        from app.application.services.analytics_service import get_analytics_service
+        from app.core.analytics_events import AnalyticsEvent
+
+        video = SqlVideoRepository(db).get_by_id(video_id)
+        if video is None:
+            return
+
+        get_analytics_service().track(
+            event=AnalyticsEvent.SHARED_TRIP_CREATED,
+            trip_id=video_id,
+            platform="server",
+            user_id=video.user_id,
+            source="pipeline_completed",
+        )
+    except Exception:
+        logger.exception("📊 Analytics kaydı başarısız (best-effort) | video_id=%s", video_id)
+
 # ── Paylaşılan VideoProcessingService instance'ı ──────────────────────────────
 #
 # VideoProcessingService.__init__ YOLO/BERT NER/Whisper/SentenceTransformer gibi
@@ -163,6 +191,7 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
 
         logger.info("✅ Task tamamlandı | video_id=%s", video_id)
         _notify_push(db, video_id, completed=True)
+        _track_trip_created(db, video_id)
 
         # Sonucu kaydettikten SONRA kuyruğa al — bu task başarısız olsa bile
         # video COMPLETED kalır, sadece ipuçları eksik olur.
@@ -318,6 +347,7 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
 
         logger.info("✅ URL task tamamlandı | video_id=%s", video_id)
         _notify_push(db, video_id, completed=True)
+        _track_trip_created(db, video_id)
 
         generate_tips_task.delay(video_id)
 

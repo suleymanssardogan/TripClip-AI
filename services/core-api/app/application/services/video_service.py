@@ -24,6 +24,8 @@ from app.core.exceptions import (
     PermissionDeniedException,
     InvalidStopOrderException,
 )
+from app.core.analytics_events import AnalyticsEvent
+from app.application.services.analytics_service import AnalyticsService, get_analytics_service
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +35,9 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 class VideoService:
 
-    def __init__(self, video_repo: AbstractVideoRepository):
+    def __init__(self, video_repo: AbstractVideoRepository, analytics: Optional[AnalyticsService] = None):
         self._repo = video_repo
+        self._analytics = analytics or get_analytics_service()
 
     # ── Upload ────────────────────────────────────────────────────────────────
 
@@ -268,3 +271,13 @@ class VideoService:
             Path(file_path).unlink(missing_ok=True)
         except OSError as exc:
             logger.warning("Video dosyası silinemedi | video_id=%s | %s", video_id, exc)
+
+        # AnalyticsService.track kendi içinde best-effort (asla fırlatmaz) —
+        # silme işlemi zaten tamamlanmış durumda, ayrıca try/except gerekmiyor.
+        self._analytics.track(
+            event=AnalyticsEvent.SHARED_TRIP_DELETED,
+            trip_id=video_id,
+            platform="server",
+            user_id=user_id,
+            source="user_delete",
+        )

@@ -377,6 +377,23 @@ def test_delete_video_removes_record(client, bff_headers, registered_user):
     assert client.get(f"/internal/videos/{vid}").status_code == 404
 
 
+def test_delete_video_tracks_shared_trip_deleted(client, bff_headers, registered_user):
+    from unittest import mock
+
+    vid = _make_video_with_locations(registered_user["user_id"], 1)
+    with mock.patch(
+        "app.application.services.analytics_service.AnalyticsService.track"
+    ) as mock_track:
+        resp = client.delete(f"/internal/videos/{vid}", headers=bff_headers)
+
+    assert resp.status_code == 200
+    mock_track.assert_called_once()
+    _, kwargs = mock_track.call_args
+    assert kwargs["trip_id"] == vid
+    assert kwargs["user_id"] == registered_user["user_id"]
+    assert kwargs["event"].value == "shared_trip_deleted"
+
+
 def test_delete_video_survives_missing_file(client, bff_headers, registered_user):
     """file_path diskte yoksa silme yine başarılı olmalı — DB kaydı asıl olan."""
     vid = _make_video_with_locations(registered_user["user_id"], 1)
