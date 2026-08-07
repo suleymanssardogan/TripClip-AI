@@ -48,12 +48,12 @@ struct ResultsView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Button {
-                            share(PDFExportService.exportToFile(plan: plan, title: plan.displayTitle))
+                            share(PDFExportService.exportToFile(plan: plan, title: plan.displayTitle), source: "pdf_export")
                         } label: {
                             Label("PDF İndir", systemImage: "doc.fill")
                         }
                         Button {
-                            share(TripShareCard.exportToFile(plan: plan, title: plan.displayTitle))
+                            share(TripShareCard.exportToFile(plan: plan, title: plan.displayTitle), source: "story_card")
                         } label: {
                             Label("Story Kartı", systemImage: "square.and.arrow.up")
                         }
@@ -88,12 +88,15 @@ struct ResultsView: View {
     }
 
     /// Dışa aktarım başarısızsa sessizce boş bir paylaşım sayfası açmak yerine
-    /// kullanıcıya söyle.
-    private func share(_ url: URL?) {
+    /// kullanıcıya söyle. Yalnızca gerçekten paylaşım sayfası AÇILDIĞINDA
+    /// (dışa aktarım başarılıysa) analytics event'i ateşlenir — başarısız bir
+    /// denemede sahte bir "share sheet opened" kaydı oluşmamalı.
+    private func share(_ url: URL?, source: String) {
         guard let url else {
             exportFailed = true
             return
         }
+        AnalyticsClient.shared.track("shared_trip_share_sheet_opened", tripID: planID, source: source, auth: auth)
         sharePayload = SharePayload(url: url)
     }
 

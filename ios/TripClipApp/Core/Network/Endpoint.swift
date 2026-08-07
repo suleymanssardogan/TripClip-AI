@@ -46,6 +46,9 @@ enum Endpoint {
     case tripDetail(tripID: Int)
     case updateTripStopOrder(tripID: Int, order: [[Int]])
     case deleteTrip(tripID: Int)
+
+    // Analytics — shared-trip büyüme hunisi (bkz. docs/analytics/shared-trip-events.md)
+    case trackAnalyticsEvent(event: String, tripID: Int, source: String)
 }
 
 extension Endpoint {
@@ -73,12 +76,13 @@ extension Endpoint {
         case .tripDetail(let id):           return "/api/mobile/trips/\(id)"
         case .updateTripStopOrder(let id, _): return "/api/mobile/trips/\(id)/order"
         case .deleteTrip(let id):           return "/api/mobile/trips/\(id)"
+        case .trackAnalyticsEvent:          return "/api/mobile/analytics/events"
         }
     }
 
     var method: HTTPMethod {
         switch self {
-        case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl, .createTrip: return .post
+        case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl, .createTrip, .trackAnalyticsEvent: return .post
         case .registerDeviceToken: return .put
         case .updateStopOrder, .updateTripStopOrder: return .patch
         case .deletePlan, .deleteTrip: return .delete
@@ -118,6 +122,9 @@ extension Endpoint {
 
         case .updateTripStopOrder(_, let order):
             return ["order": order]
+
+        case .trackAnalyticsEvent(let event, let tripID, let source):
+            return ["event": event, "trip_id": tripID, "source": source]
 
         default:
             return nil

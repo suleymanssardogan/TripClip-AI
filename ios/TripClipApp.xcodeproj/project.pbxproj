@@ -10,6 +10,7 @@
 		032F62AFADE749A800E62DE9 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DD0494F1241767AD8312E6F /* LibraryView.swift */; };
 		04F66BDD6B0FEF4AD2490320 /* TripModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7EA2D78E1DF463A1C7724A4 /* TripModels.swift */; };
 		082059E394ACA22AAD1E394B /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6BE1D486FE4CA01AA77FFF /* LoginView.swift */; };
+		34E35E6C3FB4705BB2EC7C38 /* AnalyticsClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8328F5387937569FB28A9A9D /* AnalyticsClient.swift */; };
 		08D364CE316FF612ABF86788 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03FB87E8E3920D380F6A652F /* RootView.swift */; };
 		0AF598115CE73025D3FD3D8B /* TripsListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FEC08F204B822007F230C1F /* TripsListViewModel.swift */; };
 		0D2B5F2FE3D717DD868B8950 /* URLExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E4804B79221D8965AD7E84 /* URLExtractor.swift */; };
@@ -99,6 +100,7 @@
 		26143DBFA5C545A4B9D4C760 /* PlanModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanModels.swift; sourceTree = "<group>"; };
 		2917DDC3423D027754721B5F /* TravelTipsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TravelTipsSection.swift; sourceTree = "<group>"; };
 		2B6BE1D486FE4CA01AA77FFF /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
+		8328F5387937569FB28A9A9D /* AnalyticsClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalyticsClient.swift; sourceTree = "<group>"; };
 		2CBC611FB37ABE8A2FA8067F /* PersistenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceController.swift; sourceTree = "<group>"; };
 		31397122A33782B6BF494595 /* TripClipApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = TripClipApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		35B293E6D103D668154E573B /* RegisterViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterViewModel.swift; sourceTree = "<group>"; };
@@ -248,6 +250,7 @@
 				74FD6988CA6DE8735788ABE5 /* APIClient.swift */,
 				78A71CAFE212CFE225B5434D /* APIError.swift */,
 				DFCA77B601BF52F62A73B068 /* Endpoint.swift */,
+				8328F5387937569FB28A9A9D /* AnalyticsClient.swift */,
 			);
 			path = Network;
 			sourceTree = "<group>";
@@ -479,6 +482,7 @@
 				E8C230BC762FF9E4831B86E9 /* AppDelegate+BackgroundSession.swift in Sources */,
 				7E22CDFF8F112AB1063DD7DC /* AppDelegate.swift in Sources */,
 				0FC211B5B1D80639D5134AD7 /* AppGroupStore.swift in Sources */,
+				34E35E6C3FB4705BB2EC7C38 /* AnalyticsClient.swift in Sources */,
 				A56C61BC9E5FBCF44A31FEC6 /* AuthEnvironment.swift in Sources */,
 				2A8650F15BD5EC299E770EB3 /* AuthModels.swift in Sources */,
 				82AE0D51B2BCCF9606A438D6 /* BackgroundUploader.swift in Sources */,
