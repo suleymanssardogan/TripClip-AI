@@ -4,15 +4,14 @@ import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
   MapPin, Clock, CheckCircle2, ChevronRight,
-  Globe2, Video, LogOut, Loader2, Plus, AlertTriangle, RotateCcw,
+  Globe2, Video, LogOut, Loader2, AlertTriangle, RotateCcw,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import { getUserPlans, getStats, logout, type Plan, type PlatformStats } from "@/lib/api";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { Button, buttonVariants } from "@/components/ui/Button";
+import { Button } from "@/components/ui/Button";
 
 /* ─── Yardımcı ─────────────────────────────────────────────────────────── */
 
@@ -239,21 +238,15 @@ export default function DashboardPage() {
             <div className="text-center py-20 rounded-lg border border-border-strong border-dashed">
               <div className="text-5xl mb-4">🗺️</div>
               <p className="text-text font-semibold mb-2">Henüz video analiz edilmedi</p>
-              <p className="text-text-secondary text-sm mb-5">İlk gezini oluşturmak için bir video yükle.</p>
-              <Link href="/upload" className={buttonVariants({ size: "md" })}>
-                Video Yükle
-              </Link>
+              <p className="text-text-secondary text-sm">
+                Bir Instagram Reel&apos;i TripClip iOS uygulamasından paylaşarak başla.
+              </p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {plans.map((plan, i) => (
                 <TripCard key={plan.id} plan={plan} index={i} />
               ))}
-              <Link href="/upload"
-                className="rounded-lg border border-border-strong border-dashed flex flex-col items-center justify-center gap-2 text-text-tertiary hover:text-text hover:border-accent/40 transition-colors min-h-[168px]">
-                <Plus className="w-5 h-5" />
-                <span className="text-sm font-medium">Yeni gezi paylaş</span>
-              </Link>
             </div>
           )}
         </section>

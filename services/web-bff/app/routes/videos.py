@@ -1,54 +1,19 @@
 """
 Web BFF — Video route handler'ları.
+Video capture iOS-only (bkz. CLAUDE.md) — web sadece görüntüleme/paylaşım yapar,
+yükleme endpoint'i yoktur.
 Tüm Core API hataları web_error_wrapper aracılığıyla Next.js dostu mesajlara çevrilir.
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
-from pydantic import BaseModel
-import httpx
+from fastapi import APIRouter, Depends
 from app.core.internal_client import internal_client
 import os
 import uuid
 
-from app.core.auth import get_current_user_id, get_optional_user_id
+from app.core.auth import get_optional_user_id
 from app.core.error_wrapper import web_error_wrapper, raise_from_response
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 CORE_API_URL = os.getenv("CORE_API_URL", "http://core-api:8000")
-
-
-@router.post("/upload")
-async def upload_video(
-    file: UploadFile = File(...),
-    user_id: int = Depends(get_current_user_id),
-):
-    """Video yükle — geçerli JWT zorunlu."""
-    rid = str(uuid.uuid4())[:8]
-
-    if not file.content_type or not file.content_type.startswith("video/"):
-        raise HTTPException(400, detail={
-            "code": "INVALID_FILE_TYPE",
-            "message": "Yalnızca video dosyaları yüklenebilir (MP4, MOV, AVI).",
-        })
-
-    content = await file.read()
-    if len(content) > 200 * 1024 * 1024:
-        raise HTTPException(400, detail={
-            "code": "FILE_TOO_LARGE",
-            "message": "Dosya boyutu çok büyük. Lütfen 200 MB'tan küçük bir video seçin.",
-        })
-
-    async with web_error_wrapper(request_id=rid):
-        async with internal_client(60.0) as client:
-            resp = await client.post(
-                f"{CORE_API_URL}/internal/videos/process",
-                files={"file": (file.filename, content, file.content_type)},
-                headers={"x-user-id": str(user_id)},
-            )
-        if resp.status_code >= 400:
-            raise_from_response(resp, request_id=rid)
-
-    data = resp.json()
-    return {"id": data["id"], "status": data["status"]}
 
 
 @router.get("/{video_id}/progress")
@@ -80,32 +45,3 @@ async def get_video(
         if resp.status_code >= 400:
             raise_from_response(resp, request_id=rid)
     return resp.json()
-
-
-class URLQueueRequest(BaseModel):
-    url: str
-
-
-@router.post("/queue-url", status_code=202)
-async def queue_url(
-    body: URLQueueRequest,
-    user_id: int = Depends(get_current_user_id),
-):
-    """
-    Instagram / YouTube URL'ini arka planda işlemek üzere kuyruğa al.
-    Geçerli JWT zorunlu — user_id core-api'ye x-user-id header olarak iletilir.
-    202 Accepted döner; gerçek işlem Celery worker üzerinde başlar.
-    """
-    rid = str(uuid.uuid4())[:8]
-    async with web_error_wrapper(request_id=rid):
-        async with internal_client(15.0) as client:
-            resp = await client.post(
-                f"{CORE_API_URL}/internal/videos/queue-url",
-                json={"url": body.url, "source": "web_upload"},
-                headers={"x-user-id": str(user_id)},
-            )
-        if resp.status_code >= 400:
-            raise_from_response(resp, request_id=rid)
-
-    data = resp.json()
-    return {"id": data["id"], "status": "queued"}
