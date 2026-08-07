@@ -27,6 +27,8 @@ import app.models.user           # noqa: E402, F401  ← tabloları kayıt et
 import app.models.video          # noqa: E402, F401
 import app.models.plan           # noqa: E402, F401
 import app.models.refresh_token  # noqa: E402, F401
+import app.models.place          # noqa: E402, F401
+import app.models.place_save     # noqa: E402, F401
 
 target_metadata = Base.metadata
 

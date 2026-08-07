@@ -1,12 +1,16 @@
 """
 Infrastructure katmanı — AbstractVideoRepository'nin SQLAlchemy implementasyonu.
 """
+import logging
 from typing import Optional, List, Dict, Any
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.domain.repositories.video_repository import AbstractVideoRepository
 from app.models.video import Video, VideoStatus, visible_locations
+from app.infrastructure.repositories.sql_place_repository import SqlPlaceRepository
+
+logger = logging.getLogger(__name__)
 
 
 class SqlVideoRepository(AbstractVideoRepository):
@@ -152,6 +156,17 @@ class SqlVideoRepository(AbstractVideoRepository):
         video.degradation       = results.get("degradation")
         video.status            = VideoStatus.COMPLETED
         self._db.commit()
+
+        # Bu video artık videolar-arası Place kütüphanesine işlenir — tek bir
+        # video değil, kullanıcının BİRİKMİŞ tüm mekanları "kütüphane" ekranını
+        # besler (bkz. goal.md Phase 12). Kütüphane bu adım olmadan yalnızca
+        # backfill anındaki eski videolarda kalır, yeni videolar görünmez.
+        # Best-effort: senkronizasyon başarısız olsa bile video COMPLETED
+        # kalmalı — kullanıcı sonucu görmeyi bu adıma bağımlı olmamalı.
+        try:
+            SqlPlaceRepository(self._db).sync_from_video(video)
+        except Exception:
+            logger.exception("⚠️ Place senkronizasyonu başarısız | video_id=%s", video_id)
 
     def save_travel_tips(self, video_id: int, tips: Dict[str, Any]) -> None:
         """
