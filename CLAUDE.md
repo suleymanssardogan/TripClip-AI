@@ -73,7 +73,7 @@ BFFs talk to core-api over Docker internal networking. Frontends never call core
 - **PostgreSQL** — users, videos (metadata + AI results), plans
 - **Redis db=0** — Celery broker; **db=2** — Celery results; also stores per-video progress via `set_progress(video_id, stage, percent)`
 - **MongoDB** — secondary storage
-- **Qdrant** — vector DB for RAG travel tips (sentence-transformers embeddings)
+- **Qdrant** — vector DB for Place library semantic search (sentence-transformers embeddings); one point per `Place`, keyed by `place_id`
 
 ### Video Processing Pipeline
 
@@ -91,7 +91,9 @@ Each AI stage is wrapped in `_safe_run()` — if a service fails, it logs a fall
 7. Location geocoding: Nominatim
 8. Location deduplication: Haversine distance
 9. Route optimization: TSP solver
-10. RAG travel tips: Qdrant + sentence-transformers
+10. Travel tips: Ollama LLM generation (optional, `OLLAMA_URL`) — no retrieval step, pure generation
+
+Qdrant embedding happens outside this pipeline, in `SqlPlaceRepository` when a `Place` row is created or enriched — see Library semantic search below.
 
 ### Core-API Layer Structure
 

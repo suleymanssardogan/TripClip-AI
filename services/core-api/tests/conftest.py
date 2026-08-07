@@ -78,6 +78,30 @@ def bff_headers(registered_user):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_qdrant(monkeypatch):
+    """
+    SqlPlaceRepository her oluşturulduğunda gerçek bir QdrantService kurar
+    (bkz. best-effort tasarım) — bu, testlerde gerçek Qdrant'a bağlanmaya VE
+    SentenceTransformer modelini diskten/ağdan yüklemeye çalışır (yavaş, testin
+    amacıyla ilgisiz). QdrantService zaten bağlantı hatasını sessizce yutuyor
+    (bkz. qdrant_service.py upsert_place/search_place_ids), o yüzden _load'u
+    burada başarısız kılmak gerçek "Qdrant erişilemez" davranışını taklit eder.
+
+    test_qdrant_service.py'yi etkilemez: o dosyadaki testler client/model'i
+    _load() hiç çağrılmadan doğrudan set ediyor.
+    """
+    def _fail(self):
+        # test_qdrant_service.py client/model'i _load() hiç çağrılmadan
+        # doğrudan set ediyor — bu durumda gerçek _load()'un da yapacağı gibi
+        # dokunmadan geç. Aksi halde (client hâlâ None) gerçek bağlantı hiç
+        # denenmesin diye burada başarısız ol.
+        if self.client is None:
+            raise RuntimeError("Qdrant devre dışı (test ortamı)")
+
+    monkeypatch.setattr("app.ml.qdrant_service.QdrantService._load", _fail)
+
+
+@pytest.fixture(autouse=True)
 def reset_rate_limiters():
     """Her testten önce rate limiter sayaçlarını sıfırla.
 

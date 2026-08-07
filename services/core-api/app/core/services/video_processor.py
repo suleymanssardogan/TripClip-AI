@@ -247,7 +247,6 @@ class VideoProcessingService:
             from app.ml.ner_service import NERService
             from app.ml.places_service import PlacesService
             from app.ml.location_deduplicator import LocationDeduplicator
-            from app.ml.qdrant_service import QdrantService
             from app.ml.route_optimizer import RouteOptimizer
             from app.ml.rag_service import RAGService
         except ImportError as e:
@@ -268,7 +267,6 @@ class VideoProcessingService:
         self.deduplicator     = self._try_init(
             "LocationDeduplicator", lambda: LocationDeduplicator(distance_threshold_km=2.0)
         )
-        self.qdrant           = self._try_init("Qdrant",        QdrantService)
         self.route_optimizer  = self._try_init("RouteOptimizer", RouteOptimizer)
         self.rag              = self._try_init("RAG",           RAGService)
         self._ml_available    = True
@@ -856,16 +854,6 @@ class VideoProcessingService:
             r_rag = self._run_travel_tips(deduplicated_locations, video_id)
             travel_tips = r_rag.data
             degradation_log.append(r_rag)
-
-        # ─────────────────────────────────────────────────────────────────────
-        # ── 10. Qdrant — Vektör Embedding ────────────────────────────────────
-        # ─────────────────────────────────────────────────────────────────────
-        r_qdrant = _safe_run(
-            "Qdrant",
-            lambda: self.qdrant.add_locations(enriched_locations) if enriched_locations else None,
-            fallback=None,
-        )
-        degradation_log.append(r_qdrant)
 
         # ─────────────────────────────────────────────────────────────────────
         # ── Degradasyon Raporu ────────────────────────────────────────────────

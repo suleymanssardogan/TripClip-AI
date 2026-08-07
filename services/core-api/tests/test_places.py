@@ -293,3 +293,148 @@ def test_library_category_filter_is_exact_not_substring(client, bff_headers, reg
 
     resp = client.get("/internal/places?category=Kal", headers=bff_headers)
     assert resp.json()["total"] == 0
+
+
+# ─── Anlamsal arama (Qdrant) ─────────────────────────────────────────────────
+#
+# Gerçek Qdrant/SentenceTransformer'a hiç bağlanılmaz (bkz. conftest
+# _no_real_qdrant). Sıralama/fallback mantığı, SqlPlaceRepository'ye enjekte
+# edilen sahte bir istemciyle test edilir; HTTP uçlu tek test ise gerçek
+# Qdrant devre dışıyken `semantic=true`'nun hata vermeden substring aramasına
+# düştüğünü doğrular.
+
+class _FakeQdrant:
+    """search_place_ids'in gerçek davranışını taklit eder: yalnızca sorgulanan
+    place_ids kümesinden, önceden belirlenmiş sırayla eşleşme döner."""
+
+    def __init__(self, ranked_ids=None):
+        self._ranked_ids = ranked_ids or []
+        self.search_calls = []
+
+    def upsert_place(self, place_id, name, city=None, category=None):
+        pass  # yazma tarafı bu testlerin kapsamında değil
+
+    def search_place_ids(self, query, place_ids, limit=20):
+        owned = set(place_ids)
+        self.search_calls.append({"query": query, "place_ids": owned, "limit": limit})
+        return [pid for pid in self._ranked_ids if pid in owned][:limit]
+
+
+def _library_ids_by_name(client, headers) -> dict:
+    data = client.get("/internal/places", headers=headers).json()
+    return {p["name"]: p["id"] for p in data["places"]}
+
+
+def test_semantic_search_orders_by_qdrant_ranking(client, bff_headers, registered_user):
+    from app.infrastructure.repositories.sql_place_repository import SqlPlaceRepository
+
+    uid = registered_user["user_id"]
+    vid = _make_video(uid)
+    _save_results(vid, [
+        _loc("Kaputaş Plajı", 36.15, 29.45, category="Plaj"),
+        _loc("Develi Restoran", 36.88, 30.70, category="Restoran"),
+    ])
+    ids = _library_ids_by_name(client, bff_headers)
+    beach_id, restaurant_id = ids["Kaputaş Plajı"], ids["Develi Restoran"]
+
+    db = TestingSessionLocal()
+    try:
+        fake = _FakeQdrant(ranked_ids=[restaurant_id, beach_id])
+        result = SqlPlaceRepository(db, qdrant=fake).get_library(
+            uid, q="yemek yiyebileceğim bir yer", semantic=True
+        )
+    finally:
+        db.close()
+
+    assert [p["id"] for p in result["places"]] == [restaurant_id, beach_id]
+    assert fake.search_calls[0]["place_ids"] == {beach_id, restaurant_id}
+
+
+def test_semantic_search_falls_back_to_substring_when_no_matches(client, bff_headers, registered_user):
+    from app.infrastructure.repositories.sql_place_repository import SqlPlaceRepository
+
+    uid = registered_user["user_id"]
+    vid = _make_video(uid)
+    _save_results(vid, [_loc("Kaputaş Plajı", 36.15, 29.45)])
+
+    db = TestingSessionLocal()
+    try:
+        fake = _FakeQdrant(ranked_ids=[])  # Qdrant yapılandırılmamış/eşleşme yok
+        result = SqlPlaceRepository(db, qdrant=fake).get_library(uid, q="Kaputaş", semantic=True)
+    finally:
+        db.close()
+
+    assert result["total"] == 1
+    assert result["places"][0]["name"] == "Kaputaş Plajı"
+
+
+def test_semantic_search_respects_city_and_category_filters(client, bff_headers, registered_user):
+    """Filtrelenmiş aday kümesi dışında kalan bir yer (yanlış şehir), Qdrant
+    onu en iyi eşleşme olarak sıralasa bile sonuçta olmamalı — filtreler
+    Qdrant'a giden aday kümesini daraltıyor, sonrasında değil."""
+    from app.infrastructure.repositories.sql_place_repository import SqlPlaceRepository
+
+    uid = registered_user["user_id"]
+    vid = _make_video(uid)
+    _save_results(vid, [
+        _loc("Antalya'daki Plaj", 36.88, 30.70, city="Antalya"),
+        _loc("İstanbul'daki Plaj", 41.02, 29.00, city="İstanbul"),
+    ])
+    ids = _library_ids_by_name(client, bff_headers)
+    antalya_id, istanbul_id = ids["Antalya'daki Plaj"], ids["İstanbul'daki Plaj"]
+
+    db = TestingSessionLocal()
+    try:
+        # Qdrant her ikisini de "eşleşme" olarak döndürse bile city filtresi
+        # İstanbul'dakini aday kümesinden zaten çıkarmış olmalı.
+        fake = _FakeQdrant(ranked_ids=[istanbul_id, antalya_id])
+        result = SqlPlaceRepository(db, qdrant=fake).get_library(
+            uid, q="plaj", city="Antalya", semantic=True
+        )
+    finally:
+        db.close()
+
+    assert [p["id"] for p in result["places"]] == [antalya_id]
+    assert fake.search_calls[0]["place_ids"] == {antalya_id}
+
+
+def test_semantic_search_never_receives_another_users_place_ids(client, bff_headers, registered_user):
+    """search_place_ids'e iletilen aday kümesi, sorgulayan kullanıcının kendi
+    kütüphanesiyle sınırlı olmalı — kesişim SQL katmanında (PlaceSave.user_id)
+    garanti ediliyor, burada gerçekten öyle olduğunu doğruluyoruz."""
+    import uuid
+    from app.main import app
+    from fastapi.testclient import TestClient
+    from app.infrastructure.repositories.sql_place_repository import SqlPlaceRepository
+
+    uid_a = registered_user["user_id"]
+    va = _make_video(uid_a)
+    _save_results(va, [_loc("A'nın Mekanı", 36.0, 29.0)])
+
+    with TestClient(app) as c2:
+        email_b = f"b_{uuid.uuid4().hex[:6]}@test.com"
+        rb = c2.post("/internal/auth/register", json={"email": email_b, "password": "P2_test!"})
+        uid_b = rb.json()["user_id"]
+
+    db = TestingSessionLocal()
+    try:
+        fake = _FakeQdrant(ranked_ids=[])
+        SqlPlaceRepository(db, qdrant=fake).get_library(uid_b, q="mekan", semantic=True)
+    finally:
+        db.close()
+
+    # uid_b'nin kütüphanesi boş — search_place_ids hiç çağrılmamış olmalı
+    # (bkz. _get_library_semantic: sahip olunan yer yoksa Qdrant'a gidilmez).
+    assert fake.search_calls == []
+
+
+def test_semantic_query_param_falls_back_when_qdrant_unavailable(client, bff_headers, registered_user):
+    """Test ortamında gerçek Qdrant yok (bkz. conftest._no_real_qdrant) —
+    semantic=true isteği hata vermemeli, substring aramasına sessizce düşmeli."""
+    vid = _make_video(registered_user["user_id"])
+    _save_results(vid, [_loc("Kaputaş Plajı", 36.15, 29.45)])
+
+    resp = client.get("/internal/places?q=Kaputaş&semantic=true", headers=bff_headers)
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 1
+    assert resp.json()["places"][0]["name"] == "Kaputaş Plajı"

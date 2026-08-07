@@ -1,6 +1,7 @@
 """
 Infrastructure katmanı — AbstractPlaceRepository'nin SQLAlchemy implementasyonu.
 """
+import logging
 import math
 from typing import Optional, List, Dict, Any
 from sqlalchemy import func
@@ -10,6 +11,9 @@ from app.domain.repositories.place_repository import AbstractPlaceRepository
 from app.models.place import Place
 from app.models.place_save import PlaceSave
 from app.ml.location_deduplicator import normalize_place_name
+from app.ml.qdrant_service import QdrantService
+
+logger = logging.getLogger(__name__)
 
 
 class SqlPlaceRepository(AbstractPlaceRepository):
@@ -25,8 +29,11 @@ class SqlPlaceRepository(AbstractPlaceRepository):
     # gönderse bile amplification'ı önler.
     _MAX_PAGE_SIZE = 50
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, qdrant: Optional[QdrantService] = None):
         self._db = db
+        # QdrantService kendi içinde best-effort (bkz. qdrant_service.py) —
+        # burada ayrıca try/except'e gerek yok.
+        self._qdrant = qdrant or QdrantService()
 
     @staticmethod
     def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -75,10 +82,18 @@ class SqlPlaceRepository(AbstractPlaceRepository):
                 # Daha önce city/category çözülememiş bir kayıt, şimdi
                 # elimizdeki bilgiyle zenginleşebilir — backfill'i tekrar
                 # çalıştırmak eski kayıtları da bu şekilde tamamlıyor.
+                enriched = False
                 if not candidate.city and city:
                     candidate.city = city
+                    enriched = True
                 if not candidate.category and category:
                     candidate.category = category
+                    enriched = True
+                if enriched:
+                    # Embedding metni city/category içerdiği için (bkz.
+                    # QdrantService._embedding_text) zenginleşme anlamsal
+                    # aramanın kalitesini de etkiler — yeniden gömülmeli.
+                    self._qdrant.upsert_place(candidate.id, candidate.name, candidate.city, candidate.category)
                 return candidate
 
         place = Place(
@@ -94,6 +109,7 @@ class SqlPlaceRepository(AbstractPlaceRepository):
         )
         self._db.add(place)
         self._db.flush()  # id lazım (PlaceSave FK'ı için), henüz commit etme
+        self._qdrant.upsert_place(place.id, place.name, place.city, place.category)
         return place
 
     def _save_for_user(self, user_id: int, place: Place, video_id: Optional[int]) -> None:
@@ -157,11 +173,19 @@ class SqlPlaceRepository(AbstractPlaceRepository):
         city: Optional[str] = None,
         q: Optional[str] = None,
         category: Optional[str] = None,
+        semantic: bool = False,
         limit: int = 20,
         offset: int = 0,
     ) -> Dict[str, Any]:
         limit = max(1, min(limit, self._MAX_PAGE_SIZE))
         offset = max(0, offset)
+
+        if semantic and q:
+            result = self._get_library_semantic(user_id, q, city=city, category=category, limit=limit)
+            if result is not None:
+                return result
+            # Qdrant yapılandırılmamış/erişilemez ya da anlamsal eşleşme
+            # bulunamadı — aşağıdaki substring aramasına sessizce düş.
 
         query = (
             self._db.query(Place, PlaceSave.saved_at)
@@ -187,3 +211,45 @@ class SqlPlaceRepository(AbstractPlaceRepository):
             "places": [self._to_summary(place, saved_at) for place, saved_at in rows],
             "total": total,
         }
+
+    def _get_library_semantic(
+        self,
+        user_id: int,
+        q: str,
+        city: Optional[str],
+        category: Optional[str],
+        limit: int,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Anlamsal arama — yalnızca kullanıcının KENDİ kütüphanesindeki mekanlar
+        arasından (Qdrant filtresi place_id kümesiyle sınırlı, sızıntı yok).
+
+        `None` dönerse çağıran taraf normal substring aramasına düşer: bu hem
+        Qdrant erişilemezken hem de gerçekten hiç anlamsal eşleşme yokken
+        (ki substring de muhtemelen bir şey bulamayacaktır, zararsız) olur —
+        ayrım yapmaya gerek yok, her ikisinde de fallback doğru davranış.
+
+        Not: substring aramanın aksine offset tabanlı derin sayfalama
+        desteklemez — küçük kütüphane boyutları (bkz. _MAX_PAGE_SIZE) için
+        "en iyi N eşleşme" yeterli, arama aracı bir gezinme listesi değil.
+        """
+        query = (
+            self._db.query(Place, PlaceSave.saved_at)
+            .join(PlaceSave, PlaceSave.place_id == Place.id)
+            .filter(PlaceSave.user_id == user_id)
+        )
+        if city:
+            query = query.filter(Place.city.ilike(f"%{city}%"))
+        if category:
+            query = query.filter(Place.category == category)
+
+        rows_by_id = {place.id: (place, saved_at) for place, saved_at in query.all()}
+        if not rows_by_id:
+            return None
+
+        ranked_ids = self._qdrant.search_place_ids(q, list(rows_by_id.keys()), limit=limit)
+        if not ranked_ids:
+            return None
+
+        places = [self._to_summary(*rows_by_id[pid]) for pid in ranked_ids if pid in rows_by_id]
+        return {"places": places, "total": len(places)}

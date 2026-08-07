@@ -71,7 +71,6 @@ def test_init_isolates_single_service_failure():
          mock.patch("app.ml.speech_to_text.AudioProcessingService") as m_audio, \
          mock.patch("app.ml.ner_service.NERService") as m_ner, \
          mock.patch("app.ml.places_service.PlacesService") as m_places, \
-         mock.patch("app.ml.qdrant_service.QdrantService") as m_qdrant, \
          mock.patch("app.ml.route_optimizer.RouteOptimizer") as m_route, \
          mock.patch("app.ml.rag_service.RAGService") as m_rag:
         service = VideoProcessingService()
@@ -83,7 +82,6 @@ def test_init_isolates_single_service_failure():
     assert service.audio_processor is m_audio.return_value
     assert service.ner is m_ner.return_value
     assert service.places is m_places.return_value
-    assert service.qdrant is m_qdrant.return_value
     assert service.route_optimizer is m_route.return_value
     assert service.rag is m_rag.return_value
 

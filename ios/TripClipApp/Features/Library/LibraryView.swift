@@ -66,7 +66,11 @@ struct LibraryView: View {
                 } else if vm.places.isEmpty {
                     emptyState
                 } else if filteredPlaces.isEmpty {
-                    noResultsState
+                    if searchText.isEmpty {
+                        noResultsState
+                    } else {
+                        semanticSearchState
+                    }
                 } else {
                     list
                 }
@@ -80,6 +84,17 @@ struct LibraryView: View {
         .navigationTitle("Kütüphane")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Mekan veya şehir ara")
+        .onSubmit(of: .search) {
+            // Yerel substring filtresi zaten bir şey bulduysa anlamsal
+            // aramaya hiç gerek yok — yalnızca "bulunamadı" durumunda devreye girer.
+            guard filteredPlaces.isEmpty, !searchText.isEmpty else { return }
+            Task { await vm.searchSemantic(query: searchText, auth: auth) }
+        }
+        .onChange(of: searchText) { _, _ in
+            // Eski anlamsal sonuçlar yeni arama metniyle geçersiz —
+            // ekranda asılı kalmasınlar.
+            vm.clearSemanticResults()
+        }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 HStack(spacing: 16) {
@@ -121,6 +136,17 @@ struct LibraryView: View {
             Button("Tamam", role: .cancel) { vm.tripCreationError = nil }
         } message: {
             Text(vm.tripCreationError ?? "")
+        }
+        .alert(
+            "Arama yapılamadı",
+            isPresented: Binding(
+                get: { vm.semanticSearchError != nil },
+                set: { if !$0 { vm.semanticSearchError = nil } }
+            )
+        ) {
+            Button("Tamam", role: .cancel) { vm.semanticSearchError = nil }
+        } message: {
+            Text(vm.semanticSearchError ?? "")
         }
     }
 
@@ -203,27 +229,34 @@ struct LibraryView: View {
         ScrollView {
             LazyVStack(spacing: 10) {
                 ForEach(filteredPlaces) { place in
-                    if isSelecting {
-                        Button {
-                            withAnimation(.easeOut(duration: 0.15)) {
-                                if selectedIDs.contains(place.id) {
-                                    selectedIDs.remove(place.id)
-                                } else {
-                                    selectedIDs.insert(place.id)
-                                }
-                            }
-                        } label: {
-                            LibraryRowView(place: place, isSelected: selectedIDs.contains(place.id))
-                        }
-                        .buttonStyle(PressableButtonStyle())
-                    } else {
-                        LibraryRowView(place: place)
-                    }
+                    row(for: place)
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .padding(.bottom, isSelecting && !selectedIDs.isEmpty ? 60 : 0)
+        }
+    }
+
+    /// `list` ve anlamsal arama sonuçları aynı satır + seçim davranışını
+    /// paylaşır — Trip Builder seçim modu her iki yerde de çalışmalı.
+    @ViewBuilder
+    private func row(for place: LibraryPlace) -> some View {
+        if isSelecting {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) {
+                    if selectedIDs.contains(place.id) {
+                        selectedIDs.remove(place.id)
+                    } else {
+                        selectedIDs.insert(place.id)
+                    }
+                }
+            } label: {
+                LibraryRowView(place: place, isSelected: selectedIDs.contains(place.id))
+            }
+            .buttonStyle(PressableButtonStyle())
+        } else {
+            LibraryRowView(place: place)
         }
     }
 
@@ -255,6 +288,62 @@ struct LibraryView: View {
                 .font(.system(size: 15))
                 .foregroundStyle(AppColors.textSecondary)
             Spacer()
+        }
+    }
+
+    /// Yerel substring araması hiçbir şey bulamadığında gösterilir — ismi tam
+    /// hatırlanmayan mekanlar için anlamsal aramaya (Qdrant) geçiş noktası.
+    @ViewBuilder
+    private var semanticSearchState: some View {
+        if vm.isSearchingSemantic {
+            VStack(spacing: 12) {
+                Spacer()
+                ProgressView().tint(AppColors.accentText)
+                Text("Anlamsal arama yapılıyor…")
+                    .font(.system(size: 14))
+                    .foregroundStyle(AppColors.textSecondary)
+                Spacer()
+            }
+        } else if let results = vm.semanticResults {
+            if results.isEmpty {
+                noResultsState
+            } else {
+                semanticResultsList(results)
+            }
+        } else {
+            VStack(spacing: 8) {
+                Spacer()
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 40))
+                    .foregroundStyle(AppColors.textTertiary)
+                Text("Sonuç bulunamadı")
+                    .font(.system(size: 15))
+                    .foregroundStyle(AppColors.textSecondary)
+                Text("Tam ismini hatırlamıyorsan aramayı bitirmek için\nklavyede Ara'ya bas.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(AppColors.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                Spacer()
+            }
+        }
+    }
+
+    private func semanticResultsList(_ results: [LibraryPlace]) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Anlamsal Sonuçlar")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .textCase(.uppercase)
+                    .tracking(0.8)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                ForEach(results) { place in
+                    row(for: place).padding(.horizontal, 16)
+                }
+            }
+            .padding(.bottom, 12)
         }
     }
 

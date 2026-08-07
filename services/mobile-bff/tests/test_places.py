@@ -83,6 +83,25 @@ def test_get_library_forwards_category_filter(client, auth_headers, mock_core_ap
     assert kwargs["params"]["category"] == "Restoran"
 
 
+def test_get_library_forwards_semantic_flag(client, auth_headers, mock_core_api, make_response):
+    mock_core_api.get.return_value = make_response(200, {"places": [], "total": 0})
+
+    client.get("/api/mobile/places?q=sahil+kafesi&semantic=true", headers=auth_headers)
+
+    _, kwargs = mock_core_api.get.call_args
+    assert kwargs["params"]["semantic"] == "true"
+
+
+def test_get_library_omits_semantic_when_false(client, auth_headers, mock_core_api, make_response):
+    """Varsayılan false core-api'ye hiç gönderilmemeli — gereksiz sorgu string'i şişirmesin."""
+    mock_core_api.get.return_value = make_response(200, {"places": [], "total": 0})
+
+    client.get("/api/mobile/places?q=plaj", headers=auth_headers)
+
+    _, kwargs = mock_core_api.get.call_args
+    assert "semantic" not in kwargs["params"]
+
+
 def test_get_library_invalid_limit_rejected(client, auth_headers, mock_core_api):
     """limit>50 → core-api'ye hiç gidilmeden 422."""
     resp = client.get("/api/mobile/places?limit=9999", headers=auth_headers)

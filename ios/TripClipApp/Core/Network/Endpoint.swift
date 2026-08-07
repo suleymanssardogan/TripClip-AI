@@ -35,6 +35,10 @@ enum Endpoint {
 
     // Library — videolar-arası, tekilleştirilmiş mekan kütüphanesi
     case library(city: String?, q: String?, limit: Int, offset: Int)
+    /// Anlamsal arama — "o sahildeki kafe" tarzı sorgular. Sunucu Qdrant
+    /// yapılandırılmamışsa/eşleşme yoksa sessizce substring aramasına düşer,
+    /// bu yüzden ayrı bir "bulunamadı" hata durumu ele almaya gerek yok.
+    case librarySemanticSearch(q: String, city: String?, category: String?, limit: Int)
 
     // Trip Builder — Library'den seçilen mekanlardan TSP ile rotalanmış gezi
     case createTrip(title: String, placeIDs: [Int])
@@ -63,6 +67,7 @@ extension Endpoint {
         case .publicPlans:                  return "/api/mobile/videos/public"
         case .platformStats:                return "/api/mobile/videos/stats"
         case .library:                      return "/api/mobile/places"
+        case .librarySemanticSearch:         return "/api/mobile/places"
         case .createTrip:                   return "/api/mobile/trips"
         case .tripList:                     return "/api/mobile/trips"
         case .tripDetail(let id):           return "/api/mobile/trips/\(id)"
@@ -135,6 +140,15 @@ extension Endpoint {
             ]
             if let city { items.append(URLQueryItem(name: "city", value: city)) }
             if let q    { items.append(URLQueryItem(name: "q", value: q)) }
+            return items
+        case .librarySemanticSearch(let q, let city, let category, let limit):
+            var items = [
+                URLQueryItem(name: "q",        value: q),
+                URLQueryItem(name: "semantic", value: "true"),
+                URLQueryItem(name: "limit",    value: String(limit)),
+            ]
+            if let city     { items.append(URLQueryItem(name: "city", value: city)) }
+            if let category { items.append(URLQueryItem(name: "category", value: category)) }
             return items
         default:
             return nil

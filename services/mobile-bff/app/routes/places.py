@@ -21,11 +21,18 @@ async def get_library(
     city: Optional[str] = None,
     q: Optional[str] = None,
     category: Optional[str] = None,
+    semantic: bool = False,
     limit: int = Query(20, ge=1, le=50),
     offset: int = Query(0, ge=0),
     user_id: int = Depends(get_current_user_id),
 ):
-    """Kullanıcının tüm videolarından birikmiş mekan kütüphanesi — iOS Library ekranı."""
+    """
+    Kullanıcının tüm videolarından birikmiş mekan kütüphanesi — iOS Library ekranı.
+
+    `semantic=true`: "o sahildeki kafe" tarzı anlamsal arama — Qdrant
+    yapılandırılmamışsa veya eşleşme yoksa core-api sessizce substring
+    aramasına düşer, iOS tarafında ayrı bir hata durumu ele almaya gerek yok.
+    """
     rid = str(uuid.uuid4())[:8]
     params = {"limit": limit, "offset": offset}
     if city:
@@ -34,6 +41,8 @@ async def get_library(
         params["q"] = q
     if category:
         params["category"] = category
+    if semantic:
+        params["semantic"] = "true"
 
     async with mobile_error_wrapper(request_id=rid):
         async with internal_client(15.0) as client:

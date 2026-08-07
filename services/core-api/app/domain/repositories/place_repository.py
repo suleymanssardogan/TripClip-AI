@@ -23,6 +23,7 @@ class AbstractPlaceRepository(ABC):
         city: Optional[str] = None,
         q: Optional[str] = None,
         category: Optional[str] = None,
+        semantic: bool = False,
         limit: int = 20,
         offset: int = 0,
     ) -> Dict[str, Any]:

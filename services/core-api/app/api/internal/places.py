@@ -23,6 +23,7 @@ def get_library(
     city: Optional[str] = None,
     q: Optional[str] = None,
     category: Optional[str] = None,
+    semantic: bool = False,
     limit: int = Query(20, ge=1, le=50),
     offset: int = Query(0, ge=0),
     service: PlaceService = Depends(get_place_service),
@@ -32,6 +33,10 @@ def get_library(
     Kullanıcının tüm videolarından birikmiş, tekilleştirilmiş mekan
     kütüphanesi. goal.md Phase 7'deki "Library" ekranının backend'i —
     tek video değil, tüm zamanların kaydedilmiş mekanları.
+
+    `semantic=true`: Qdrant ile "o sahildeki kafe" tarzı anlamsal arama —
+    Qdrant yapılandırılmamışsa veya eşleşme yoksa normal substring aramasına
+    sessizce düşer (bkz. SqlPlaceRepository._get_library_semantic).
     """
     if x_user_id is None:
         from fastapi import HTTPException
@@ -39,4 +44,6 @@ def get_library(
             status_code=401,
             detail={"code": "UNAUTHORIZED", "message": "Kimlik doğrulama gerekli."},
         )
-    return service.get_library(x_user_id, city=city, q=q, category=category, limit=limit, offset=offset)
+    return service.get_library(
+        x_user_id, city=city, q=q, category=category, semantic=semantic, limit=limit, offset=offset
+    )

@@ -1,6 +1,5 @@
 """
-QdrantService — collection oluşturma, lokasyon ekleme ve benzerlik aramasının
-Qdrant/embedding istemcilerine doğru argümanlarla çağrı yaptığını doğrular.
+QdrantService — Place embed/anlamsal arama testleri.
 
 Gerçek Qdrant/SentenceTransformer'a hiç bağlanılmaz — self.client ve
 self.model doğrudan mock'lanarak _load()'un lazy-connect'i atlanır.
@@ -24,120 +23,116 @@ def service():
 def _fake_collections(names):
     collections = mock.MagicMock()
     collections.collections = [mock.MagicMock(name=n) for n in names]
-    # mock.MagicMock(name=...) sets the mock's repr, not the .name attribute —
-    # .name must be set explicitly for the code under test to read it correctly.
     for c, n in zip(collections.collections, names):
         c.name = n
     return collections
 
 
-# ─── create_collection ────────────────────────────────────────────────────────
+# ─── upsert_place ─────────────────────────────────────────────────────────────
 
-def test_create_collection_creates_when_missing(service):
+def test_upsert_place_creates_collection_when_missing(service):
     service.client.get_collections.return_value = _fake_collections([])
 
-    service.create_collection()
+    service.upsert_place(1, "Kaputaş Plajı", city="Antalya", category="Plaj")
 
     service.client.create_collection.assert_called_once()
     _, kwargs = service.client.create_collection.call_args
-    assert kwargs["collection_name"] == "locations"
+    assert kwargs["collection_name"] == "places"
 
 
-def test_create_collection_skips_when_already_exists(service):
-    service.client.get_collections.return_value = _fake_collections(["locations"])
+def test_upsert_place_skips_collection_creation_when_already_ready(service):
+    service.client.get_collections.return_value = _fake_collections(["places"])
 
-    service.create_collection()
+    service.upsert_place(1, "Kaputaş Plajı")
+    service.upsert_place(2, "Kaleiçi")
 
-    service.client.create_collection.assert_not_called()
+    # İlk çağrı koleksiyonu kontrol eder, ikincisi _collection_ready flag'i
+    # sayesinde tekrar get_collections çağırmamalı.
+    assert service.client.get_collections.call_count == 1
 
 
-# ─── add_locations ────────────────────────────────────────────────────────────
+def test_upsert_place_uses_place_id_as_point_id(service):
+    service.client.get_collections.return_value = _fake_collections(["places"])
 
-def test_add_locations_upserts_correct_point_count(service):
-    service.client.get_collections.return_value = _fake_collections(["locations"])
-    locations = [
-        {
-            "original_name": "Kaputaş Plajı",
-            "place_data": {"address": "Kaş, Antalya", "location": {"lat": 36.22, "lng": 29.45}, "type": "beach"},
-        },
-        {
-            "original_name": "Kaleiçi",
-            "place_data": {"address": "Antalya", "location": {"lat": 36.88, "lng": 30.70}, "type": "museum"},
-        },
-    ]
+    service.upsert_place(42, "Kaleiçi", city="Antalya", category="Tarihi Alan")
 
-    count = service.add_locations(locations)
-
-    assert count == 2
-    service.client.upsert.assert_called_once()
     _, kwargs = service.client.upsert.call_args
-    assert kwargs["collection_name"] == "locations"
-    assert len(kwargs["points"]) == 2
+    point = kwargs["points"][0]
+    assert point.id == 42
+    assert point.payload == {
+        "place_id": 42, "name": "Kaleiçi", "city": "Antalya", "category": "Tarihi Alan",
+    }
 
 
-def test_add_locations_embeds_name_and_address(service):
-    service.client.get_collections.return_value = _fake_collections(["locations"])
-    locations = [{"original_name": "Gaziantep Kalesi", "place_data": {"address": "Gaziantep"}}]
+def test_upsert_place_embeds_name_city_category():
+    svc = QdrantService()
+    svc.client = mock.MagicMock()
+    svc.model = mock.MagicMock()
+    svc.model.encode.return_value = mock.MagicMock(tolist=lambda: [0.1])
+    svc.client.get_collections.return_value = _fake_collections(["places"])
 
-    service.add_locations(locations)
+    svc.upsert_place(1, "Kaputaş Plajı", city="Antalya", category="Plaj")
 
-    service.model.encode.assert_called_once_with("Gaziantep Kalesi Gaziantep")
-
-
-def test_add_locations_payload_includes_coordinates(service):
-    service.client.get_collections.return_value = _fake_collections(["locations"])
-    locations = [{
-        "original_name": "Kaleiçi",
-        "place_data": {"address": "Antalya", "location": {"lat": 36.88, "lng": 30.70}, "type": "museum"},
-    }]
-
-    service.add_locations(locations)
-
-    point = service.client.upsert.call_args.kwargs["points"][0]
-    assert point.payload["lat"] == 36.88
-    assert point.payload["lng"] == 30.70
-    assert point.payload["type"] == "museum"
+    svc.model.encode.assert_called_once_with("Kaputaş Plajı, Antalya, Plaj")
 
 
-def test_add_locations_empty_list_upserts_nothing(service):
-    service.client.get_collections.return_value = _fake_collections(["locations"])
-    count = service.add_locations([])
-    assert count == 0
-    service.client.upsert.assert_called_once_with(collection_name="locations", points=[])
+def test_upsert_place_omits_missing_fields_from_embedding_text():
+    svc = QdrantService()
+    svc.client = mock.MagicMock()
+    svc.model = mock.MagicMock()
+    svc.model.encode.return_value = mock.MagicMock(tolist=lambda: [0.1])
+    svc.client.get_collections.return_value = _fake_collections(["places"])
+
+    svc.upsert_place(1, "Bilinmeyen Yer")
+
+    svc.model.encode.assert_called_once_with("Bilinmeyen Yer")
 
 
-# ─── search_similar ───────────────────────────────────────────────────────────
+def test_upsert_place_swallows_qdrant_errors(service):
+    service.client.get_collections.side_effect = RuntimeError("connection refused")
 
-def _fake_result(name, address, lat, lng, score):
+    # Exception fırlatmamalı — best-effort.
+    service.upsert_place(1, "Kaleiçi")
+
+
+# ─── search_place_ids ─────────────────────────────────────────────────────────
+
+def _fake_hit(place_id, score):
     r = mock.MagicMock()
-    r.payload = {"name": name, "address": address, "lat": lat, "lng": lng}
+    r.payload = {"place_id": place_id}
     r.score = score
     return r
 
 
-def test_search_similar_maps_results_and_rounds_score(service):
-    service.client.search.return_value = [
-        _fake_result("Kaleiçi", "Antalya", 36.88, 30.70, 0.876543),
-    ]
-
-    results = service.search_similar("tarihi çarşı")
-
-    assert len(results) == 1
-    assert results[0]["name"] == "Kaleiçi"
-    assert results[0]["score"] == 0.877
+def test_search_returns_empty_list_when_no_place_ids_given(service):
+    assert service.search_place_ids("plaj", place_ids=[]) == []
+    service.client.search.assert_not_called()
 
 
-def test_search_similar_passes_query_vector_and_limit(service):
-    service.client.search.return_value = []
+def test_search_filters_by_place_ids(service):
+    service.client.get_collections.return_value = _fake_collections(["places"])
+    service.client.search.return_value = [_fake_hit(5, 0.9), _fake_hit(2, 0.7)]
 
-    service.search_similar("sahil", limit=3)
+    result = service.search_place_ids("sahil kenarı", place_ids=[5, 2, 9], limit=10)
 
-    service.model.encode.assert_called_once_with("sahil")
+    assert result == [5, 2]
     _, kwargs = service.client.search.call_args
-    assert kwargs["collection_name"] == "locations"
-    assert kwargs["limit"] == 3
+    assert kwargs["collection_name"] == "places"
+    assert kwargs["limit"] == 10
+    qfilter = kwargs["query_filter"]
+    assert qfilter.must[0].match.any == [5, 2, 9]
 
 
-def test_search_similar_empty_results(service):
+def test_search_returns_empty_list_on_qdrant_error(service):
+    service.client.get_collections.side_effect = RuntimeError("unreachable")
+
+    result = service.search_place_ids("plaj", place_ids=[1, 2])
+
+    assert result == []
+
+
+def test_search_returns_empty_list_when_no_hits(service):
+    service.client.get_collections.return_value = _fake_collections(["places"])
     service.client.search.return_value = []
-    assert service.search_similar("bulunamayan yer") == []
+
+    assert service.search_place_ids("bulunamayan yer", place_ids=[1]) == []

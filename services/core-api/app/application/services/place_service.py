@@ -18,9 +18,12 @@ class PlaceService:
         city: Optional[str] = None,
         q: Optional[str] = None,
         category: Optional[str] = None,
+        semantic: bool = False,
         limit: int = 20,
         offset: int = 0,
     ) -> LibraryResponse:
-        data = self._repo.get_library(user_id, city=city, q=q, category=category, limit=limit, offset=offset)
+        data = self._repo.get_library(
+            user_id, city=city, q=q, category=category, semantic=semantic, limit=limit, offset=offset
+        )
         places = [PlaceSummary(**p) for p in data["places"]]
         return LibraryResponse(places=places, total=data["total"])
