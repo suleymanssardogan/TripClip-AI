@@ -29,6 +29,8 @@ import app.models.plan           # noqa: E402, F401
 import app.models.refresh_token  # noqa: E402, F401
 import app.models.place          # noqa: E402, F401
 import app.models.place_save     # noqa: E402, F401
+import app.models.trip           # noqa: E402, F401
+import app.models.trip_stop      # noqa: E402, F401
 
 target_metadata = Base.metadata
 

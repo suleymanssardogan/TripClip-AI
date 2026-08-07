@@ -124,6 +124,34 @@ class DailyQuotaExceededException(TripClipException):
         )
 
 
+# ── Trip ──────────────────────────────────────────────────────────────────────
+
+class TripNotFoundException(TripClipException):
+    def __init__(self, trip_id: int):
+        super().__init__(
+            f"Gezi bulunamadı (ID: {trip_id})",
+            code="TRIP_NOT_FOUND",
+            status_code=404,
+            details={"trip_id": trip_id},
+        )
+
+
+class InvalidTripPlacesException(TripClipException):
+    """Trip oluşturulurken verilen place_id listesi geçersiz.
+
+    Boş, tekrarlı, ya da kullanıcının kendi Library'sine ait olmayan bir id
+    içeriyorsa reddedilir — aksi halde başka bir kullanıcının kaydettiği bir
+    mekan sessizce bir Trip'e eklenebilir.
+    """
+    def __init__(self, message: str):
+        super().__init__(message, code="INVALID_TRIP_PLACES", status_code=400)
+
+
+class InvalidTripStopOrderException(TripClipException):
+    def __init__(self, message: str):
+        super().__init__(message, code="INVALID_TRIP_STOP_ORDER", status_code=400)
+
+
 # ── Database ──────────────────────────────────────────────────────────────────
 
 class DatabaseException(TripClipException):

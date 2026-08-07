@@ -27,7 +27,7 @@ def get_db():
     finally:
         db.close()
 
-from app.models import user, video, place, place_save
+from app.models import user, video, place, place_save, trip, trip_stop
 
 def create_table():
     Base.metadata.create_all(bind=engine)

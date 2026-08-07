@@ -32,6 +32,9 @@ _MOBILE_MESSAGES: dict[str, str] = {
     "DAILY_QUOTA_EXCEEDED":      "Günlük video işleme limitine ulaştınız. Lütfen yarın tekrar deneyin.",
     "VALIDATION_ERROR":          "Gönderilen bilgiler eksik veya hatalı.",
     "INVALID_STOP_ORDER":        "Durak sırası güncellenemedi. Sayfayı yenileyip tekrar deneyin.",
+    "TRIP_NOT_FOUND":            "Bu gezi artık mevcut değil.",
+    "INVALID_TRIP_PLACES":       "Seçilen mekanlardan gezi oluşturulamadı.",
+    "INVALID_TRIP_STOP_ORDER":   "Durak sırası güncellenemedi. Sayfayı yenileyip tekrar deneyin.",
     "ML_SERVICE_UNAVAILABLE":    "AI analiz servisi şu an meşgul. Lütfen bekleyin.",
     "DATABASE_ERROR":            "Sunucu geçici olarak kullanılamıyor.",
     "SERVICE_UNAVAILABLE":       "Servis şu an kullanılamıyor. Lütfen daha sonra deneyin.",
@@ -52,7 +55,7 @@ def _parse_core_error(data: dict) -> tuple[str, str, int]:
     status   = 500 if code in {"INTERNAL_SERVER_ERROR", "DATABASE_ERROR", "ML_SERVICE_UNAVAILABLE"} else 400
     if code in {"UNAUTHORIZED", "AUTH_ERROR"}:
         status = 401
-    if code in {"VIDEO_NOT_FOUND"}:
+    if code in {"VIDEO_NOT_FOUND", "TRIP_NOT_FOUND"}:
         status = 404
     # Yetki hatası 400'e düşüyordu; başkasının planını silmeye/düzenlemeye
     # çalışmak istemcide "geçersiz istek" gibi görünüyordu.
