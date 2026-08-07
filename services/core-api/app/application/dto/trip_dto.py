@@ -33,6 +33,11 @@ class TripDetailResponse(BaseModel):
     created_at: Optional[str]
     days: List[List[TripStopDTO]]
     stops_count: int
+    owner_id: int
+    # 'owner' | 'editor' | 'viewer' — isteği yapan kullanıcının BU trip'teki
+    # rolü. İstemci bunu düzenleme/silme kontrollerini göstermek/gizlemek için
+    # kullanır (sunucu zaten her isteği ayrıca doğruluyor, bu yalnızca UI ipucu).
+    your_role: str
 
 
 class TripSummaryResponse(BaseModel):
@@ -41,6 +46,7 @@ class TripSummaryResponse(BaseModel):
     total_distance_km: Optional[float]
     created_at: Optional[str]
     stops_count: int
+    role: str
 
 
 class TripListResponse(BaseModel):

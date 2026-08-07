@@ -293,3 +293,150 @@ def test_delete_trip(client, bff_headers, registered_user):
 def test_delete_trip_not_found(client, bff_headers):
     resp = client.delete("/internal/trips/999999", headers=bff_headers)
     assert resp.status_code == 404
+
+
+# ─── Collaborator izinleri (accept-invite akışı henüz yok, satır doğrudan
+# eklenerek accept'in üreteceği son durum taklit ediliyor) ───────────────────
+
+def _add_collaborator(trip_id: int, user_id: int, role: str) -> None:
+    from app.models.trip_collaborator import TripCollaborator
+    from app.models.trip_share_enums import CollaboratorRole
+
+    db = TestingSessionLocal()
+    try:
+        db.add(TripCollaborator(trip_id=trip_id, user_id=user_id, role=CollaboratorRole(role)))
+        db.commit()
+    finally:
+        db.close()
+
+
+def _second_user(client):
+    import uuid
+    email = f"collab_{uuid.uuid4().hex[:6]}@test.com"
+    resp = client.post("/internal/auth/register", json={"email": email, "password": "P2_test!"})
+    return resp.json()["user_id"]
+
+
+def test_owner_role_reported_as_owner(client, bff_headers, registered_user):
+    uid = registered_user["user_id"]
+    _save_places(uid, [_loc("Sahip Mekanı", 36.0, 29.0)])
+    place_ids = _library_place_ids(client, bff_headers)
+    resp = client.post("/internal/trips", json={"title": "T", "place_ids": place_ids}, headers=bff_headers)
+    assert resp.json()["your_role"] == "owner"
+    assert resp.json()["owner_id"] == uid
+
+
+def test_viewer_collaborator_can_view_trip(client, bff_headers, registered_user):
+    uid = registered_user["user_id"]
+    _save_places(uid, [_loc("Görüntülenecek Mekan", 36.0, 29.0)])
+    place_ids = _library_place_ids(client, bff_headers)
+    trip_id = client.post(
+        "/internal/trips", json={"title": "T", "place_ids": place_ids}, headers=bff_headers
+    ).json()["id"]
+
+    viewer_id = _second_user(client)
+    _add_collaborator(trip_id, viewer_id, "viewer")
+
+    resp = client.get(f"/internal/trips/{trip_id}", headers={"x-user-id": str(viewer_id)})
+    assert resp.status_code == 200
+    assert resp.json()["your_role"] == "viewer"
+
+
+def test_viewer_collaborator_cannot_edit_stop_order(client, bff_headers, registered_user):
+    uid = registered_user["user_id"]
+    _save_places(uid, [_loc("Mekan A", 36.0, 29.0), _loc("Mekan B", 36.1, 29.1)])
+    place_ids = _library_place_ids(client, bff_headers)
+    trip_id = client.post(
+        "/internal/trips", json={"title": "T", "place_ids": place_ids}, headers=bff_headers
+    ).json()["id"]
+
+    viewer_id = _second_user(client)
+    _add_collaborator(trip_id, viewer_id, "viewer")
+
+    resp = client.patch(
+        f"/internal/trips/{trip_id}/order",
+        json={"order": [list(reversed(place_ids))]},
+        headers={"x-user-id": str(viewer_id)},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "PERMISSION_DENIED"
+
+
+def test_editor_collaborator_can_edit_stop_order(client, bff_headers, registered_user):
+    uid = registered_user["user_id"]
+    _save_places(uid, [_loc("Mekan A", 36.0, 29.0), _loc("Mekan B", 36.1, 29.1)])
+    place_ids = _library_place_ids(client, bff_headers)
+    trip_id = client.post(
+        "/internal/trips", json={"title": "T", "place_ids": place_ids}, headers=bff_headers
+    ).json()["id"]
+
+    editor_id = _second_user(client)
+    _add_collaborator(trip_id, editor_id, "editor")
+
+    reversed_ids = list(reversed(place_ids))
+    resp = client.patch(
+        f"/internal/trips/{trip_id}/order",
+        json={"order": [reversed_ids]},
+        headers={"x-user-id": str(editor_id)},
+    )
+    assert resp.status_code == 200
+
+    detail = client.get(f"/internal/trips/{trip_id}", headers=bff_headers).json()
+    assert [s["place_id"] for s in detail["days"][0]] == reversed_ids
+
+
+def test_editor_collaborator_cannot_delete_trip(client, bff_headers, registered_user):
+    """Yalnızca owner silebilir — editor bile silemez (spesifikasyonun katı gereksinimi)."""
+    uid = registered_user["user_id"]
+    _save_places(uid, [_loc("Mekan", 36.0, 29.0)])
+    place_ids = _library_place_ids(client, bff_headers)
+    trip_id = client.post(
+        "/internal/trips", json={"title": "T", "place_ids": place_ids}, headers=bff_headers
+    ).json()["id"]
+
+    editor_id = _second_user(client)
+    _add_collaborator(trip_id, editor_id, "editor")
+
+    resp = client.delete(f"/internal/trips/{trip_id}", headers={"x-user-id": str(editor_id)})
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "PERMISSION_DENIED"
+
+    # Trip hâlâ owner için erişilebilir olmalı — silme denemesi başarısız olduğu için.
+    assert client.get(f"/internal/trips/{trip_id}", headers=bff_headers).status_code == 200
+
+
+def test_non_collaborator_gets_not_found_not_forbidden(client, bff_headers, registered_user):
+    """İlişkisi olmayan biri için 403 değil 404 dönmeli — trip'in var olduğunu bile sızdırmamalı."""
+    uid = registered_user["user_id"]
+    _save_places(uid, [_loc("Mekan", 36.0, 29.0)])
+    place_ids = _library_place_ids(client, bff_headers)
+    trip_id = client.post(
+        "/internal/trips", json={"title": "T", "place_ids": place_ids}, headers=bff_headers
+    ).json()["id"]
+
+    stranger_id = _second_user(client)
+    resp = client.get(f"/internal/trips/{trip_id}", headers={"x-user-id": str(stranger_id)})
+    assert resp.status_code == 404
+
+
+def test_list_trips_includes_collaborator_trips_with_role(client, bff_headers, registered_user):
+    uid = registered_user["user_id"]
+    _save_places(uid, [_loc("Paylaşılan Mekan", 36.0, 29.0)])
+    place_ids = _library_place_ids(client, bff_headers)
+    trip_id = client.post(
+        "/internal/trips", json={"title": "Paylaşılan Gezi", "place_ids": place_ids}, headers=bff_headers
+    ).json()["id"]
+
+    viewer_id = _second_user(client)
+    _add_collaborator(trip_id, viewer_id, "viewer")
+
+    resp = client.get("/internal/trips", headers={"x-user-id": str(viewer_id)})
+    trips = resp.json()["trips"]
+    assert len(trips) == 1
+    assert trips[0]["id"] == trip_id
+    assert trips[0]["role"] == "viewer"
+
+    # Owner'ın kendi listesinde hâlâ 'owner' rolüyle görünmeli, çift kayıt değil.
+    owner_trips = client.get("/internal/trips", headers=bff_headers).json()["trips"]
+    assert len(owner_trips) == 1
+    assert owner_trips[0]["role"] == "owner"

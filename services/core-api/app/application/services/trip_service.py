@@ -14,6 +14,7 @@ from app.core.exceptions import (
     TripNotFoundException,
     InvalidTripPlacesException,
     InvalidTripStopOrderException,
+    PermissionDeniedException,
 )
 
 
@@ -63,8 +64,17 @@ class TripService:
         if len(flat) != len(set(flat)):
             raise InvalidTripStopOrderException("Aynı mekan birden fazla kez sıralanamaz.")
 
-        self._repo.update_stop_order(trip_id, user_id, order)
+        result = self._repo.update_stop_order(trip_id, user_id, order)
+        if result == "forbidden":
+            raise PermissionDeniedException("Bu geziyi düzenleme yetkiniz yok — yalnızca sahibi ve editörler düzenleyebilir.")
+        # 'not_found' burada pratikte olmaz: current = get_trip zaten yukarıda
+        # None kontrolü yaptı, ama savunmacı olarak yine de kontrol ediyoruz.
+        if result == "not_found":
+            raise TripNotFoundException(trip_id)
 
     def delete_trip(self, trip_id: int, user_id: int) -> None:
-        if not self._repo.delete_trip(trip_id, user_id):
+        result = self._repo.delete_trip(trip_id, user_id)
+        if result == "not_found":
             raise TripNotFoundException(trip_id)
+        if result == "forbidden":
+            raise PermissionDeniedException("Bu geziyi yalnızca sahibi silebilir.")
