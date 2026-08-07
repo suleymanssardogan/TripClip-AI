@@ -32,6 +32,16 @@ enum Endpoint {
     // Plans
     case publicPlans(city: String?, limit: Int, offset: Int)
     case platformStats
+
+    // Library — videolar-arası, tekilleştirilmiş mekan kütüphanesi
+    case library(city: String?, q: String?, limit: Int, offset: Int)
+
+    // Trip Builder — Library'den seçilen mekanlardan TSP ile rotalanmış gezi
+    case createTrip(title: String, placeIDs: [Int])
+    case tripList
+    case tripDetail(tripID: Int)
+    case updateTripStopOrder(tripID: Int, order: [[Int]])
+    case deleteTrip(tripID: Int)
 }
 
 extension Endpoint {
@@ -52,15 +62,21 @@ extension Endpoint {
         case .deletePlan(let id):           return "/api/mobile/videos/\(id)"
         case .publicPlans:                  return "/api/mobile/videos/public"
         case .platformStats:                return "/api/mobile/videos/stats"
+        case .library:                      return "/api/mobile/places"
+        case .createTrip:                   return "/api/mobile/trips"
+        case .tripList:                     return "/api/mobile/trips"
+        case .tripDetail(let id):           return "/api/mobile/trips/\(id)"
+        case .updateTripStopOrder(let id, _): return "/api/mobile/trips/\(id)/order"
+        case .deleteTrip(let id):           return "/api/mobile/trips/\(id)"
         }
     }
 
     var method: HTTPMethod {
         switch self {
-        case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl: return .post
+        case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl, .createTrip: return .post
         case .registerDeviceToken: return .put
-        case .updateStopOrder: return .patch
-        case .deletePlan: return .delete
+        case .updateStopOrder, .updateTripStopOrder: return .patch
+        case .deletePlan, .deleteTrip: return .delete
         default: return .get
         }
     }
@@ -92,6 +108,12 @@ extension Endpoint {
         case .updateStopOrder(_, let order):
             return ["order": order]
 
+        case .createTrip(let title, let placeIDs):
+            return ["title": title, "place_ids": placeIDs]
+
+        case .updateTripStopOrder(_, let order):
+            return ["order": order]
+
         default:
             return nil
         }
@@ -105,6 +127,14 @@ extension Endpoint {
                 URLQueryItem(name: "offset", value: String(offset)),
             ]
             if let city { items.append(URLQueryItem(name: "city", value: city)) }
+            return items
+        case .library(let city, let q, let limit, let offset):
+            var items = [
+                URLQueryItem(name: "limit",  value: String(limit)),
+                URLQueryItem(name: "offset", value: String(offset)),
+            ]
+            if let city { items.append(URLQueryItem(name: "city", value: city)) }
+            if let q    { items.append(URLQueryItem(name: "q", value: q)) }
             return items
         default:
             return nil

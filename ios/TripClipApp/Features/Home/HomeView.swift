@@ -225,6 +225,14 @@ struct HomeView: View {
             .disabled(uploadState.isActive)
             .padding(.trailing, 8)
 
+            // Kütüphane — tüm videolardan birikmiş, tekilleştirilmiş mekanlar
+            NavigationLink(destination: LibraryView()) {
+                Image(systemName: "books.vertical")
+                    .font(.system(size: 18))
+                    .foregroundStyle(AppColors.textSecondary)
+            }
+            .padding(.trailing, 12)
+
             // Offline history
             NavigationLink(destination: HistoryView()) {
                 Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
