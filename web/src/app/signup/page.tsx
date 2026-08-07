@@ -1,20 +1,27 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { Suspense, useState } from "react";
 import { motion } from "framer-motion";
 import { Loader2, AlertCircle, CheckCircle, ArrowRight } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { register, saveAuthTokens } from "@/lib/api";
 import PasswordInput from "@/components/PasswordInput";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 
-export default function SignupPage() {
+function SignupForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState("");
   const [success, setSuccess] = useState(false);
+
+  // Yalnızca site-içi bir yola izin ver — açık yönlendirme (open redirect)
+  // olmasın diye ("//evil.com" gibi protokolden bağımsız yollar da reddedilir).
+  const next = searchParams.get("next");
+  const redirectTo = next && next.startsWith("/") && !next.startsWith("//") ? next : "/welcome";
+  const loginHref = next ? `/login?next=${encodeURIComponent(next)}` : "/login";
 
   const handleSignup = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -28,7 +35,7 @@ export default function SignupPage() {
       );
       saveAuthTokens(data);
       setSuccess(true);
-      setTimeout(() => router.push("/welcome"), 1000);
+      setTimeout(() => router.push(redirectTo), 1000);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Kayıt sırasında bir hata oluştu.");
     } finally { setLoading(false); }
@@ -120,12 +127,20 @@ export default function SignupPage() {
 
           <p className="text-text-secondary text-sm text-center">
             Zaten hesabın var mı?{" "}
-            <Link href="/login" className="text-accent-text hover:opacity-80 font-semibold transition-opacity">
+            <Link href={loginHref} className="text-accent-text hover:opacity-80 font-semibold transition-opacity">
               Giriş Yap →
             </Link>
           </p>
         </motion.div>
       </div>
     </div>
+  );
+}
+
+export default function SignupPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-bg" />}>
+      <SignupForm />
+    </Suspense>
   );
 }

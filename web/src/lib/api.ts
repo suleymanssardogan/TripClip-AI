@@ -269,6 +269,40 @@ export async function getStats() {
   return request<PlatformStats>("/plans/stats");
 }
 
+// ─── Trip sharing ──────────────────────────────────────────────────────────
+//
+// Web'in rolü yalnızca davet ALAN taraf: önizleme (anonim) + kabul/reddet
+// (giriş gerektirir). Davet OLUŞTURMA/collaborator yönetimi iOS'ta — bkz.
+// services/web-bff/app/routes/trip_sharing.py.
+
+export async function getSharePreview(token: string) {
+  return request<SharePreview>(`/shares/${token}/preview`);
+}
+
+export async function acceptShare(token: string) {
+  return request<AcceptShareResult>("/shares/accept", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export async function declineShare(token: string) {
+  return request<{ success: boolean }>("/shares/decline", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
+}
+
+export interface SharePreview {
+  trip_title: string;
+  stops_count: number;
+  role: string;
+}
+
+export interface AcceptShareResult {
+  trip_id: number;
+}
+
 // ─── Tipler ────────────────────────────────────────────────────────────────
 
 export interface Plan {
