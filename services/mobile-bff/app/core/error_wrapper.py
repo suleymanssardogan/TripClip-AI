@@ -39,6 +39,8 @@ _MOBILE_MESSAGES: dict[str, str] = {
     "SHARE_NOT_FOUND":          "Bu davet artık mevcut değil.",
     "SHARE_TOKEN_INVALID":      "Bu davet linki artık geçerli değil.",
     "CANNOT_JOIN_OWN_TRIP":     "Kendi gezinize collaborator olarak katılamazsınız.",
+    "INVALID_OPTIMIZATION_REQUEST": "Gezi optimize edilemedi. Seçimlerinizi kontrol edip tekrar deneyin.",
+    "ITINERARY_NOT_FOUND":      "Bu itinerary artık mevcut değil.",
     "ML_SERVICE_UNAVAILABLE":    "AI analiz servisi şu an meşgul. Lütfen bekleyin.",
     "DATABASE_ERROR":            "Sunucu geçici olarak kullanılamıyor.",
     "SERVICE_UNAVAILABLE":       "Servis şu an kullanılamıyor. Lütfen daha sonra deneyin.",
@@ -59,7 +61,7 @@ def _parse_core_error(data: dict) -> tuple[str, str, int]:
     status   = 500 if code in {"INTERNAL_SERVER_ERROR", "DATABASE_ERROR", "ML_SERVICE_UNAVAILABLE"} else 400
     if code in {"UNAUTHORIZED", "AUTH_ERROR"}:
         status = 401
-    if code in {"VIDEO_NOT_FOUND", "TRIP_NOT_FOUND", "SHARE_NOT_FOUND", "SHARE_TOKEN_INVALID"}:
+    if code in {"VIDEO_NOT_FOUND", "TRIP_NOT_FOUND", "SHARE_NOT_FOUND", "SHARE_TOKEN_INVALID", "ITINERARY_NOT_FOUND"}:
         status = 404
     # Yetki hatası 400'e düşüyordu; başkasının planını silmeye/düzenlemeye
     # çalışmak istemcide "geçersiz istek" gibi görünüyordu.

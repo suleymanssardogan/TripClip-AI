@@ -35,6 +35,8 @@ _WEB_MESSAGES: dict[str, str] = {
     "SHARE_TOKEN_INVALID":       "Bu davet linki artık geçerli değil. Süresi dolmuş, iptal edilmiş ya da zaten yanıtlanmış olabilir.",
     "CANNOT_JOIN_OWN_TRIP":      "Kendi gezinize collaborator olarak katılamazsınız.",
     "TRIP_NOT_FOUND":            "Aradığınız gezi bulunamadı.",
+    "INVALID_OPTIMIZATION_REQUEST": "Gezi optimize edilemedi. Seçimlerinizi kontrol edip tekrar deneyin.",
+    "ITINERARY_NOT_FOUND":       "Aradığınız itinerary bulunamadı.",
 }
 
 _DEFAULT_MESSAGE = "Bir hata oluştu. Lütfen sayfayı yenileyip tekrar deneyin."
@@ -49,7 +51,7 @@ def _parse_core_error(data: dict) -> tuple[str, str, int]:
         status = 401
     elif code == "PERMISSION_DENIED":
         status = 403
-    elif code in {"VIDEO_NOT_FOUND", "SHARE_TOKEN_INVALID", "TRIP_NOT_FOUND"}:
+    elif code in {"VIDEO_NOT_FOUND", "SHARE_TOKEN_INVALID", "TRIP_NOT_FOUND", "ITINERARY_NOT_FOUND"}:
         status = 404
     elif code in {"RATE_LIMIT_EXCEEDED", "DAILY_QUOTA_EXCEEDED"}:
         status = 429
