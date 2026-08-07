@@ -72,7 +72,7 @@ BFFs talk to core-api over Docker internal networking. Frontends never call core
 
 - **PostgreSQL** — users, videos (metadata + AI results), plans
 - **Redis db=0** — Celery broker; **db=2** — Celery results; also stores per-video progress via `set_progress(video_id, stage, percent)`
-- **MongoDB** — secondary storage
+- **MongoDB** — `analytics_events` collection: shared-trip growth-loop instrumentation (see `docs/shared-trip-analytics.md`)
 - **Qdrant** — vector DB for Place library semantic search (sentence-transformers embeddings); one point per `Place`, keyed by `place_id`
 
 ### Video Processing Pipeline
@@ -150,5 +150,6 @@ Core-API uses `TripClipException` → `tripclip_exception_handler` for structure
 | `YT_DLP_COOKIES` | celery-worker | Path to cookies.txt for private Instagram Reels |
 | `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_BUNDLE_ID` / `APNS_AUTH_KEY` | celery-worker | Optional; push (processing complete/failed) only activates when all four are set |
 | `APNS_USE_SANDBOX` | celery-worker | `true` for TestFlight/dev builds, `false` for App Store. Default: `true` |
+| `ANALYTICS_ENABLED` | core-api | Kill switch for shared-trip event writes. Default: `true` |
 
 All vars in `docker-compose.yml`. Copy `.env.example` → `.env` and set `GEMINI_API_KEY`.

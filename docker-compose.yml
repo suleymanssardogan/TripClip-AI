@@ -92,6 +92,7 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
       - GEMINI_SEND_FRAMES=${GEMINI_SEND_FRAMES:-true}
+      - ANALYTICS_ENABLED=${ANALYTICS_ENABLED:-true}
     volumes:
       - uploads_data:/app/uploads
       - ./services/core-api/app:/app/app
@@ -136,6 +137,7 @@ services:
       - APNS_BUNDLE_ID=${APNS_BUNDLE_ID:-}
       - APNS_AUTH_KEY=${APNS_AUTH_KEY:-}
       - APNS_USE_SANDBOX=${APNS_USE_SANDBOX:-true}
+      - ANALYTICS_ENABLED=${ANALYTICS_ENABLED:-true}
       - OMP_NUM_THREADS=1
       - MKL_NUM_THREADS=1
       - OPENBLAS_NUM_THREADS=1
