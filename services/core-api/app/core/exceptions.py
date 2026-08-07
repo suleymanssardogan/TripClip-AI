@@ -152,6 +152,25 @@ class InvalidTripStopOrderException(TripClipException):
         super().__init__(message, code="INVALID_TRIP_STOP_ORDER", status_code=400)
 
 
+# ── Trip Optimizer ──────────────────────────────────────────────────────────
+
+class InvalidOptimizationRequestException(TripClipException):
+    """Boş/tekrarlı-sonrası-boş place_ids, sahibi olunmayan bir place_id,
+    geçersiz saat/tarih formatı ya da bilinmeyen bir strateji adı."""
+    def __init__(self, message: str):
+        super().__init__(message, code="INVALID_OPTIMIZATION_REQUEST", status_code=400)
+
+
+class ItineraryNotFoundException(TripClipException):
+    def __init__(self, itinerary_id: int):
+        super().__init__(
+            f"Itinerary bulunamadı (ID: {itinerary_id})",
+            code="ITINERARY_NOT_FOUND",
+            status_code=404,
+            details={"itinerary_id": itinerary_id},
+        )
+
+
 # ── Trip Sharing ──────────────────────────────────────────────────────────────
 
 class InvalidShareRequestException(TripClipException):
