@@ -22,6 +22,7 @@ def get_place_service(db: Session = Depends(get_db)) -> PlaceService:
 def get_library(
     city: Optional[str] = None,
     q: Optional[str] = None,
+    category: Optional[str] = None,
     limit: int = Query(20, ge=1, le=50),
     offset: int = Query(0, ge=0),
     service: PlaceService = Depends(get_place_service),
@@ -38,4 +39,4 @@ def get_library(
             status_code=401,
             detail={"code": "UNAUTHORIZED", "message": "Kimlik doğrulama gerekli."},
         )
-    return service.get_library(x_user_id, city=city, q=q, limit=limit, offset=offset)
+    return service.get_library(x_user_id, city=city, q=q, category=category, limit=limit, offset=offset)

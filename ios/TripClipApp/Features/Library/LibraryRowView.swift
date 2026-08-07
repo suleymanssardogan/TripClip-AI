@@ -26,6 +26,15 @@ struct LibraryRowView: View {
                     .lineLimit(1)
 
                 HStack(spacing: 8) {
+                    if let category = place.category, !category.isEmpty {
+                        Text(category)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(AppColors.route)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(AppColors.route.opacity(0.1))
+                            .clipShape(Capsule())
+                    }
                     if let city = place.city, !city.isEmpty {
                         Text(city)
                             .font(.system(size: 12))

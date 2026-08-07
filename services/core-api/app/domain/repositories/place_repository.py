@@ -22,6 +22,7 @@ class AbstractPlaceRepository(ABC):
         user_id: int,
         city: Optional[str] = None,
         q: Optional[str] = None,
+        category: Optional[str] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> Dict[str, Any]:

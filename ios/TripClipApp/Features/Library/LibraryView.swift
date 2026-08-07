@@ -5,6 +5,9 @@ struct LibraryView: View {
     @Environment(AuthEnvironment.self) private var auth
     @State private var vm = LibraryViewModel()
     @State private var searchText = ""
+    /// nil → "Tümü" (filtre yok). places_service._categorize'ın sabit
+    /// taksonomisinden geliyor, bu yüzden serbest metin değil seçim listesi.
+    @State private var selectedCategory: String?
 
     // MARK: - Trip Builder seçim modu
 
@@ -16,32 +19,59 @@ struct LibraryView: View {
     /// Trip Detail'e geçer, sonra otomatik nil'e döner.
     @State private var createdTrip: TripDetail?
 
-    // Sunucu city/q filtresini destekliyor, ama ilk sürümde tüm kütüphane
-    // (≤50 mekan) zaten tek seferde çekiliyor — arama-her-tuşta-ağ isteği
-    // yerine yerinde filtrelemek daha basit ve anında yanıt veriyor.
+    // Sunucu city/q/category filtresini destekliyor, ama ilk sürümde tüm
+    // kütüphane (≤50 mekan) zaten tek seferde çekiliyor — arama-her-tuşta-ağ
+    // isteği yerine yerinde filtrelemek daha basit ve anında yanıt veriyor.
     private var filteredPlaces: [LibraryPlace] {
-        guard !searchText.isEmpty else { return vm.places }
+        var places = vm.places
+        if let selectedCategory {
+            places = places.filter { $0.category == selectedCategory }
+        }
+        guard !searchText.isEmpty else { return places }
         let q = searchText.lowercased()
-        return vm.places.filter {
+        return places.filter {
             $0.name.lowercased().contains(q) || ($0.city?.lowercased().contains(q) ?? false)
         }
+    }
+
+    /// Kütüphanede fiilen görülen kategoriler, ilk görülme sırasına göre —
+    /// var olmayan kategoriler için boş bir filtre satırı göstermeyiz.
+    private var availableCategories: [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for place in vm.places {
+            guard let category = place.category, !category.isEmpty, !seen.contains(category) else { continue }
+            seen.insert(category)
+            ordered.append(category)
+        }
+        return ordered
     }
 
     var body: some View {
         ZStack(alignment: .bottom) {
             AppColors.background.ignoresSafeArea()
 
-            if vm.isLoading && vm.places.isEmpty {
-                ProgressView().tint(AppColors.accentText)
-            } else if let error = vm.error, vm.places.isEmpty {
-                errorState(error)
-            } else if vm.places.isEmpty {
-                emptyState
-            } else if filteredPlaces.isEmpty {
-                noResultsState
-            } else {
-                list
+            VStack(spacing: 0) {
+                if !availableCategories.isEmpty {
+                    categoryChips
+                        .padding(.top, 8)
+                }
+
+                if vm.isLoading && vm.places.isEmpty {
+                    Spacer()
+                    ProgressView().tint(AppColors.accentText)
+                    Spacer()
+                } else if let error = vm.error, vm.places.isEmpty {
+                    errorState(error)
+                } else if vm.places.isEmpty {
+                    emptyState
+                } else if filteredPlaces.isEmpty {
+                    noResultsState
+                } else {
+                    list
+                }
             }
+            .frame(maxHeight: .infinity)
 
             if isSelecting && !selectedIDs.isEmpty {
                 selectionBar
@@ -108,6 +138,38 @@ struct LibraryView: View {
         selectedIDs.removeAll()
         tripTitle = ""
         createdTrip = trip
+    }
+
+    private var categoryChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                categoryChip(label: "Tümü", isSelected: selectedCategory == nil) {
+                    selectedCategory = nil
+                }
+                ForEach(availableCategories, id: \.self) { category in
+                    categoryChip(label: category, isSelected: selectedCategory == category) {
+                        selectedCategory = (selectedCategory == category) ? nil : category
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    private func categoryChip(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isSelected ? Color.white : AppColors.textSecondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(isSelected ? AppColors.accent : AppColors.surface)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule().stroke(isSelected ? Color.clear : AppColors.border, lineWidth: 1)
+                )
+        }
+        .buttonStyle(PressableButtonStyle())
     }
 
     private var selectionBar: some View {

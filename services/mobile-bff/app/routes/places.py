@@ -20,6 +20,7 @@ CORE_API_URL = os.getenv("CORE_API_URL", "http://core-api:8000")
 async def get_library(
     city: Optional[str] = None,
     q: Optional[str] = None,
+    category: Optional[str] = None,
     limit: int = Query(20, ge=1, le=50),
     offset: int = Query(0, ge=0),
     user_id: int = Depends(get_current_user_id),
@@ -31,6 +32,8 @@ async def get_library(
         params["city"] = city
     if q:
         params["q"] = q
+    if category:
+        params["category"] = category
 
     async with mobile_error_wrapper(request_id=rid):
         async with internal_client(15.0) as client:

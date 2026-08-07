@@ -60,6 +60,7 @@ class SqlPlaceRepository(AbstractPlaceRepository):
         lng: float,
         city: Optional[str],
         address: Optional[str],
+        category: Optional[str],
         first_seen_video_id: Optional[int],
     ) -> Place:
         name_key = normalize_place_name(name)
@@ -71,11 +72,13 @@ class SqlPlaceRepository(AbstractPlaceRepository):
         candidates = self._db.query(Place).filter(Place.name_key == name_key).all()
         for candidate in candidates:
             if self._haversine_km(lat, lng, candidate.lat, candidate.lng) <= self.MERGE_RADIUS_KM:
-                # Daha önce city çözülememiş bir kayıt, şimdi elimizdeki
-                # bilgiyle zenginleşebilir — backfill'i tekrar çalıştırmak
-                # eski kayıtları da bu şekilde tamamlıyor.
+                # Daha önce city/category çözülememiş bir kayıt, şimdi
+                # elimizdeki bilgiyle zenginleşebilir — backfill'i tekrar
+                # çalıştırmak eski kayıtları da bu şekilde tamamlıyor.
                 if not candidate.city and city:
                     candidate.city = city
+                if not candidate.category and category:
+                    candidate.category = category
                 return candidate
 
         place = Place(
@@ -85,6 +88,7 @@ class SqlPlaceRepository(AbstractPlaceRepository):
             lng=lng,
             city=city,
             address=address,
+            category=category,
             first_seen_video_id=first_seen_video_id,
             save_count=0,
         )
@@ -126,6 +130,7 @@ class SqlPlaceRepository(AbstractPlaceRepository):
                 lng=float(lng),
                 city=self._extract_city(place_data),
                 address=place_data.get("address"),
+                category=place_data.get("category"),
                 first_seen_video_id=video.id,
             )
             self._save_for_user(user_id=video.user_id, place=place, video_id=video.id)
@@ -151,6 +156,7 @@ class SqlPlaceRepository(AbstractPlaceRepository):
         user_id: int,
         city: Optional[str] = None,
         q: Optional[str] = None,
+        category: Optional[str] = None,
         limit: int = 20,
         offset: int = 0,
     ) -> Dict[str, Any]:
@@ -166,6 +172,10 @@ class SqlPlaceRepository(AbstractPlaceRepository):
             query = query.filter(Place.city.ilike(f"%{city}%"))
         if q:
             query = query.filter(Place.name.ilike(f"%{q}%"))
+        if category:
+            # Sabit bir taksonomiden geliyor (bkz. places_service._categorize),
+            # serbest metin arama değil — tam eşleşme doğru filtre.
+            query = query.filter(Place.category == category)
 
         total = query.with_entities(func.count(Place.id)).scalar()
         rows = (

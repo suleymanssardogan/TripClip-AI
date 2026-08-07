@@ -36,21 +36,22 @@ def _save_results(video_id: int, locations: list) -> None:
         db.close()
 
 
-def _loc(name: str, lat: float, lng: float, city: str = "Antalya") -> dict:
+def _loc(name: str, lat: float, lng: float, city: str = "Antalya", category: str = None) -> dict:
     """
     Nominatim'in gerçek `deduplicated_locations` şeklini taklit eder — city
     üst seviyede DEĞİL, `place_data.address_details.city/town/province/state`
-    içinde gelir (bkz. SqlPlaceRepository._extract_city).
+    içinde gelir (bkz. SqlPlaceRepository._extract_city). `category`,
+    PlacesService._categorize'ın ürettiği sabit taksonomi etiketi.
     """
-    return {
-        "original_name": name,
-        "place_data": {
-            "name": name,
-            "address": f"{name}, {city}",
-            "location": {"lat": lat, "lng": lng},
-            "address_details": {"city": city},
-        },
+    place_data = {
+        "name": name,
+        "address": f"{name}, {city}",
+        "location": {"lat": lat, "lng": lng},
+        "address_details": {"city": city},
     }
+    if category:
+        place_data["category"] = category
+    return {"original_name": name, "place_data": place_data}
 
 
 # ─── Senkronizasyon (save_results hook) ────────────────────────────────────
@@ -231,3 +232,64 @@ def test_existing_null_city_place_gets_enriched_by_later_video(client, bff_heade
     second = client.get("/internal/places", headers=bff_headers).json()
     assert second["total"] == 1  # hâlâ tek Place — birleşme bozulmadı
     assert second["places"][0]["city"] == "Gaziantep"
+
+
+# ─── Kategori (places_service._categorize taksonomisi) ─────────────────────
+
+def test_category_populated_from_pipeline(client, bff_headers, registered_user):
+    vid = _make_video(registered_user["user_id"])
+    _save_results(vid, [_loc("Develi Restoran", 36.0, 29.0, category="Restoran")])
+
+    data = client.get("/internal/places", headers=bff_headers).json()
+    assert data["places"][0]["category"] == "Restoran"
+
+
+def test_category_missing_stays_none(client, bff_headers, registered_user):
+    """Eski/kategori üretemeyen bir kayıt için None'da kalmalı, hata fırlatmamalı."""
+    vid = _make_video(registered_user["user_id"])
+    _save_results(vid, [_loc("Kategorisiz Yer", 36.0, 29.0)])
+
+    data = client.get("/internal/places", headers=bff_headers).json()
+    assert data["places"][0]["category"] is None
+
+
+def test_existing_null_category_place_gets_enriched_by_later_video(client, bff_headers, registered_user):
+    """City enrichment testiyle aynı mantık: kategorisi boş bir Place, aynı
+    mekanın kategorili bir sonraki tekrarıyla zenginleşebilmeli."""
+    uid = registered_user["user_id"]
+
+    v1 = _make_video(uid, "no_category.mp4")
+    _save_results(v1, [_loc("Şelale", 38.0, 38.0)])
+
+    first = client.get("/internal/places", headers=bff_headers).json()
+    assert first["places"][0]["category"] is None
+
+    v2 = _make_video(uid, "with_category.mp4")
+    _save_results(v2, [_loc("Şelale", 38.0001, 38.0001, category="Şelale")])
+
+    second = client.get("/internal/places", headers=bff_headers).json()
+    assert second["total"] == 1
+    assert second["places"][0]["category"] == "Şelale"
+
+
+def test_library_category_filter(client, bff_headers, registered_user):
+    vid = _make_video(registered_user["user_id"])
+    _save_results(vid, [
+        _loc("Kaputaş Plajı", 36.15, 29.45, category="Plaj"),
+        _loc("Develi Restoran", 36.88, 30.70, category="Restoran"),
+    ])
+
+    resp = client.get("/internal/places?category=Plaj", headers=bff_headers)
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["places"][0]["name"] == "Kaputaş Plajı"
+
+
+def test_library_category_filter_is_exact_not_substring(client, bff_headers, registered_user):
+    """category taksonomisi sabit değerlerden oluşuyor — kısmi eşleşme yanlış
+    sonuç döndürür (ör. 'Kale' 'Kalesi'yle karışmamalı), bu yüzden tam eşleşme."""
+    vid = _make_video(registered_user["user_id"])
+    _save_results(vid, [_loc("Bir Yer", 36.0, 29.0, category="Kale")])
+
+    resp = client.get("/internal/places?category=Kal", headers=bff_headers)
+    assert resp.json()["total"] == 0

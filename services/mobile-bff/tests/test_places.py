@@ -63,7 +63,7 @@ def test_get_library_forwards_query_params(client, auth_headers, mock_core_api, 
 
 
 def test_get_library_omits_absent_filters(client, auth_headers, mock_core_api, make_response):
-    """city/q verilmediyse core-api'ye boş string değil, hiç gönderilmemeli."""
+    """city/q/category verilmediyse core-api'ye boş string değil, hiç gönderilmemeli."""
     mock_core_api.get.return_value = make_response(200, {"places": [], "total": 0})
 
     client.get("/api/mobile/places", headers=auth_headers)
@@ -71,6 +71,16 @@ def test_get_library_omits_absent_filters(client, auth_headers, mock_core_api, m
     _, kwargs = mock_core_api.get.call_args
     assert "city" not in kwargs["params"]
     assert "q" not in kwargs["params"]
+    assert "category" not in kwargs["params"]
+
+
+def test_get_library_forwards_category_filter(client, auth_headers, mock_core_api, make_response):
+    mock_core_api.get.return_value = make_response(200, {"places": [], "total": 0})
+
+    client.get("/api/mobile/places?category=Restoran", headers=auth_headers)
+
+    _, kwargs = mock_core_api.get.call_args
+    assert kwargs["params"]["category"] == "Restoran"
 
 
 def test_get_library_invalid_limit_rejected(client, auth_headers, mock_core_api):
