@@ -186,8 +186,9 @@ def health_ready():
 
 # Import routers AFTER app creation
 from app.core.internal_auth import verify_internal_secret
-from app.api.internal import videos, auth, places, trips
+from app.api.internal import videos, auth, places, trips, analytics
 app.include_router(videos.router, dependencies=[Depends(verify_internal_secret)])
 app.include_router(auth.router, dependencies=[Depends(verify_internal_secret)])
 app.include_router(places.router, dependencies=[Depends(verify_internal_secret)])
 app.include_router(trips.router, dependencies=[Depends(verify_internal_secret)])
+app.include_router(analytics.router, dependencies=[Depends(verify_internal_secret)])

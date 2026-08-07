@@ -152,6 +152,16 @@ class InvalidTripStopOrderException(TripClipException):
         super().__init__(message, code="INVALID_TRIP_STOP_ORDER", status_code=400)
 
 
+# ── Analytics ─────────────────────────────────────────────────────────────────
+
+class InvalidAnalyticsEventException(TripClipException):
+    """Bilinmeyen bir event adı, ya da yalnızca sunucu tarafından tetiklenmesi
+    gereken bir event'in (CREATED/DELETED) beacon endpoint'i üzerinden
+    istemciden gönderilmeye çalışılması."""
+    def __init__(self, message: str):
+        super().__init__(message, code="INVALID_ANALYTICS_EVENT", status_code=400)
+
+
 # ── Database ──────────────────────────────────────────────────────────────────
 
 class DatabaseException(TripClipException):

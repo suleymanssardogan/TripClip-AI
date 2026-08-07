@@ -60,6 +60,7 @@ sentence-transformers==2.3.1
 sentry-sdk[fastapi]==2.22.0
 slowapi==0.1.9
 prometheus-fastapi-instrumentator==6.1.0
+pymongo==4.6.1  # analytics event log — MONGODB_URL zaten provision edilmiş, ilk gerçek kullanım
 # Share Extension URL download
 yt-dlp>=2024.1.0
 
