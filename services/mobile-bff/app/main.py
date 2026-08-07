@@ -6,7 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
-from app.routes import videos, auth, places, trips
+from app.routes import videos, auth, places, trips, analytics
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -132,6 +132,7 @@ app.include_router(auth.router, prefix="/api/mobile")
 app.include_router(videos.router, prefix="/api/mobile")
 app.include_router(places.router, prefix="/api/mobile")
 app.include_router(trips.router, prefix="/api/mobile")
+app.include_router(analytics.router, prefix="/api/mobile")
 
 
 @app.get("/")
