@@ -31,6 +31,9 @@ import app.models.place          # noqa: E402, F401
 import app.models.place_save     # noqa: E402, F401
 import app.models.trip           # noqa: E402, F401
 import app.models.trip_stop      # noqa: E402, F401
+import app.models.trip_share     # noqa: E402, F401
+import app.models.share_token    # noqa: E402, F401
+import app.models.trip_collaborator  # noqa: E402, F401
 
 target_metadata = Base.metadata
 

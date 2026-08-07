@@ -69,15 +69,25 @@ def get_current_user(
     return user
 
 
-# ── Refresh Token — opak (JWT değil), DB'de hash'lenmiş halde saklanır ────────
+# ── Güvenli, opak token'lar — DB'de hash'lenmiş halde saklanır ────────────────
 #
-# Neden opak? Bir JWT refresh token kullansaydık yine de iptal etmek için bir
+# Neden opak (JWT değil)? Bir JWT kullansaydık yine de iptal etmek için bir
 # DB/blacklist kontrolüne ihtiyaç duyardık — opak + DB-backed, ekstra karmaşıklık
-# katmadan aynı garantiyi (rotation + revocation) verir.
+# katmadan aynı garantiyi (rotation + revocation) verir. Refresh token'lar VE
+# trip share token'ları (bkz. app/models/share_token.py) aynı ilkeyi paylaşır:
+# 256 bit rastgelelik, ham değer asla DB'ye yazılmaz — yalnızca hash'i.
+
+def generate_secure_token(nbytes: int = 32) -> str:
+    return secrets.token_urlsafe(nbytes)
+
+
+def hash_token(raw_token: str) -> str:
+    return hashlib.sha256(raw_token.encode()).hexdigest()
+
 
 def generate_refresh_token() -> str:
-    return secrets.token_urlsafe(32)
+    return generate_secure_token()
 
 
 def hash_refresh_token(raw_token: str) -> str:
-    return hashlib.sha256(raw_token.encode()).hexdigest()
+    return hash_token(raw_token)
