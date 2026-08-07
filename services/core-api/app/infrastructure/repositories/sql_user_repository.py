@@ -59,3 +59,9 @@ class SqlUserRepository(AbstractUserRepository):
         if user:
             user.apns_token = token
             self._db.commit()
+
+    def clear_apns_token(self, user_id: int) -> None:
+        user = self.get_by_id(user_id)
+        if user:
+            user.apns_token = None
+            self._db.commit()

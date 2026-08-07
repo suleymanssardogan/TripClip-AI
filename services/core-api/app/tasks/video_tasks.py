@@ -71,6 +71,31 @@ def _is_permanent_yt_dlp_failure(message: str) -> bool:
     lowered = (message or "").lower()
     return any(marker in lowered for marker in _PERMANENT_YT_DLP_MARKERS)
 
+
+def _notify_push(db, video_id: int, completed: bool) -> None:
+    """
+    Video tamamlandığında/kalıcı olarak başarısız olduğunda kullanıcıya APNs
+    push bildirimi gönderir. Best-effort: APNs yapılandırılmamışsa veya istek
+    başarısız olursa pipeline sonucunu ETKİLEMEZ — Place senkronizasyonundaki
+    (sql_video_repository.save_results) aynı fail-open deseni.
+    """
+    try:
+        from app.infrastructure.repositories.sql_video_repository import SqlVideoRepository
+        from app.infrastructure.repositories.sql_user_repository import SqlUserRepository
+        from app.application.services.push_service import PushService
+
+        video = SqlVideoRepository(db).get_by_id(video_id)
+        if video is None:
+            return
+
+        service = PushService(SqlUserRepository(db))
+        if completed:
+            service.notify_video_completed(video)
+        else:
+            service.notify_video_failed(video)
+    except Exception:
+        logger.exception("📵 Push bildirimi başarısız (best-effort) | video_id=%s", video_id)
+
 # ── Paylaşılan VideoProcessingService instance'ı ──────────────────────────────
 #
 # VideoProcessingService.__init__ YOLO/BERT NER/Whisper/SentenceTransformer gibi
@@ -137,6 +162,7 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
         set_progress(video_id, "completed", 100)
 
         logger.info("✅ Task tamamlandı | video_id=%s", video_id)
+        _notify_push(db, video_id, completed=True)
 
         # Sonucu kaydettikten SONRA kuyruğa al — bu task başarısız olsa bile
         # video COMPLETED kalır, sadece ipuçları eksik olur.
@@ -148,6 +174,7 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
         logger.error("⏰ Zaman aşımı | video_id=%s", video_id)
         repo.mark_failed(video_id)
         set_progress(video_id, "failed", 0)
+        _notify_push(db, video_id, completed=False)
         raise   # Celery'nin göreceği şekilde yeniden fırlat
 
     except Exception as exc:
@@ -160,6 +187,7 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
             repo.mark_failed(video_id)
             set_progress(video_id, "failed", 0)
             logger.error("💀 Kalıcı hata | video_id=%s | tüm denemeler tükendi", video_id)
+            _notify_push(db, video_id, completed=False)
         else:
             set_progress(video_id, "retrying", 0)
 
@@ -289,6 +317,7 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
         set_progress(video_id, "completed", 100)
 
         logger.info("✅ URL task tamamlandı | video_id=%s", video_id)
+        _notify_push(db, video_id, completed=True)
 
         generate_tips_task.delay(video_id)
 
@@ -298,6 +327,7 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
         logger.error("⏰ URL task zaman aşımı | video_id=%s", video_id)
         repo.mark_failed(video_id)
         set_progress(video_id, "failed", 0)
+        _notify_push(db, video_id, completed=False)
         raise
 
     except PermanentDownloadError as exc:
@@ -309,6 +339,7 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
                      video_id, exc)
         repo.mark_failed(video_id)
         set_progress(video_id, "failed", 0)
+        _notify_push(db, video_id, completed=False)
         return {"status": "failed", "video_id": video_id, "reason": "permanent_download_error"}
 
     except Exception as exc:
@@ -320,6 +351,7 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
         if self.request.retries >= self.max_retries:
             repo.mark_failed(video_id)
             set_progress(video_id, "failed", 0)
+            _notify_push(db, video_id, completed=False)
         else:
             set_progress(video_id, "retrying", 0)
         raise

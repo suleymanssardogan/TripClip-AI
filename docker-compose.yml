@@ -131,6 +131,11 @@ services:
       - USE_GOOGLE_VISION=false
       - OLLAMA_URL=${OLLAMA_URL:-}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
+      - APNS_KEY_ID=${APNS_KEY_ID:-}
+      - APNS_TEAM_ID=${APNS_TEAM_ID:-}
+      - APNS_BUNDLE_ID=${APNS_BUNDLE_ID:-}
+      - APNS_AUTH_KEY=${APNS_AUTH_KEY:-}
+      - APNS_USE_SANDBOX=${APNS_USE_SANDBOX:-true}
       - OMP_NUM_THREADS=1
       - MKL_NUM_THREADS=1
       - OPENBLAS_NUM_THREADS=1

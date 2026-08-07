@@ -42,3 +42,9 @@ class AbstractUserRepository(ABC):
     def update_apns_token(self, user_id: int, token: str) -> None:
         """Kullanıcının APNs push bildirim device token'ını güncelle."""
         ...
+
+    @abstractmethod
+    def clear_apns_token(self, user_id: int) -> None:
+        """APNs'in geçersiz/kayıt-dışı dediği bir token'ı temizle — aksi
+        halde her push denemesi aynı ölü token'a boşuna gönderilmeye devam eder."""
+        ...

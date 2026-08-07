@@ -22,6 +22,7 @@ pydantic==2.5.3
 pytest==7.4.4
 pytest-asyncio==0.23.3
 httpx==0.26.0
+h2==4.1.0  # httpx(http2=True) — APNs provider API HTTP/2 zorunlu kılıyor
 
 # Video Processing
 ffmpeg-python==0.2.0

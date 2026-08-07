@@ -146,5 +146,7 @@ Core-API uses `TripClipException` → `tripclip_exception_handler` for structure
 | `USE_GOOGLE_VISION` | celery-worker | Default: `false` |
 | `SENTRY_DSN` | core-api | Optional; Sentry only activates when set |
 | `YT_DLP_COOKIES` | celery-worker | Path to cookies.txt for private Instagram Reels |
+| `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_BUNDLE_ID` / `APNS_AUTH_KEY` | celery-worker | Optional; push (processing complete/failed) only activates when all four are set |
+| `APNS_USE_SANDBOX` | celery-worker | `true` for TestFlight/dev builds, `false` for App Store. Default: `true` |
 
 All vars in `docker-compose.yml`. Copy `.env.example` → `.env` and set `GEMINI_API_KEY`.
