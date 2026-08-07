@@ -10,39 +10,46 @@ onto an action that already existed.
 
 ## Scope: what "trip" means here
 
-The event payload field is `trip_id`, but it refers to the **existing
-`Video`/`Plan` entity** — the only thing in the product with a working
-public share page (`web/share/[id]`, copy-link, QR code) — not the newer
-`Trip`/`TripStop` Trip Builder entity from Weeks 6–7. As of this writing the
-Trip Builder has no sharing capability of any kind (no `is_public`, no share
-endpoint, no share page). `trip_id` uses "trip" because that's the
-user-facing word for a completed video result (e.g. `"İstanbul Gezisi"`),
-not because it's the Trip Builder's `Trip` table. If/when Trip Builder gains
-its own sharing, it should get its own `trip_id` namespace or a `kind` field
-distinguishing the two — don't assume every `trip_id` in this collection is
-a `Video.id`.
+The event payload field is `trip_id`, and it now spans **two different
+entities**, disambiguated by a `kind` field:
 
-Also worth noting: `Plan.is_public` is a dead column — never set, never
-read anywhere in the codebase. Today, "public" effectively means "the video
-finished processing" (`Video.status == COMPLETED`); there's no explicit
-publish action to observe. `shared_trip_created` reflects that reality (see
-below) rather than pretending a publish toggle exists.
+- `kind: "video"` (default, omitted on older documents predating this
+  field) — the existing `Video`/`Plan` entity, the original public share
+  page (`web/share/[id]`, copy-link, QR code). `trip_id` uses "trip"
+  because that's the user-facing word for a completed video result (e.g.
+  `"İstanbul Gezisi"`), not because it's the Trip Builder's `Trip` table.
+- `kind: "trip"` — the Trip Builder's `Trip`/`TripStop` entity
+  (`app/models/trip.py`), which gained its own sharing capability (invite
+  links, accept/decline, collaborators) in the trip-sharing feature. Here
+  `trip_id` really is a `Trip.id`.
+
+**Don't assume every `trip_id` in this collection is a `Video.id`** — always
+filter/group by `kind` as well when querying, or the two id spaces will
+collide (a `Video.id` and a `Trip.id` can be numerically equal but refer to
+completely different rows).
+
+`Plan.is_public` is a dead column — never set, never read anywhere in the
+codebase. Today, "public" effectively means "the video finished processing"
+(`Video.status == COMPLETED`); there's no explicit publish action to
+observe. `shared_trip_created` reflects that reality (see below) rather
+than pretending a publish toggle exists.
 
 ## Event taxonomy
 
 Single source of truth: `services/core-api/app/core/analytics_events.py`.
 
-| Event | Status | Platform(s) | Fired from |
-|---|---|---|---|
-| `shared_trip_created` | ✅ wired | server | `video_tasks.py` (`_track_trip_created`), on `COMPLETED` |
-| `shared_trip_link_copied` | ✅ wired | web | `share/[id]/page.tsx` (3 copy actions) |
-| `shared_trip_share_sheet_opened` | ✅ wired | iOS | `ResultsView.swift` (PDF/Story Card export) |
-| `shared_trip_opened` | ✅ wired | web | `share/[id]/page.tsx`, on successful mount |
-| `shared_trip_joined` | ✅ wired | web | `api.ts` `register()`, via referral marker |
-| `shared_trip_deleted` | ✅ wired | server | `VideoService.delete_video` |
-| `shared_trip_invite_sent` | ⛔ not wired | — | no invite mechanism exists |
-| `shared_trip_declined` | ⛔ not wired | — | no accept/decline flow exists |
-| `shared_trip_expired` | ⛔ not wired | — | no share-link expiry exists |
+| Event | Status | `kind` | Platform(s) | Fired from |
+|---|---|---|---|---|
+| `shared_trip_created` | ✅ wired | video | server | `video_tasks.py` (`_track_trip_created`), on `COMPLETED` |
+| `shared_trip_link_copied` | ✅ wired | video | web | `share/[id]/page.tsx` (3 copy actions) |
+| `shared_trip_share_sheet_opened` | ✅ wired | video | iOS | `ResultsView.swift` (PDF/Story Card export) |
+| `shared_trip_opened` | ✅ wired | video | web | `share/[id]/page.tsx`, on successful mount |
+| `shared_trip_joined` | ✅ wired | video | web | `api.ts` `register()`, via referral marker |
+| `shared_trip_deleted` | ✅ wired | video | server | `VideoService.delete_video` |
+| `shared_trip_invite_sent` | ✅ wired | trip | server | `SqlSharingRepository.create_share`, on invite-link creation |
+| `shared_trip_declined` | ✅ wired | trip | server | `SqlSharingRepository.decline_by_token`, on decline |
+| `shared_trip_expired` | ✅ wired | trip | server | `SqlSharingRepository._maybe_expire`, lazy check on next token use |
+| *(invite accepted)* | ⛔ not wired | — | — | no event exists — `accept_by_token` doesn't call `AnalyticsService.track()` at all |
 
 ### `shared_trip_created`
 
@@ -127,28 +134,67 @@ a small referral-attribution mechanism, not a new event trigger point:
 - **Platform:** `"server"`.
 - **source:** `"user_delete"`.
 
-### Not wired: `shared_trip_invite_sent`, `shared_trip_declined`, `shared_trip_expired`
+### `shared_trip_invite_sent`
 
-These three are defined in `AnalyticsEvent` for schema forward-compatibility
-and are explicitly rejected by the beacon endpoint
-(`InvalidAnalyticsEventException`) if a client attempts to send them. They
-don't correspond to anything a user can currently do:
+Fires the moment a trip owner creates an invite link (`POST
+/internal/trips/{trip_id}/shares`) — the server-side analog of "an invite
+now exists," same pattern as `shared_trip_created`.
 
-- **No invite mechanism.** There's no email/SMS/in-app way to invite a
-  specific person to a trip — the only distribution channel is "copy a link
-  and send it yourself outside the app."
-- **No accept/decline flow.** Opening a share link just... shows the trip.
-  There's no request-to-join or accept/reject step.
-- **No expiry.** A share link works as long as the video exists; there's no
-  TTL or revocation on the link itself.
+- **Where:** `services/core-api/app/infrastructure/repositories/sql_sharing_repository.py`,
+  `SqlSharingRepository.create_share`, right after the `TripShare`/`ShareToken`
+  rows commit. Best-effort — a failed analytics write never fails invite
+  creation (the token is already committed by the time `track()` runs).
+- **Platform:** always `"server"`. **kind:** always `"trip"`.
+- **source:** always `"share_link_created"`.
+- **user_id:** the trip owner (`created_by`), i.e. the person creating the
+  invite — not the (not-yet-known) recipient.
+- Not client-fireable: this is derived from a server-controlled state
+  change (share creation), same reasoning as `shared_trip_created`/`deleted`.
 
-All three become meaningful once collaborative trip building (goal.md
-Phase 6, "should have," scoped to v2) exists — a real invite/accept/decline
-UI for the `Trip` entity. Wiring fake triggers for them now would mean
-recording events for actions that can't happen, which is worse than not
-recording them at all. When that feature ships, wire these three the same
-way the other six are wired here — the taxonomy and beacon already support
-it, only `CLIENT_FIREABLE_EVENTS`/new server hooks need updating.
+### `shared_trip_declined`
+
+Fires when the invite recipient explicitly declines (`POST
+/internal/shares/decline`).
+
+- **Where:** same file, `SqlSharingRepository.decline_by_token`, after the
+  share's status flips to `DECLINED`.
+- **Platform:** always `"server"`. **kind:** always `"trip"`.
+- **source:** always `"invite_response"`.
+- **user_id:** the recipient who declined.
+- Not client-fireable: the BFF/web page never calls the beacon endpoint for
+  this — the decline itself (`POST /shares/decline`) is what triggers it,
+  server-side, same as `created`/`deleted`/`invite_sent`.
+
+### `shared_trip_expired`
+
+There's no background cron sweeping for expired invites — expiry is
+observed lazily, the first time anyone touches an expired token again
+(preview, accept, or decline all funnel through the same `_is_usable` →
+`_maybe_expire` check).
+
+- **Where:** same file, `SqlSharingRepository._maybe_expire`, called from
+  `_is_usable` (shared by `preview_by_token`/`accept_by_token`/
+  `decline_by_token`). Only fires on the transition itself (`PENDING` →
+  `EXPIRED`) — a token that's already `EXPIRED` from a prior check doesn't
+  re-fire on every subsequent touch.
+- **Platform:** always `"server"`. **kind:** always `"trip"`.
+- **source:** always `"lazy_expiry_check"`.
+- **user_id:** the trip owner (`created_by`) — whoever is touching the
+  expired link at the moment of the lazy check isn't necessarily who should
+  be attributed to the expiry.
+
+### Not wired: invite acceptance
+
+There is currently **no event for a successful accept**
+(`POST /internal/shares/accept`) — `SqlSharingRepository.accept_by_token`
+never calls `AnalyticsService.track()`. This is the actual "did the
+invite convert" growth-loop signal for trip sharing (the `kind: "trip"`
+analog of `shared_trip_joined` for video shares) and it's currently a real
+gap in the funnel, not an intentional no-op like the three above used to
+be. `AnalyticsEvent` has no dedicated member for it either — wiring it
+would need a new enum value (e.g. `shared_trip_accepted`) added to both
+`CLIENT_FIREABLE_EVENTS`-adjacent server-only wiring and a `track()` call
+in `accept_by_token`, mirroring how `declined`/`expired` are wired above.
 
 ## Payload schema
 
@@ -159,6 +205,7 @@ Every event is a MongoDB document in the `analytics_events` collection
 {
   "event":     "shared_trip_link_copied",
   "trip_id":   42,
+  "kind":      "video",
   "user_id":   17,
   "platform":  "web",
   "source":    "hero_button",
@@ -170,7 +217,8 @@ Every event is a MongoDB document in the `analytics_events` collection
 | Field | Type | Notes |
 |---|---|---|
 | `event` | string | One of the 9 taxonomy values (`AnalyticsEvent`) |
-| `trip_id` | int | See "Scope" above — a `Video`/`Plan` id today |
+| `trip_id` | int | See "Scope" above — a `Video`/`Plan` id when `kind="video"`, a `Trip` id when `kind="trip"` |
+| `kind` | string | `"video"` (default) \| `"trip"` — disambiguates the `trip_id` namespace, see "Scope" |
 | `user_id` | int \| null | Absent for anonymous share-page viewers |
 | `platform` | string | `"ios"` \| `"web"` \| `"server"` — set by the BFF/server, never trusted from the client body |
 | `source` | string \| null | Free-form, per-event (see tables above) |
@@ -195,10 +243,12 @@ auth resolution (JWT for mobile, optional JWT for web), forwarded as the
 user's activity or claiming to be a different platform.
 
 Only `CLIENT_FIREABLE_EVENTS` are accepted from this endpoint
-(`link_copied`, `share_sheet_opened`, `opened`, `joined`). `created` and
-`deleted` are rejected if sent by a client — they're derived from state the
-server already controls, and accepting them from outside would let anyone
-fabricate fake trip activity.
+(`link_copied`, `share_sheet_opened`, `opened`, `joined`). Every other
+event — `created`, `deleted`, and the trip-sharing trio
+(`invite_sent`/`declined`/`expired`) — is rejected if sent by a client:
+all six are derived from state the server already controls (video
+lifecycle or `SqlSharingRepository` mutations), and accepting them from
+outside would let anyone fabricate fake trip activity.
 
 The endpoint returns `202` immediately; the actual Mongo write happens via
 FastAPI `BackgroundTasks` after the response is sent. A slow or unreachable
@@ -221,9 +271,12 @@ Two of these six steps don't have a real backing action today:
   `trip_id` (or repeat sessions for the same `user_id`) over time, rather
   than firing a dedicated event per visit.
 
-For the four steps that are real, query `analytics_events` directly. Example
-aggregation — trips created in the last 30 days, with counts at each funnel
-stage:
+For the four steps that are real, query `analytics_events` directly. This
+funnel is `kind: "video"` only — `created`/`link_copied`/`opened`/`joined`
+are never fired with `kind: "trip"` today (see the trip-sharing events
+above for that funnel's equivalents: `invite_sent` → `declined`/`expired`,
+with acceptance still unobserved). Example aggregation — trips created in
+the last 30 days, with counts at each funnel stage:
 
 ```javascript
 db.analytics_events.aggregate([

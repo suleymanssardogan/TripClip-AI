@@ -1,17 +1,19 @@
 """
 Shared-trip büyüme hunisi için event taksonomisi — tek doğru kaynak.
 
-`trip_id`, videolar-arası Trip Builder varlığına (app/models/trip.py) DEĞİL,
-çalışan paylaşım sayfası olan Video/Plan'a işaret eder (bkz.
-docs/analytics/shared-trip-events.md "Scope" bölümü) — Trip Builder'ın henüz
-hiçbir paylaşım yeteneği yok, bu isimlendirme kullanıcıya dönük "gezi" dilini
-yansıtıyor.
+`trip_id` iki farklı varlık uzayını paylaşır — `kind` alanı hangisi olduğunu
+ayırt eder (bkz. AnalyticsService.track):
+  - `kind="video"` (varsayılan): çalışan paylaşım sayfası olan Video/Plan'a
+    işaret eder (bkz. docs/shared-trip-analytics.md "Scope" bölümü).
+  - `kind="trip"`: Trip Builder'ın `Trip` varlığına (app/models/trip.py)
+    işaret eder — trip sharing (invite/accept/decline) bu uzayda çalışır.
 
-Her event burada tanımlı olsa da hepsi bir tetikleyiciye bağlı DEĞİL —
-NOT_YET_WIRED_EVENTS'e bakın: bu üçü (davet/reddet/süre-doldu) ürünte
-karşılığı olmayan, gelecekteki collaborative-trip özelliği (goal.md Phase 6,
-v2) için şema uyumluluğu amacıyla tanımlanmış, sahte bir tetikleyiciye
-bağlanmamış event'ler.
+Her event burada tanımlı olsa da hepsi bir tetikleyiciye bağlı değildir.
+`shared_trip_invite_sent`/`declined`/`expired`, trip sharing'in
+`SqlSharingRepository`'sinden (`kind="trip"` ile) tetiklenir. Kabul (accept)
+için henüz karşılık gelen bir event YOK — `accept_by_token` hiçbir analytics
+çağrısı yapmıyor; "davet kabul edildi" büyüme sinyali bugün gözlemlenemiyor
+(bkz. docs/shared-trip-analytics.md).
 """
 from enum import Enum
 
@@ -32,17 +34,12 @@ class AnalyticsEvent(str, Enum):
 # event'ler. CREATED ve DELETED bilerek dışarıda: bunlar sunucunun zaten
 # kontrol ettiği durum değişikliklerinden türetiliyor — istemciden kabul
 # edilirse herkes var olmayan bir "trip" için sahte olay üretebilirdi.
+# INVITE_SENT/DECLINED/EXPIRED de dışarıda: bunlar da sunucu tarafından
+# (SqlSharingRepository) tetiklenir — istemcinin doğrudan tetikleyebileceği
+# bir kullanıcı eylemi değiller.
 CLIENT_FIREABLE_EVENTS = frozenset({
     AnalyticsEvent.SHARED_TRIP_LINK_COPIED,
     AnalyticsEvent.SHARED_TRIP_SHARE_SHEET_OPENED,
     AnalyticsEvent.SHARED_TRIP_OPENED,
     AnalyticsEvent.SHARED_TRIP_JOINED,
-})
-
-# Taksonomide tanımlı ama hiçbir yerden tetiklenmiyor — ürünte davet/kabul/
-# reddetme/süre-dolma mekanizması yok. Bkz. docs/analytics/shared-trip-events.md.
-NOT_YET_WIRED_EVENTS = frozenset({
-    AnalyticsEvent.SHARED_TRIP_INVITE_SENT,
-    AnalyticsEvent.SHARED_TRIP_DECLINED,
-    AnalyticsEvent.SHARED_TRIP_EXPIRED,
 })
