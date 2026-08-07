@@ -7,22 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		032F62AFADE749A800E62DE9 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DD0494F1241767AD8312E6F /* LibraryView.swift */; };
+		04F66BDD6B0FEF4AD2490320 /* TripModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7EA2D78E1DF463A1C7724A4 /* TripModels.swift */; };
 		082059E394ACA22AAD1E394B /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6BE1D486FE4CA01AA77FFF /* LoginView.swift */; };
 		08D364CE316FF612ABF86788 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03FB87E8E3920D380F6A652F /* RootView.swift */; };
+		0AF598115CE73025D3FD3D8B /* TripsListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FEC08F204B822007F230C1F /* TripsListViewModel.swift */; };
 		0D2B5F2FE3D717DD868B8950 /* URLExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E4804B79221D8965AD7E84 /* URLExtractor.swift */; };
 		0FC211B5B1D80639D5134AD7 /* AppGroupStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A41F817700A394A86DC9EF /* AppGroupStore.swift */; };
+		11D4604EAA081171BB6EC0AD /* TripsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67CA4399C718575A84E9336D /* TripsListView.swift */; };
+		137CD6EEAA5189507D41733F /* TripRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 524B50A641A69329D34A660F /* TripRowView.swift */; };
 		17720540365DE7A6FCEBB257 /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 558793C78BE2EFC720EEC7DC /* Config.swift */; };
 		2A8650F15BD5EC299E770EB3 /* AuthModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE5DD24D1526D167DCA1DB7 /* AuthModels.swift */; };
-		F7666BD67A0F6443DF15AAF7 /* PlaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 840D00B808B912F4A05F2D9A /* PlaceModels.swift */; };
-		032F62AFADE749A800E62DE9 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DD0494F1241767AD8312E6F /* LibraryView.swift */; };
-		DBC32E90DAA4151C63BF1D65 /* LibraryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE0B66CE22303511C2714706 /* LibraryViewModel.swift */; };
-		82D88E1F73289C5B4859A5A2 /* LibraryRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAD2100DE3A4452E996823FE /* LibraryRowView.swift */; };
-		04F66BDD6B0FEF4AD2490320 /* TripModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7EA2D78E1DF463A1C7724A4 /* TripModels.swift */; };
-		F91BB26C8F2A6C09C44A6ABC /* TripDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00B14477678F521C348311FB /* TripDetailView.swift */; };
-		D540CCAA68D9B14A640ED886 /* TripDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ED083407BAE6E3F3AB461BE /* TripDetailViewModel.swift */; };
-		11D4604EAA081171BB6EC0AD /* TripsListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67CA4399C718575A84E9336D /* TripsListView.swift */; };
-		0AF598115CE73025D3FD3D8B /* TripsListViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FEC08F204B822007F230C1F /* TripsListViewModel.swift */; };
-		137CD6EEAA5189507D41733F /* TripRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 524B50A641A69329D34A660F /* TripRowView.swift */; };
 		3747DE962DDD76C53907647F /* ProcessingViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCE29E0073E0455FABE8A37D /* ProcessingViewModel.swift */; };
 		3B185B7738465036B0DD5B8D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 968FD77836F30B779B3CC7B4 /* Assets.xcassets */; };
 		3E9004802942DA325016C776 /* LocationCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B983A39E9A82C36BFBE87DD6 /* LocationCard.swift */; };
@@ -36,6 +31,7 @@
 		7E22CDFF8F112AB1063DD7DC /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0563BA80A92665BB8D3A36D /* AppDelegate.swift */; };
 		808671464A9F8DDC44A75919 /* TripClipApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 143A5A8A5C2354EB64A0F946 /* TripClipApp.swift */; };
 		82AE0D51B2BCCF9606A438D6 /* BackgroundUploader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77B16DD309E3B724FBA8CE45 /* BackgroundUploader.swift */; };
+		82D88E1F73289C5B4859A5A2 /* LibraryRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAD2100DE3A4452E996823FE /* LibraryRowView.swift */; };
 		8ACEA027B149AE74906C2729 /* APIError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A71CAFE212CFE225B5434D /* APIError.swift */; };
 		8C9A5236AC2BA08600CA7055 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B88E418A97C9B8335A0182 /* ShareViewController.swift */; };
 		9B4E8E31E67157E8FB8B698C /* PlanRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CDD0E790D6A67CF3AF6AB16D /* PlanRowView.swift */; };
@@ -53,13 +49,17 @@
 		C13AEFB508922F430B724DB5 /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 558793C78BE2EFC720EEC7DC /* Config.swift */; };
 		C252E40A0EE400154CEF9722 /* TripMapView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 132C959BE851008CB9C4D30B /* TripMapView.swift */; };
 		D45E0B98B4182C2F2DB35113 /* LoginViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE15F960FE7CDF3D4BA5FEE4 /* LoginViewModel.swift */; };
+		D540CCAA68D9B14A640ED886 /* TripDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ED083407BAE6E3F3AB461BE /* TripDetailViewModel.swift */; };
 		D695BB1B432954ECC506D40D /* TripClipAI.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 943BBEDAF9CF71A7C5B03B7D /* TripClipAI.xcdatamodeld */; };
 		D845ECF7F2DF1B7C66DC180D /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 536DF00D1393575E6F659A84 /* WelcomeView.swift */; };
+		DBC32E90DAA4151C63BF1D65 /* LibraryViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE0B66CE22303511C2714706 /* LibraryViewModel.swift */; };
 		DC5F460B1847B9A4C96A165C /* ResultsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFBFA14096FC8B01ADA05172 /* ResultsView.swift */; };
 		E00CEE7F93833C0D7EED148E /* HomeViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 078D0B6788566B732166478A /* HomeViewModel.swift */; };
 		E8C230BC762FF9E4831B86E9 /* AppDelegate+BackgroundSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C5D4C5737D28C75BDF4C80A /* AppDelegate+BackgroundSession.swift */; };
 		F008BA49749ABB595686F4B3 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AED6B7F3B523FDF9A4D46607 /* KeychainStore.swift */; };
 		F6ADC28A15BAB58092FC0AF6 /* JWT.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18955B16C88C0C8D98082272 /* JWT.swift */; };
+		F7666BD67A0F6443DF15AAF7 /* PlaceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 840D00B808B912F4A05F2D9A /* PlaceModels.swift */; };
+		F91BB26C8F2A6C09C44A6ABC /* TripDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00B14477678F521C348311FB /* TripDetailView.swift */; };
 		FC4FA733719C851108014441 /* TripShareCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9718E29EE427E8620545B9F9 /* TripShareCard.swift */; };
 		FE4EA46483C084FB9ED91CCF /* ProcessingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2245417A4D703AEFD81A708 /* ProcessingView.swift */; };
 /* End PBXBuildFile section */
@@ -89,6 +89,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		00B14477678F521C348311FB /* TripDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripDetailView.swift; sourceTree = "<group>"; };
 		03FB87E8E3920D380F6A652F /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		078D0B6788566B732166478A /* HomeViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewModel.swift; sourceTree = "<group>"; };
 		132C959BE851008CB9C4D30B /* TripMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripMapView.swift; sourceTree = "<group>"; };
@@ -103,48 +104,47 @@
 		35B293E6D103D668154E573B /* RegisterViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterViewModel.swift; sourceTree = "<group>"; };
 		3C5D4C5737D28C75BDF4C80A /* AppDelegate+BackgroundSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppDelegate+BackgroundSession.swift"; sourceTree = "<group>"; };
 		485ED9C20DAF04FDC58C838C /* ResultsViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResultsViewModel.swift; sourceTree = "<group>"; };
+		4FEC08F204B822007F230C1F /* TripsListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripsListViewModel.swift; sourceTree = "<group>"; };
+		524B50A641A69329D34A660F /* TripRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripRowView.swift; sourceTree = "<group>"; };
 		536DF00D1393575E6F659A84 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		558793C78BE2EFC720EEC7DC /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
 		5B9DB98CE03EBBD876D35E10 /* PDFExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFExportService.swift; sourceTree = "<group>"; };
 		64B1B16045F93DF8A0A3065C /* RegisterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterView.swift; sourceTree = "<group>"; };
 		658F52C276A51D4ECFD4FB97 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		67CA4399C718575A84E9336D /* TripsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripsListView.swift; sourceTree = "<group>"; };
+		6ED083407BAE6E3F3AB461BE /* TripDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripDetailViewModel.swift; sourceTree = "<group>"; };
 		74FD6988CA6DE8735788ABE5 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		77B16DD309E3B724FBA8CE45 /* BackgroundUploader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundUploader.swift; sourceTree = "<group>"; };
 		78A41F817700A394A86DC9EF /* AppGroupStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppGroupStore.swift; sourceTree = "<group>"; };
 		78A71CAFE212CFE225B5434D /* APIError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIError.swift; sourceTree = "<group>"; };
-		7EE5DD24D1526D167DCA1DB7 /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
-		840D00B808B912F4A05F2D9A /* PlaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceModels.swift; sourceTree = "<group>"; };
 		7DD0494F1241767AD8312E6F /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
-		FE0B66CE22303511C2714706 /* LibraryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViewModel.swift; sourceTree = "<group>"; };
-		CAD2100DE3A4452E996823FE /* LibraryRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryRowView.swift; sourceTree = "<group>"; };
-		B7EA2D78E1DF463A1C7724A4 /* TripModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripModels.swift; sourceTree = "<group>"; };
-		00B14477678F521C348311FB /* TripDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripDetailView.swift; sourceTree = "<group>"; };
-		6ED083407BAE6E3F3AB461BE /* TripDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripDetailViewModel.swift; sourceTree = "<group>"; };
-		67CA4399C718575A84E9336D /* TripsListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripsListView.swift; sourceTree = "<group>"; };
-		4FEC08F204B822007F230C1F /* TripsListViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripsListViewModel.swift; sourceTree = "<group>"; };
-		524B50A641A69329D34A660F /* TripRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripRowView.swift; sourceTree = "<group>"; };
+		7EE5DD24D1526D167DCA1DB7 /* AuthModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthModels.swift; sourceTree = "<group>"; };
 		826704A52BD579F46C8CA166 /* TripClipAI.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = TripClipAI.xcdatamodel; sourceTree = "<group>"; };
 		83E4804B79221D8965AD7E84 /* URLExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = URLExtractor.swift; sourceTree = "<group>"; };
+		840D00B808B912F4A05F2D9A /* PlaceModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaceModels.swift; sourceTree = "<group>"; };
 		968FD77836F30B779B3CC7B4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		9718E29EE427E8620545B9F9 /* TripShareCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripShareCard.swift; sourceTree = "<group>"; };
-		9D992FF160BC6BBBDEB9692A /* TripClipShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = TripClipShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		9D992FF160BC6BBBDEB9692A /* TripClipShare.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TripClipShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A2245417A4D703AEFD81A708 /* ProcessingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingView.swift; sourceTree = "<group>"; };
 		ADF35CFE561AB96B922DB322 /* AuthEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthEnvironment.swift; sourceTree = "<group>"; };
 		AE15F960FE7CDF3D4BA5FEE4 /* LoginViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewModel.swift; sourceTree = "<group>"; };
 		AED6B7F3B523FDF9A4D46607 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		AFBFA14096FC8B01ADA05172 /* ResultsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResultsView.swift; sourceTree = "<group>"; };
 		B0563BA80A92665BB8D3A36D /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		B7EA2D78E1DF463A1C7724A4 /* TripModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripModels.swift; sourceTree = "<group>"; };
 		B909B84E18F81BADFB1C56F5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		B983A39E9A82C36BFBE87DD6 /* LocationCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationCard.swift; sourceTree = "<group>"; };
 		BBFC849057C30ECFA60FADF4 /* PressableButtonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PressableButtonStyle.swift; sourceTree = "<group>"; };
-		BF585DBEA2E14514DEA6E08B /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		BF585DBEA2E14514DEA6E08B /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		C7A3D344230EA31CC3C37BDA /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		CAD2100DE3A4452E996823FE /* LibraryRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryRowView.swift; sourceTree = "<group>"; };
 		CDD0E790D6A67CF3AF6AB16D /* PlanRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanRowView.swift; sourceTree = "<group>"; };
 		D8B88E418A97C9B8335A0182 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		DFCA77B601BF52F62A73B068 /* Endpoint.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Endpoint.swift; sourceTree = "<group>"; };
 		F006DFAB5A2D29CC39E8C597 /* AppColors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppColors.swift; sourceTree = "<group>"; };
 		F09F163223BC580F03BBEE16 /* HistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryView.swift; sourceTree = "<group>"; };
 		FCE29E0073E0455FABE8A37D /* ProcessingViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingViewModel.swift; sourceTree = "<group>"; };
+		FE0B66CE22303511C2714706 /* LibraryViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryViewModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -173,6 +173,16 @@
 				8782D9A0ACF9BA1DFCBD9C4C /* Trips */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		247D46C3562327D8227F6F52 /* Library */ = {
+			isa = PBXGroup;
+			children = (
+				7DD0494F1241767AD8312E6F /* LibraryView.swift */,
+				FE0B66CE22303511C2714706 /* LibraryViewModel.swift */,
+				CAD2100DE3A4452E996823FE /* LibraryRowView.swift */,
+			);
+			path = Library;
 			sourceTree = "<group>";
 		};
 		31896970E59BA9EAC38D0DF2 /* Results */ = {
@@ -252,6 +262,18 @@
 			path = Home;
 			sourceTree = "<group>";
 		};
+		8782D9A0ACF9BA1DFCBD9C4C /* Trips */ = {
+			isa = PBXGroup;
+			children = (
+				00B14477678F521C348311FB /* TripDetailView.swift */,
+				6ED083407BAE6E3F3AB461BE /* TripDetailViewModel.swift */,
+				67CA4399C718575A84E9336D /* TripsListView.swift */,
+				4FEC08F204B822007F230C1F /* TripsListViewModel.swift */,
+				524B50A641A69329D34A660F /* TripRowView.swift */,
+			);
+			path = Trips;
+			sourceTree = "<group>";
+		};
 		8A608A3E3914C479635921D7 /* Core */ = {
 			isa = PBXGroup;
 			children = (
@@ -272,28 +294,6 @@
 				B7EA2D78E1DF463A1C7724A4 /* TripModels.swift */,
 			);
 			path = Models;
-			sourceTree = "<group>";
-		};
-		247D46C3562327D8227F6F52 /* Library */ = {
-			isa = PBXGroup;
-			children = (
-				7DD0494F1241767AD8312E6F /* LibraryView.swift */,
-				FE0B66CE22303511C2714706 /* LibraryViewModel.swift */,
-				CAD2100DE3A4452E996823FE /* LibraryRowView.swift */,
-			);
-			path = Library;
-			sourceTree = "<group>";
-		};
-		8782D9A0ACF9BA1DFCBD9C4C /* Trips */ = {
-			isa = PBXGroup;
-			children = (
-				00B14477678F521C348311FB /* TripDetailView.swift */,
-				6ED083407BAE6E3F3AB461BE /* TripDetailViewModel.swift */,
-				67CA4399C718575A84E9336D /* TripsListView.swift */,
-				4FEC08F204B822007F230C1F /* TripsListViewModel.swift */,
-				524B50A641A69329D34A660F /* TripRowView.swift */,
-			);
-			path = Trips;
 			sourceTree = "<group>";
 		};
 		C4A2D82543BB12B44C052378 /* Resources */ = {
@@ -432,7 +432,6 @@
 						ProvisioningStyle = Automatic;
 					};
 					EB45705A6AE19BAFAC410B9D = {
-						DevelopmentTeam = JN85S9B6B8;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -551,6 +550,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TripClipShare/TripClipShare.entitlements;
+				DEVELOPMENT_TEAM = GTL4QNSHX6;
 				INFOPLIST_FILE = TripClipShare/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -717,6 +717,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = TripClipShare/TripClipShare.entitlements;
+				DEVELOPMENT_TEAM = GTL4QNSHX6;
 				INFOPLIST_FILE = TripClipShare/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
