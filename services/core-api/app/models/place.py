@@ -29,6 +29,11 @@ class Place(Base):
     # sınıflandırma) kapsamında pipeline tarafından set edilecek. Şimdiden
     # kolonu açmak, o iş geldiğinde ikinci bir migration'ı gereksiz kılıyor.
     category = Column(String, nullable=True, index=True)
+    # Henüz hiçbir pipeline tarafından doldurulmuyor (category ile aynı
+    # gerekçe) — "HH:MM-HH:MM" biçiminde günlük saat aralığı, örn. "09:00-18:00".
+    # Trip Optimizer bu alan doluysa çizelgeye dahil eder, boşsa "opening
+    # hours unavailable" uyarısı üretir (bkz. docs/trip-optimizer.md).
+    opening_hours = Column(String, nullable=True)
     # ondelete=SET NULL: video silinebilir bir kullanıcı özelliği (bkz.
     # VideoService.delete_video) — kaynak video gittiğinde Place'in kendisi
     # (ve ona bağlı PlaceSave'ler) geçerliliğini korumalı, sadece köken bilgisi kaybolur.

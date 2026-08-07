@@ -34,6 +34,8 @@ import app.models.trip_stop      # noqa: E402, F401
 import app.models.trip_share     # noqa: E402, F401
 import app.models.share_token    # noqa: E402, F401
 import app.models.trip_collaborator  # noqa: E402, F401
+import app.models.trip_itinerary      # noqa: E402, F401
+import app.models.trip_itinerary_stop # noqa: E402, F401
 
 target_metadata = Base.metadata
 
