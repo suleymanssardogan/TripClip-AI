@@ -11,7 +11,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from prometheus_fastapi_instrumentator import Instrumentator
-from app.routes import auth, plans, analytics
+from app.routes import auth, plans, analytics, trip_sharing
 from app.routes import videos as videos_router
 import logging
 import sys
@@ -134,6 +134,7 @@ app.include_router(auth.router,          prefix="/api/web")
 app.include_router(plans.router,         prefix="/api/web")
 app.include_router(videos_router.router, prefix="/api/web")
 app.include_router(analytics.router,     prefix="/api/web")
+app.include_router(trip_sharing.router,  prefix="/api/web")
 
 
 @app.get("/")

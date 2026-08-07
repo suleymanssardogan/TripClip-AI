@@ -90,7 +90,9 @@ def reset_rate_limiters():
     from app.main import limiter as main_limiter
     from app.routes.videos import limiter as videos_limiter
     from app.routes.auth import limiter as auth_limiter
+    from app.routes.trip_sharing import limiter as trip_sharing_limiter
     main_limiter.reset()
     videos_limiter.reset()
     auth_limiter.reset()
+    trip_sharing_limiter.reset()
     yield

@@ -32,6 +32,9 @@ _WEB_MESSAGES: dict[str, str] = {
     "DATABASE_ERROR":            "Sunucu veritabanına ulaşamıyor. Ekibimiz bilgilendirildi.",
     "SERVICE_UNAVAILABLE":       "Servis geçici olarak kullanılamıyor. Lütfen daha sonra tekrar ziyaret edin.",
     "INTERNAL_SERVER_ERROR":     "Beklenmeyen bir sunucu hatası oluştu. Sorun devam ederse destek ekibiyle iletişime geçin.",
+    "SHARE_TOKEN_INVALID":       "Bu davet linki artık geçerli değil. Süresi dolmuş, iptal edilmiş ya da zaten yanıtlanmış olabilir.",
+    "CANNOT_JOIN_OWN_TRIP":      "Kendi gezinize collaborator olarak katılamazsınız.",
+    "TRIP_NOT_FOUND":            "Aradığınız gezi bulunamadı.",
 }
 
 _DEFAULT_MESSAGE = "Bir hata oluştu. Lütfen sayfayı yenileyip tekrar deneyin."
@@ -46,7 +49,7 @@ def _parse_core_error(data: dict) -> tuple[str, str, int]:
         status = 401
     elif code == "PERMISSION_DENIED":
         status = 403
-    elif code == "VIDEO_NOT_FOUND":
+    elif code in {"VIDEO_NOT_FOUND", "SHARE_TOKEN_INVALID", "TRIP_NOT_FOUND"}:
         status = 404
     elif code in {"RATE_LIMIT_EXCEEDED", "DAILY_QUOTA_EXCEEDED"}:
         status = 429
