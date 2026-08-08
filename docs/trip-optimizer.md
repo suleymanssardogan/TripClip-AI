@@ -259,7 +259,10 @@ role).
 ### `GET /internal/trips/{trip_id}/itineraries`
 
 Summary list, newest first, for anyone with any access to the trip
-(owner/editor/viewer).
+(owner/editor/viewer). Each summary includes `days_count`/`stops_count`
+(added for the iOS Itinerary History screen — see
+`docs/ios-trip-optimizer.md` — computed via two grouped queries against
+`TripItineraryStop`, batched per trip, not stored redundantly).
 
 ### `GET /internal/itineraries/{itinerary_id}`
 

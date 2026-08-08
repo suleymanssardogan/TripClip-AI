@@ -111,6 +111,26 @@ Response body: core-api's `OptimizeTripResponse`, returned unchanged
 No request body. Response: core-api's `ItineraryListResponse`, unchanged —
 `{"itineraries": [ItinerarySummaryResponse, ...]}`, newest first.
 
+```json
+{
+  "itineraries": [
+    {
+      "id": 2, "trip_id": 1, "strategy_name": "greedy_distance",
+      "optimization_score": 92.2, "total_distance_km": 1.4, "total_travel_time_minutes": 3.4,
+      "warnings": ["..."], "created_at": "2026-08-08T23:52:29",
+      "days_count": 1, "stops_count": 2
+    }
+  ]
+}
+```
+
+`days_count`/`stops_count` were added for the iOS Itinerary History screen
+(see `docs/ios-trip-optimizer.md`), which needs to show these without
+fetching each itinerary's full detail. Computed server-side (two grouped
+queries against `TripItineraryStop`, batched per trip — no N+1), not
+carried in the DB — additive, backward-compatible change to the response
+shape.
+
 ### `GET /itineraries/{itinerary_id}`
 
 No request body. Response: the same `OptimizeTripResponse` shape as the
