@@ -35,4 +35,20 @@ enum OptimizerFixtures {
     }
 
     static var emptyDays: [ItineraryDay] { [] }
+
+    static func summary(
+        id: Int,
+        score: Double = 87.5,
+        createdAt: String? = "2026-08-08T10:00:00",
+        warnings: [String] = [],
+        daysCount: Int = 1,
+        stopsCount: Int = 2
+    ) -> ItinerarySummary {
+        ItinerarySummary(
+            id: id, tripId: 1, strategyName: "greedy_distance",
+            optimizationScore: score, totalDistanceKm: 12.4, totalTravelTimeMinutes: 29.8,
+            warnings: warnings, createdAt: createdAt,
+            daysCount: daysCount, stopsCount: stopsCount
+        )
+    }
 }

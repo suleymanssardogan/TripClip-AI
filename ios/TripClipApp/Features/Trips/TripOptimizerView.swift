@@ -1,21 +1,39 @@
 import SwiftUI
 
-/// AI Trip Optimizer önizleme ekranı — bir Trip'in mevcut duraklarından
-/// üretilen çok-günlü itinerary'i gösterir. Yalnızca ÖNİZLEME: Trip'in kendi
-/// TripStop'unu hiçbir zaman değiştirmez (backend zaten TripItinerary'i ayrı
-/// bir kayıt olarak persist ediyor — bkz. docs/trip-optimizer.md
-/// "Architecture: neden TripStop'a yazılmıyor"). "Kapat" ve "Daha Sonra İçin
-/// Kaydet" bu yüzden sunucu tarafında aynı sonucu üretir; aralarındaki fark
-/// yalnızca kullanıcıya verilen geri bildirimdir — bkz. docs/ios-trip-optimizer.md.
+/// AI Trip Optimizer sonuç ekranı — iki modda çalışır, ikisi de aynı
+/// yükleme/hata/boş/başarı sunumunu paylaşır (itinerary render mantığı hiçbir
+/// yerde tekrarlanmaz):
+///   - `.generate`: Trip'in mevcut duraklarından YENİ bir itinerary üretir.
+///   - `.viewSaved`: Itinerary History'den açılan, ZATEN üretilmiş kayıtlı
+///     bir itinerary'i olduğu gibi yükler — optimizer TEKRAR ÇALIŞMAZ.
+///
+/// Yalnızca ÖNİZLEME: Trip'in kendi TripStop'unu hiçbir zaman değiştirmez
+/// (backend zaten TripItinerary'i ayrı bir kayıt olarak persist ediyor —
+/// bkz. docs/trip-optimizer.md "Architecture: neden TripStop'a yazılmıyor").
+/// "Kapat" ve "Daha Sonra İçin Kaydet" bu yüzden sunucu tarafında aynı sonucu
+/// üretir; aralarındaki fark yalnızca kullanıcıya verilen geri bildirimdir —
+/// yalnızca `.generate` modunda gösterilir, `.viewSaved` zaten geçmişten
+/// açıldığı için "kaydet"in bir anlamı yok (bkz. docs/ios-trip-optimizer.md).
 struct TripOptimizerView: View {
 
-    let tripID:   Int
-    let placeIDs: [Int]
+    enum Mode {
+        case generate(tripID: Int, placeIDs: [Int])
+        case viewSaved(itineraryID: Int)
+    }
+
+    let mode: Mode
 
     @Environment(AuthEnvironment.self) private var auth
     @Environment(\.dismiss) private var dismiss
     @State private var vm = TripOptimizerViewModel()
     @State private var showSavedConfirmation = false
+
+    private var navigationTitle: String {
+        switch mode {
+        case .generate:  return "Gezi Optimizasyonu"
+        case .viewSaved: return "Kayıtlı İtinerary"
+        }
+    }
 
     var body: some View {
         ZStack {
@@ -33,7 +51,7 @@ struct TripOptimizerView: View {
                 }
             }
         }
-        .navigationTitle("Gezi Optimizasyonu")
+        .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
@@ -41,11 +59,20 @@ struct TripOptimizerView: View {
                     .foregroundStyle(AppColors.textSecondary)
             }
         }
-        .task { await vm.optimize(tripID: tripID, placeIDs: placeIDs, auth: auth) }
+        .task { await load() }
         .alert("Kaydedildi", isPresented: $showSavedConfirmation) {
             Button("Tamam") { dismiss() }
         } message: {
             Text("Bu itinerary geziye kaydedildi. Gezinin kendisi değişmedi — istediğin zaman tekrar optimize edebilirsin.")
+        }
+    }
+
+    private func load() async {
+        switch mode {
+        case .generate(let tripID, let placeIDs):
+            await vm.optimize(tripID: tripID, placeIDs: placeIDs, auth: auth)
+        case .viewSaved(let itineraryID):
+            await vm.loadItinerary(itineraryID: itineraryID, auth: auth)
         }
     }
 
@@ -54,9 +81,16 @@ struct TripOptimizerView: View {
     private var loadingState: some View {
         VStack(spacing: 16) {
             ProgressView().tint(AppColors.accentText)
-            Text("Gezi optimize ediliyor…")
+            Text(loadingMessage)
                 .font(.system(size: 14))
                 .foregroundStyle(AppColors.textSecondary)
+        }
+    }
+
+    private var loadingMessage: String {
+        switch mode {
+        case .generate:  return "Gezi optimize ediliyor…"
+        case .viewSaved: return "İtinerary yükleniyor…"
         }
     }
 
@@ -65,12 +99,12 @@ struct TripOptimizerView: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 48))
                 .foregroundStyle(AppColors.destructive)
-            Text(error.localizedDescription ?? "Optimize edilemedi.")
+            Text(error.localizedDescription ?? "Yüklenemedi.")
                 .foregroundStyle(AppColors.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
             Button("Tekrar Dene") {
-                Task { await vm.optimize(tripID: tripID, placeIDs: placeIDs, auth: auth) }
+                Task { await load() }
             }
             .foregroundStyle(AppColors.accentText)
         }
@@ -107,8 +141,10 @@ struct TripOptimizerView: View {
                     ItineraryDaySection(day: day)
                 }
 
-                footerButton
-                    .padding(.top, 8)
+                if case .generate = mode {
+                    footerButton
+                        .padding(.top, 8)
+                }
 
                 Color.clear.frame(height: 24)
             }

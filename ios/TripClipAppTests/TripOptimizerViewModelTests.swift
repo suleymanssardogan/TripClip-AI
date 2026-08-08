@@ -181,4 +181,76 @@ final class TripOptimizerViewModelTests: XCTestCase {
         XCTAssertNotNil(vm.itinerary)
         XCTAssertEqual(vm.itinerary?.days.isEmpty, true)
     }
+
+    // MARK: - Itinerary History: loading a previously saved itinerary
+
+    func test_loadItinerary_fetchesSavedItinerary_populatesItinerary() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.itinerary(id: 9))
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        await vm.loadItinerary(itineraryID: 9, auth: auth)
+
+        XCTAssertFalse(vm.isLoading)
+        XCTAssertNil(vm.error)
+        XCTAssertEqual(vm.itinerary?.id, 9)
+    }
+
+    /// Itinerary History'den bir satıra dokunmak optimizer'ı TEKRAR
+    /// ÇALIŞTIRMAMALI — yalnızca kayıtlı sonucu getirmeli. `.optimizeTrip`
+    /// hiç çağrılmamalı, yalnızca `.itineraryDetail`.
+    func test_loadItinerary_callsItineraryDetailEndpoint_neverOptimizeEndpoint() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.itinerary(id: 9))
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        await vm.loadItinerary(itineraryID: 9, auth: auth)
+
+        guard case .itineraryDetail(let itineraryID) = fake.lastEndpoint else {
+            XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint)) — .itineraryDetail bekleniyordu")
+            return
+        }
+        XCTAssertEqual(itineraryID, 9)
+        XCTAssertEqual(fake.callCount, 1)
+        XCTAssertEqual(fake.lastToken, "test-token")
+    }
+
+    func test_loadItinerary_serverError_setsError() async {
+        let fake = FakeAPIClient()
+        fake.result = .failure(APIError.server(code: "ITINERARY_NOT_FOUND", message: "Bu itinerary artık mevcut değil."))
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        await vm.loadItinerary(itineraryID: 999, auth: auth)
+
+        XCTAssertNil(vm.itinerary)
+        XCTAssertEqual(vm.error?.localizedDescription, "Bu itinerary artık mevcut değil.")
+    }
+
+    func test_loadItinerary_unauthorized_logsOutAndDoesNotSetError() async {
+        let fake = FakeAPIClient()
+        fake.result = .failure(APIError.unauthorized(message: nil))
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        await vm.loadItinerary(itineraryID: 9, auth: auth)
+
+        XCTAssertFalse(auth.isAuthenticated)
+        XCTAssertNil(vm.error)
+        XCTAssertNil(vm.itinerary)
+    }
+
+    func test_loadItinerary_noToken_neverCallsAPI() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.itinerary(id: 9))
+        let auth = makeAuth(fake: fake, withUser: false)
+        let vm = TripOptimizerViewModel()
+
+        await vm.loadItinerary(itineraryID: 9, auth: auth)
+
+        XCTAssertEqual(fake.callCount, 0)
+        XCTAssertNil(vm.itinerary)
+    }
 }

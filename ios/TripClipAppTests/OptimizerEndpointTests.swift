@@ -117,11 +117,14 @@ final class OptimizerEndpointTests: XCTestCase {
     }
 
     func test_decodesItineraryListResponse() throws {
+        // days_count/stops_count — Itinerary History listesinin days/stops'un
+        // tamamını çekmeden özet gösterebilmesi için eklendi (bkz.
+        // SqlOptimizationRepository.list_itineraries).
         let json = """
         { "itineraries": [
             { "id": 1, "trip_id": 1, "strategy_name": "greedy_distance",
               "optimization_score": 90.0, "total_distance_km": 5.0, "total_travel_time_minutes": 12.0,
-              "warnings": [], "created_at": null }
+              "warnings": [], "created_at": null, "days_count": 2, "stops_count": 5 }
         ] }
         """.data(using: .utf8)!
 
@@ -130,6 +133,9 @@ final class OptimizerEndpointTests: XCTestCase {
         let list = try decoder.decode(ItineraryListResponse.self, from: json)
 
         XCTAssertEqual(list.itineraries.count, 1)
-        XCTAssertEqual(list.itineraries.first?.optimizationScore, 90.0)
+        let summary = try XCTUnwrap(list.itineraries.first)
+        XCTAssertEqual(summary.optimizationScore, 90.0)
+        XCTAssertEqual(summary.daysCount, 2)
+        XCTAssertEqual(summary.stopsCount, 5)
     }
 }

@@ -61,6 +61,13 @@ struct ItinerarySummary: Decodable, Identifiable, Hashable {
     let totalTravelTimeMinutes: Double
     let warnings:               [String]
     let createdAt:              String?
+    let daysCount:              Int
+    let stopsCount:             Int
+
+    var formattedCreatedAt: String {
+        guard let raw = createdAt, let date = APIDate.parse(raw) else { return "" }
+        return APIDate.displayString(from: date)
+    }
 }
 
 struct ItineraryListResponse: Decodable {

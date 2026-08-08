@@ -33,6 +33,30 @@ final class TripDetailViewModel {
         }
     }
 
+    // MARK: - Itinerary History girişi
+    //
+    // "Optimizasyon Geçmişi" toolbar butonu yalnızca gerçekten geçmiş varsa
+    // gösterilmeli (bkz. spesifikasyon) — bu yüzden ayrı, bağımsız bir
+    // async metod: `load()`'u hiç değiştirmiyor (View'da paralel bir `.task`
+    // olarak çalışır, trip'in kendi yüklenmesini asla yavaşlatmaz/engellemez)
+    // ve best-effort'tur — başarısız olursa sessizce false kalır, trip
+    // ekranında hiçbir hata göstermez (explore/landing'in getStats() ile aynı
+    // "kritik olmayan ek bilgi" gerekçesi).
+
+    private(set) var hasItineraryHistory = false
+
+    func refreshItineraryHistoryFlag(tripID: Int, auth: AuthEnvironment) async {
+        guard let token = auth.user?.token else { return }
+        do {
+            let response: ItineraryListResponse = try await auth.apiClient.send(
+                .itineraries(tripID: tripID), token: token
+            )
+            hasItineraryHistory = !response.itineraries.isEmpty
+        } catch {
+            // best-effort — gösterge sessizce false kalır
+        }
+    }
+
     // MARK: - Durak Düzenleme
     //
     // Trip Builder şu an oluşturma anında tüm durakları tek güne (days[0])

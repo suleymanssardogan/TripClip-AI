@@ -32,9 +32,19 @@ struct TripDetailView: View {
             if let trip = vm.trip, !trip.allStops.isEmpty {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     NavigationLink(
-                        destination: TripOptimizerView(tripID: trip.id, placeIDs: trip.allStops.map(\.placeId))
+                        destination: TripOptimizerView(
+                            mode: .generate(tripID: trip.id, placeIDs: trip.allStops.map(\.placeId))
+                        )
                     ) {
                         Image(systemName: "sparkles")
+                            .foregroundStyle(AppColors.accentText)
+                    }
+                }
+            }
+            if let trip = vm.trip, vm.hasItineraryHistory {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink(destination: ItineraryHistoryView(tripID: trip.id)) {
+                        Image(systemName: "clock.arrow.circlepath")
                             .foregroundStyle(AppColors.accentText)
                     }
                 }
@@ -76,6 +86,7 @@ struct TripDetailView: View {
             Text(vm.stopEditError ?? "")
         }
         .task { await vm.load(tripID: tripID, auth: auth, preloaded: preloaded) }
+        .task { await vm.refreshItineraryHistoryFlag(tripID: tripID, auth: auth) }
     }
 
     @ViewBuilder
