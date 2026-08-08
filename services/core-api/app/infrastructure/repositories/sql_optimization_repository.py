@@ -5,6 +5,7 @@ from typing import Optional, List, Dict, Any
 from collections import defaultdict
 from datetime import datetime
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.domain.repositories.optimization_repository import AbstractOptimizationRepository
@@ -164,6 +165,26 @@ class SqlOptimizationRepository(AbstractOptimizationRepository):
             .order_by(TripItinerary.created_at.desc())
             .all()
         )
+        if not rows:
+            return []
+
+        # N+1 sorgudan kaçınmak için gün/durak sayılarını tek seferde,
+        # itinerary_id'ye göre gruplanmış olarak çek — bkz. iOS Itinerary
+        # History ekranının days_count/stops_count ihtiyacı.
+        itinerary_ids = [it.id for it in rows]
+        stops_count_by_id: Dict[int, int] = dict(
+            self._db.query(TripItineraryStop.itinerary_id, func.count(TripItineraryStop.id))
+            .filter(TripItineraryStop.itinerary_id.in_(itinerary_ids))
+            .group_by(TripItineraryStop.itinerary_id)
+            .all()
+        )
+        days_count_by_id: Dict[int, int] = dict(
+            self._db.query(TripItineraryStop.itinerary_id, func.count(func.distinct(TripItineraryStop.day_index)))
+            .filter(TripItineraryStop.itinerary_id.in_(itinerary_ids))
+            .group_by(TripItineraryStop.itinerary_id)
+            .all()
+        )
+
         return [
             {
                 "id": it.id,
@@ -174,6 +195,8 @@ class SqlOptimizationRepository(AbstractOptimizationRepository):
                 "total_travel_time_minutes": it.total_travel_time_minutes,
                 "warnings": it.warnings or [],
                 "created_at": it.created_at.isoformat() if it.created_at else None,
+                "days_count": days_count_by_id.get(it.id, 0),
+                "stops_count": stops_count_by_id.get(it.id, 0),
             }
             for it in rows
         ]

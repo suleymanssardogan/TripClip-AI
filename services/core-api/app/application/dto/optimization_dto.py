@@ -54,6 +54,10 @@ class ItinerarySummaryResponse(BaseModel):
     total_travel_time_minutes: float
     warnings: List[str]
     created_at: Optional[str]
+    # Liste ekranının (iOS Itinerary History) days/stops'un tamamını çekmeden
+    # özet gösterebilmesi için — bkz. docs/trip-optimizer-bff.md.
+    days_count: int
+    stops_count: int
 
 
 class ItineraryListResponse(BaseModel):

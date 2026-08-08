@@ -118,6 +118,36 @@ def test_optimize_trip_persists_and_is_listable(client, bff_headers):
     assert get_resp.json()["id"] == itinerary_id
 
 
+def test_list_itineraries_includes_days_and_stops_count(client, bff_headers):
+    """iOS Itinerary History listesi bunları full detail çekmeden gösterebilmeli."""
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=2)
+    client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids}, headers=bff_headers,
+    )
+
+    list_resp = client.get(f"/internal/trips/{trip_id}/itineraries", headers=bff_headers)
+    summary = list_resp.json()["itineraries"][0]
+    assert summary["stops_count"] == 2
+    assert summary["days_count"] == 1
+
+
+def test_list_itineraries_newest_first(client, bff_headers):
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=1)
+    first = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids}, headers=bff_headers,
+    ).json()
+    second = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids}, headers=bff_headers,
+    ).json()
+
+    list_resp = client.get(f"/internal/trips/{trip_id}/itineraries", headers=bff_headers)
+    ids_in_order = [it["id"] for it in list_resp.json()["itineraries"]]
+    assert ids_in_order == [second["id"], first["id"]]
+
+
 def test_multiple_optimize_runs_do_not_overwrite_each_other(client, bff_headers):
     """Aynı trip için birden çok itinerary geçmişte kalmalı (bkz. TripItinerary
     docstring'i) — Trip Builder'ın TripStop'u gibi ezilmemeli."""
