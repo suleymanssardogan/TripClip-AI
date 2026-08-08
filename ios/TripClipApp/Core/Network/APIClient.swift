@@ -5,6 +5,10 @@ import OSLog
 
 protocol APIClientProtocol: Sendable {
     func send<T: Decodable>(_ endpoint: Endpoint, token: String?) async throws -> T
+    func uploadVideoFile(
+        data: Data, filename: String, token: String,
+        onProgress: @Sendable @escaping (Double) -> Void
+    ) async throws -> APIClient.UploadResponse
 }
 
 // MARK: - Live Implementation

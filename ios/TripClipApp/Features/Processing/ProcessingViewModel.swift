@@ -72,7 +72,7 @@ final class ProcessingViewModel: ObservableObject {
     @Published private(set) var elapsedSeconds: Int           = 0
 
     private let videoID:         Int
-    private let apiClient:       APIClient
+    private let apiClient:       APIClientProtocol
     private let token:           String
     private let pollingInterval: TimeInterval = 2.0
     private let maxWaitSeconds:  TimeInterval = 300
@@ -82,7 +82,7 @@ final class ProcessingViewModel: ObservableObject {
     // retry() sonrası yeni bir 5dk sabır penceresi için resetlenebilmeli — bu yüzden var.
     private var startedAt = Date()
 
-    init(videoID: Int, apiClient: APIClient, token: String) {
+    init(videoID: Int, apiClient: APIClientProtocol, token: String) {
         self.videoID   = videoID
         self.apiClient = apiClient
         self.token     = token

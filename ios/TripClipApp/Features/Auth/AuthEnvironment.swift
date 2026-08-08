@@ -17,14 +17,22 @@ final class AuthEnvironment {
 
     // MARK: Dependencies
 
-    let apiClient: APIClient
+    /// Protokol tipinde (somut `APIClient` değil) — testlerin `APIClientProtocol`'e
+    /// uyan bir sahte istemci enjekte edebilmesi için. Üretimde her zaman gerçek
+    /// `APIClient` (varsayılan parametre), davranış değişmiyor.
+    let apiClient: APIClientProtocol
 
     // MARK: Init
 
-    init(apiClient: APIClient = APIClient()) {
+    init(apiClient: APIClientProtocol = APIClient()) {
         self.apiClient = apiClient
-        apiClient.refreshHandler = { @MainActor [weak self] in
-            await self?.refreshTokens()
+        // refreshHandler yalnızca somut APIClient'ta var (protokolün parçası
+        // değil) — testlerde enjekte edilen sahte istemciler bu callback'i
+        // hiç kullanmaz, 401-yenile-tekrarla akışı onlar için test kapsamı dışı.
+        if let concreteClient = apiClient as? APIClient {
+            concreteClient.refreshHandler = { @MainActor [weak self] in
+                await self?.refreshTokens()
+            }
         }
         restoreSession()
     }
@@ -180,3 +188,16 @@ final class AuthEnvironment {
 private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
 }
+
+// MARK: - Test Support
+
+#if DEBUG
+extension AuthEnvironment {
+    /// Yalnızca testler için: Keychain/session restore akışını atlayıp
+    /// doğrudan bir kullanıcı enjekte eder. `user` `private(set)` olduğu için
+    /// bu, aynı dosyadaki tek erişim noktası — üretim kodu hiç çağırmaz.
+    func setUserForTesting(_ user: AuthUser) {
+        self.user = user
+    }
+}
+#endif

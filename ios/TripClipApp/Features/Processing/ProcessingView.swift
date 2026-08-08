@@ -15,7 +15,7 @@ struct ProcessingView: View {
     @StateObject private var vm: ProcessingViewModel
     @Environment(\.dismiss) private var dismiss
 
-    init(videoID: Int, apiClient: APIClient, token: String,
+    init(videoID: Int, apiClient: APIClientProtocol, token: String,
          onCompleted: ((Int) -> Void)? = nil) {
         self.videoID     = videoID
         self.onCompleted = onCompleted
