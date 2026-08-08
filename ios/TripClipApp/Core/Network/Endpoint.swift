@@ -47,6 +47,14 @@ enum Endpoint {
     case updateTripStopOrder(tripID: Int, order: [[Int]])
     case deleteTrip(tripID: Int)
 
+    // AI Trip Optimizer — mevcut bir Trip'in duraklarından çok-günlü, zaman-
+    // pencereli bir itinerary üretir (bkz. docs/trip-optimizer-bff.md). Trip
+    // Builder'ın kendi TSP rotasını (createTrip) DEĞİŞTİRMEZ — ayrı, kalıcı
+    // bir önizleme.
+    case optimizeTrip(tripID: Int, placeIDs: [Int])
+    case itineraries(tripID: Int)
+    case itineraryDetail(itineraryID: Int)
+
     // Analytics — shared-trip büyüme hunisi (bkz. docs/analytics/shared-trip-events.md)
     case trackAnalyticsEvent(event: String, tripID: Int, source: String)
 }
@@ -76,13 +84,16 @@ extension Endpoint {
         case .tripDetail(let id):           return "/api/mobile/trips/\(id)"
         case .updateTripStopOrder(let id, _): return "/api/mobile/trips/\(id)/order"
         case .deleteTrip(let id):           return "/api/mobile/trips/\(id)"
+        case .optimizeTrip(let id, _):      return "/api/mobile/trips/\(id)/optimize"
+        case .itineraries(let id):          return "/api/mobile/trips/\(id)/itineraries"
+        case .itineraryDetail(let id):      return "/api/mobile/itineraries/\(id)"
         case .trackAnalyticsEvent:          return "/api/mobile/analytics/events"
         }
     }
 
     var method: HTTPMethod {
         switch self {
-        case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl, .createTrip, .trackAnalyticsEvent: return .post
+        case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl, .createTrip, .optimizeTrip, .trackAnalyticsEvent: return .post
         case .registerDeviceToken: return .put
         case .updateStopOrder, .updateTripStopOrder: return .patch
         case .deletePlan, .deleteTrip: return .delete
@@ -122,6 +133,13 @@ extension Endpoint {
 
         case .updateTripStopOrder(_, let order):
             return ["order": order]
+
+        case .optimizeTrip(_, let placeIDs):
+            // start_date/duration_days/preferred_*_time/strategy kasıtlı olarak
+            // gönderilmiyor — core-api'nin kendi varsayılanları (09:00-18:00,
+            // greedy_distance) kullanılır (bkz. OptimizeTripRequest). iOS v1'de
+            // bunlar için henüz bir seçim ekranı yok.
+            return ["selected_place_ids": placeIDs]
 
         case .trackAnalyticsEvent(let event, let tripID, let source):
             return ["event": event, "trip_id": tripID, "source": source]

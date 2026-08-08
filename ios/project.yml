@@ -85,6 +85,23 @@ targets:
       - target: TripClipShare
         embed: true
 
+  # ── Unit Tests ───────────────────────────────────────────────────────────────
+  TripClipAppTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+
+    sources:
+      - path: TripClipAppTests
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.sardogan.TripClipAI.Tests
+        GENERATE_INFOPLIST_FILE: YES
+
+    dependencies:
+      - target: TripClipApp
+
   # ── Share Extension ──────────────────────────────────────────────────────────
   TripClipShare:
     type: app-extension
@@ -132,6 +149,8 @@ schemes:
       config: Debug
     test:
       config: Debug
+      targets:
+        - TripClipAppTests
     profile:
       config: Release
     analyze:

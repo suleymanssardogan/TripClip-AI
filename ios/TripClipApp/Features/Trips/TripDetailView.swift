@@ -29,6 +29,16 @@ struct TripDetailView: View {
         .navigationTitle(vm.trip?.title ?? "Gezi")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if let trip = vm.trip, !trip.allStops.isEmpty {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink(
+                        destination: TripOptimizerView(tripID: trip.id, placeIDs: trip.allStops.map(\.placeId))
+                    ) {
+                        Image(systemName: "sparkles")
+                            .foregroundStyle(AppColors.accentText)
+                    }
+                }
+            }
             if vm.trip != nil {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(role: .destructive) {
