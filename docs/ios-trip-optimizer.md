@@ -193,20 +193,29 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
 19 tests, three files:
 
 - **`Support/FakeAPIClient.swift`** — `APIClientProtocol` test double.
-  Returns a canned `Result<Any, Error>`; an optional `AsyncGate` (a small
-  `actor` wrapping a `CheckedContinuation`) lets a test suspend `send`
-  mid-flight on demand, for deterministic loading-state assertions.
+  Returns a canned `Result<Any, Error>`; two independent `AsyncGate`s (a
+  small `actor` wrapping a `CheckedContinuation`) give deterministic
+  control over an in-flight call: `startedGate` opens the instant `send`
+  is entered (before any `await`, same instant as `callCount` increments)
+  so a test can `await started.wait()` for "the request has definitely
+  begun" instead of guessing with `Task.yield()`; `gate` is what the test
+  then holds closed to keep the call suspended mid-flight until it's
+  done asserting. An earlier version used a fixed number of
+  `Task.yield()` calls to approximate "the child task has started" —
+  that passed the first several runs, then failed once under
+  scheduler load (a genuinely flaky assertion, not a one-off fluke),
+  which is why it was replaced with this explicit signal instead.
 - **`TripOptimizerViewModelTests.swift`** (10 tests) — ViewModel tests:
   initial state, success populates `itinerary`, server/network errors set
   `error`, a 401 logs the session out *without* setting `error` (matching
   `TripDetailViewModel`'s exact behavior), no-token short-circuits before
   ever calling the API. **Loading-state tests**: `isLoading` is
-  observably `true` while the fake's `send` is parked on the gate and
-  `false` immediately after, using `Task { await vm.optimize(...) }` +
-  `Task.yield()` to let the child task reach its suspension point before
-  asserting — plus a re-entrancy test confirming a second call while the
-  first is still in flight is a true no-op (`callCount == 1` after both
-  resolve).
+  observably `true` once `started.wait()` returns (the request is
+  definitely in flight) and `false` immediately after `gate.open()` lets
+  it complete — plus a re-entrancy test confirming a second call while
+  the first is still in flight is a true no-op (`callCount == 1` after
+  both resolve). Verified stable across 5 repeated full-suite runs, not
+  just a single pass.
 - **`OptimizerEndpointTests.swift`** (9 tests) — **networking tests**,
   pure and synchronous, no ViewModel involved: `Endpoint.urlRequest`
   produces the right path/method/body/`Authorization` header for all
