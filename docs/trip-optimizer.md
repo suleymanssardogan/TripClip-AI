@@ -25,7 +25,8 @@ app/domain/optimization/
 app/domain/repositories/
     optimization_repository.py — AbstractOptimizationRepository (ABC)
 app/infrastructure/optimization/
-    greedy_distance_strategy.py — v1 strategy (nearest-neighbor + day-splitting)
+    greedy_distance_strategy.py — "greedy_distance" strategy (nearest-neighbor + day-splitting)
+    ortools_strategy.py         — "ortools" strategy (OR-Tools routing solver + day-splitting)
     strategy_registry.py        — name → strategy instance, the extension point
 app/infrastructure/repositories/
     sql_optimization_repository.py — SQLAlchemy implementation
@@ -189,7 +190,59 @@ the collaboration/invite flow, and `SHARED_TRIP_CREATED`/`DELETED` are
 `trip_id`, `user_id` (the applier), `kind="trip"`, and
 `metadata={"itinerary_id", "stops_count"}`.
 
-## Algorithm ("simple heuristic" — v1: `greedy_distance`)
+## Available strategies
+
+Two `RouteOptimizationStrategy` implementations are registered today (see
+`strategy_registry.py`):
+
+| Name (`OptimizeTripRequest.strategy`) | Approach | Determinism | Default |
+|---|---|---|---|
+| `greedy_distance` | Nearest-neighbor construction | Deterministic (no search, one pass) | **Yes** |
+| `ortools` | Google OR-Tools constraint-programming routing solver | Deterministic (bounded by a fixed solution count, not wall-clock time — see "`ortools` strategy → Determinism") | No — opt-in via `strategy: "ortools"` |
+
+**Neither is an AI/LLM strategy.** Both are classical, fully deterministic
+algorithms — nearest-neighbor construction and constraint-programming route
+search, respectively. `ortools` specifically is Google's open-source
+operations-research solver (the same library used for vehicle routing,
+scheduling, and bin-packing problems industry-wide), not a language model
+or any kind of learned/probabilistic system. There is no prompt, no
+inference call, no non-determinism from sampling.
+
+### Why `strategy` is a public API field, not internal configuration
+
+`OptimizeTripRequest.strategy` already existed before this milestone (added
+alongside `greedy_distance` itself, anticipating exactly this) — so adding
+`ortools` required **zero API changes**, just a new registered name. The
+alternative this milestone's own spec raised — server-side configuration
+(an env var, say `DEFAULT_OPTIMIZATION_STRATEGY`) instead of a request
+field — was considered and rejected: a string enum selecting between two
+interchangeable, same-shape-output algorithms is a legitimate caller-facing
+choice (like `sort=price` vs `sort=rating` on a listing endpoint), not an
+internal implementation detail. It doesn't leak anything about *how*
+either strategy works internally — the caller supplies a name, gets back
+the identical `OptimizeTripResponse` shape either way, and everything
+about routing math/day-splitting/scoring stays entirely server-side. A
+config-only approach would additionally block the one caller-visible use
+case that actually motivates having two strategies: letting a client (or a
+future "regenerate with a different strategy" UI affordance) pick per
+request, not just per deployment.
+
+### When to prefer each
+
+- **`greedy_distance`** (default): a single nearest-neighbor pass, no
+  search — effectively instant regardless of selection size, and quality
+  is already reasonable for small-to-medium selections (a handful to
+  ~15-20 places). Good default because it has zero solver startup cost and
+  a trivially auditable algorithm (one paragraph of code).
+- **`ortools`**: worth the extra latency (milliseconds to low seconds,
+  see "Benchmark" below) when route quality matters more than raw
+  speed — larger selections (20+ places) or itineraries spanning multiple
+  clusters/cities, where nearest-neighbor's well-known weakness (a single
+  bad early greedy choice compounds) is more likely to leave a visibly
+  suboptimal route. Both produce a *valid* itinerary either way — the
+  difference is route quality, not correctness.
+
+## `greedy_distance` strategy
 
 **Route-first, cluster-second.** Two passes over the (deduplicated,
 ownership-checked) selected places:
@@ -244,24 +297,139 @@ Note: the "N duplicate place selection(s) removed" warning (added by
 **not** included in this calculation — it's request hygiene, not a
 property of the route itself. See `optimization_service.py`.
 
+## `ortools` strategy
+
+Second `RouteOptimizationStrategy` implementation — this milestone's own
+purpose was to prove the strategy abstraction is genuinely replaceable, so
+it deliberately uses a real, widely-used constraint solver (Google
+OR-Tools) rather than another bespoke heuristic.
+
+### Architecture: same route-first/cluster-second split, smarter route-first
+
+`ortools_strategy.py` mirrors `greedy_distance_strategy.py`'s own
+architecture — it only replaces the **route-first** phase:
+
+1. **Route-first (different from greedy):** instead of nearest-neighbor
+   construction, an OR-Tools `RoutingModel` searches for a shorter open-path
+   ordering — `PATH_CHEAPEST_ARC` first-solution construction, then
+   `GUIDED_LOCAL_SEARCH` improvement (2-opt/Or-opt-class moves), bounded by
+   a fixed solution count rather than wall-clock time (see "Determinism"
+   below).
+2. **Cluster-second (identical algorithm to greedy):** the resulting order
+   is walked with the exact same day-splitting/opening-hours/timing/scoring
+   control flow `greedy_distance_strategy.py` uses — re-implemented in
+   `ortools_strategy.py` rather than imported (this milestone's own
+   constraint was to leave `GreedyDistanceStrategy` completely unchanged),
+   but built from the *same pure helpers* (`haversine_km`, HH:MM parsing/
+   formatting, opening-hours parsing, the category → visit-minutes table),
+   imported directly from `greedy_distance_strategy.py` — so the low-level
+   math and constants can never silently drift between the two strategies,
+   only the day-clustering control flow is duplicated, and that's each
+   strategy's own "ordering/timing/day distribution" responsibility per
+   `RouteOptimizationStrategy`'s own docstring, not orchestration.
+
+### The open-path TSP trick
+
+OR-Tools' `RoutingIndexManager` always expects a "depot" (start/end) node —
+but there's no real depot here (a trip has no fixed starting location, and
+`greedy_distance_strategy.py` doesn't have this concept either). The fix is
+a standard OR-Tools pattern: add one virtual depot node (index 0, not a
+real `Place`) with **zero-cost edges to and from every real place**. The
+solver still has to visit every real node exactly once, but "starting" and
+"ending" at the depot is free — net effect, it minimizes the sum of
+consecutive real-stop distances, i.e. exactly an open-path TSP, with no
+artificial "return to start" cost distorting the result.
+
+### Determinism
+
+`solution_limit` (a count of improving solutions found, `200` by default —
+see `SOLUTION_LIMIT` in `ortools_strategy.py`) is the **primary** stopping
+condition, deliberately *not* a wall-clock `time_limit` — the count of
+local-search moves explored is independent of machine speed, so the same
+input always produces the same output regardless of what else is running
+on the machine. A generous `time_limit` (5s) exists purely as a safety net
+against pathologically large inputs; for realistic trip sizes (tens of
+places) `solution_limit` is reached well before it — confirmed empirically
+(10 back-to-back solves of the same 15-place input were byte-identical) and
+covered by `test_same_input_produces_identical_result_across_repeated_runs`
+in `tests/test_ortools_strategy.py`. `GUIDED_LOCAL_SEARCH` itself uses no
+randomness (unlike, say, simulated annealing) — it explores neighborhoods
+in a fixed order and greedily accepts improving moves.
+
+### Benchmark
+
+Route length vs. `greedy_distance`'s nearest-neighbor, same random
+place sets (see "Verification → Benchmark" for the exact script):
+
+| Places | `greedy_distance` | `ortools` | Improvement | `ortools` full solve time |
+|---|---|---|---|---|
+| 10 | 1666.3 km | 1440.0 km | 13.6% shorter | 52.6 ms |
+| 20 | 2316.5 km | 2240.3 km | 3.3% shorter | 143.7 ms |
+| 30 | 3017.7 km | 2776.7 km | 8.0% shorter | 324.6 ms |
+| 60 | 4352.5 km | 3877.1 km | 10.9% shorter | 1300.8 ms |
+
+Solve time is the full `optimize()` call (routing search + day-clustering
+walk), well under the 5s safety-net `time_limit` at every size tested —
+`solution_limit` is what actually governs termination in practice (see
+"Determinism" above). `ortools` is never *worse* than `greedy_distance` on
+these samples (its first-solution phase alone starts from the same class
+of construction heuristic, then improves on it) — but the spread (3–14%)
+shows route quality is instance-dependent, not a fixed guarantee, which is
+why "Available strategies → When to prefer each" frames this as "worth it for
+larger/messier selections," not a blanket recommendation.
+
+### What OR-Tools does *not* change vs. greedy (deliberate scope)
+
+- **Opening-hours conflicts are still soft, not solved.** The `ortools`
+  route search optimizes pure geographic distance; it does not know about
+  opening hours at all — those are applied identically to greedy, as a
+  post-processing clip/warning during the (shared-algorithm) day-clustering
+  walk. OR-Tools *could* model opening hours as hard time windows on the
+  routing dimension — deliberately not attempted here, to keep this
+  milestone scoped to what was actually asked ("optimize stop ordering,
+  geographic travel distance, multi-day distribution") rather than
+  conflating two different concerns. Flagged as a natural v2 for `ortools`
+  specifically in "Future improvements."
+- **Day-splitting is still a post-processing pass, not a first-class
+  OR-Tools model.** A "real" multi-day VRP (one OR-Tools vehicle per day,
+  with per-day time-budget capacities) was considered and deliberately
+  rejected for v1: it requires soft-capacity penalties and vehicle-count
+  minimization tuning to avoid either infeasible solves or spreading a
+  small selection needlessly across many days — meaningful extra
+  complexity for uncertain gain, since day-splitting is fundamentally a
+  scheduling concern that the existing (already-tested) day-clustering
+  algorithm already handles reasonably. What OR-Tools contributes here is
+  a better-ordered path *feeding into* that same clustering step — see
+  "Architecture" above.
+
 ## Extension points
 
-Adding a new strategy (Google Maps API, Apple Maps, OR-Tools, an
-LLM-assisted planner, …) requires no change to the service, DTOs, or API:
+Adding a new strategy (Google Maps API, Apple Maps, an LLM-assisted
+planner, …) requires no change to the service, DTOs, or API — `ortools`
+is the second real implementation proving exactly this claim, not just a
+hypothetical:
 
 1. Implement `RouteOptimizationStrategy` (`app/domain/optimization/strategy.py`)
    — one method, `optimize(places: List[PlaceInput], constraints) -> OptimizationResult`.
 2. Register it: `register_strategy(MyStrategy())` in
    `strategy_registry.py`.
 3. Callers select it via `OptimizeTripRequest.strategy` (e.g.
-   `"or_tools"`) — `OptimizationService` resolves it by name and never
-   imports a concrete strategy class itself.
+   `"ortools"`) — `OptimizationService` resolves it by name and never
+   imports a concrete strategy class itself. Zero lines changed in
+   `optimization_service.py`, the DTOs, or the API route to add `ortools` —
+   confirmed by `git diff` for this milestone touching only
+   `ortools_strategy.py` (new file), `strategy_registry.py` (one import +
+   one registration line), `requirements.txt`, and tests/docs.
 
-A strategy backed by a real routing API would naturally also improve travel
-time accuracy and could resolve opening-hours conflicts by actually
-reordering stops — both flagged as v1 limitations below.
+A strategy backed by a real routing API (Google/Apple Maps) would naturally
+improve travel time accuracy beyond both existing strategies' flat-speed
+haversine assumption — see "Assumptions" below.
 
 ## Assumptions
+
+Shared by **both** strategies (`ortools` imports these exact constants/
+helpers from `greedy_distance_strategy.py` — see "`ortools` strategy →
+Architecture"), except where noted:
 
 - **Average travel speed: 25 km/h**, flat, no traffic/time-of-day model —
   an approximation to unblock v1 without a real routing engine. A
@@ -275,7 +443,9 @@ reordering stops — both flagged as v1 limitations below.
   seasonal, and — as of this writing — **populated by no pipeline stage**.
   In practice every optimizer run today includes the "opening hours
   unavailable" warning for every place, exercised in tests but not yet a
-  real signal in production data.
+  real signal in production data. Both strategies treat this identically
+  (soft clip/warning, not a hard constraint) — see "`ortools` strategy →
+  What OR-Tools does not change vs. greedy."
 - **`selected_place_ids` are validated against the *trip owner's* Library**
   (`PlaceSave` rows for `Trip.user_id`), not the requesting collaborator's —
   matching how `Trip.create_trip` already resolves ownership. An editor can
@@ -286,26 +456,38 @@ reordering stops — both flagged as v1 limitations below.
   itineraries but not generate new ones — the same split as
   `update_stop_order`.
 
-## Limitations (v1)
+## Limitations
 
-- **No re-shuffling for opening-hours conflicts.** If a stop's computed
-  arrival lands after closing, the optimizer warns but keeps the stop where
-  the greedy walk put it — it doesn't try a different day or a different
-  position in the route. Real constraint-solving (which day/slot fits every
-  stop's hours) is exactly the kind of problem an OR-Tools-based strategy
-  would solve properly; deferred there on purpose rather than half-building
-  a weaker version of it here.
-- **No real-world travel time.** No traffic, no walking-vs-driving
-  distinction, no public transit — flat haversine distance over an assumed
-  speed. A Google/Apple Maps strategy is the natural fix.
-- **The route-first/cluster-second split can be locally suboptimal.**
-  Nearest-neighbor is a classic, well-known TSP heuristic — good enough for
-  small selections, not close to optimal for larger ones (no 2-opt pass,
-  no OR-Tools-grade solver). This is explicitly what "the first
-  implementation may use a simple heuristic" calls for.
+- **No re-shuffling for opening-hours conflicts, in either strategy.** If a
+  stop's computed arrival lands after closing, both `greedy_distance` and
+  `ortools` warn but keep the stop where their respective route search put
+  it — neither tries a different day or position to resolve it. `ortools`
+  *could* model this as a hard time-window constraint on the routing
+  dimension — deliberately not attempted in this milestone, kept scoped to
+  ordering/distance/day-distribution (see "`ortools` strategy → What
+  OR-Tools does not change vs. greedy"). Flagged as the natural next
+  OR-Tools enhancement in "Future improvements."
+- **No real-world travel time, in either strategy.** No traffic, no
+  walking-vs-driving distinction, no public transit — flat haversine
+  distance over an assumed speed for both `greedy_distance` and `ortools`.
+  A Google/Apple Maps-backed strategy (a third `RouteOptimizationStrategy`)
+  is the natural fix, and would slot in the same way `ortools` did.
+- **`greedy_distance`'s nearest-neighbor construction can be locally
+  suboptimal** for larger selections (no 2-opt pass) — this is exactly what
+  `ortools` exists to mitigate for callers who opt into it (see "Available
+  strategies → When to prefer each" and the benchmark table there);
+  `greedy_distance` itself is unchanged and remains the zero-latency
+  default.
+- **`ortools`'s day-splitting is post-processing, not a first-class
+  OR-Tools model** (multi-vehicle VRP with per-day capacity) — see
+  "`ortools` strategy → What OR-Tools does not change vs. greedy" for why
+  this was a deliberate v1 scope decision, not an oversight.
 - **The optimization score is not comparable across strategies** or
   validated against real user satisfaction — it's a same-strategy,
-  same-run diagnostic, not a benchmark.
+  same-run diagnostic, not a benchmark. (Route-length comparison across
+  strategies is possible and shown in the benchmark table above — the
+  0–100 *score*, specifically, is not the right tool for that comparison,
+  since both strategies compute it from their own resulting route only.)
 - **Apply keeps only the most recent provenance pointer**, not a full
   history of every apply — see "Apply semantics → Repeated application."
 
@@ -332,6 +514,11 @@ Requires `x-user-id` header (owner or editor).
 ```
 
 All fields except `selected_place_ids` are optional (defaults shown above).
+`strategy` accepts any registered name — currently `"greedy_distance"`
+(default) or `"ortools"` (see "Available strategies"); an unrecognized
+name is rejected with `400 INVALID_OPTIMIZATION_REQUEST` listing the valid
+options (`strategy_registry.available_strategies()`), never silently
+falls back to the default.
 
 ```json
 {
@@ -413,16 +600,37 @@ empty itinerary, duplicate places — see "Apply semantics → Safety").
 
 ```bash
 cd services/core-api
-pytest tests/test_optimization_strategy.py -v   # pure unit — no DB, no HTTP
+pytest tests/test_optimization_strategy.py -v   # greedy_distance unit — no DB, no HTTP
+pytest tests/test_ortools_strategy.py -v         # ortools unit — no DB, no HTTP
+pytest tests/test_strategy_comparison.py -v      # both strategies, shared fixtures/invariants
 pytest tests/test_trip_optimization.py -v        # integration — full API round trip
 pytest tests/ -q                                  # full suite (confirms no regressions)
 ```
 
-`test_optimization_strategy.py` covers the algorithm directly (`PlaceInput`
-in, `OptimizationResult` out): empty input, a single place, category-based
-visit duration, opening-hours clipping vs. conflict, day-splitting,
-`duration_days` derivation and overflow, `start_date` → calendar dates,
-and score bounds.
+`test_optimization_strategy.py` covers `greedy_distance` directly
+(`PlaceInput` in, `OptimizationResult` out): empty input, a single place,
+category-based visit duration, opening-hours clipping vs. conflict,
+day-splitting, `duration_days` derivation and overflow, `start_date` →
+calendar dates, and score bounds. **Unchanged by this milestone** — same
+19 tests, still passing, confirming `GreedyDistanceStrategy` itself was
+never touched.
+
+`test_ortools_strategy.py` (19 tests, new) mirrors that same structure for
+`ortools` — the required edge cases (0/1/2 places, duplicate places,
+multiple cities, impossible day budgets, identical/degenerate coordinates,
+missing opening hours, multi-day splitting, a 60-place set completing in
+about a second) plus two determinism tests (5 repeated solves of the same
+15-place input byte-identical; a fresh strategy instance each time still
+agrees).
+
+`test_strategy_comparison.py` (35 tests, new) runs both strategies over
+the same six fixtures and asserts the shared contract without requiring
+identical routes: registry sanity (both resolvable, `greedy_distance`
+still `DEFAULT_STRATEGY_NAME`), `OptimizationResult`/`OptimizedStop`
+field-type schema parity, no lost/duplicated places, valid contiguous
+day/order indices, and score bounds — parametrized across strategy ×
+fixture (`ids=lambda s: s.name` makes failures immediately attributable to
+one strategy).
 
 `test_trip_optimization.py` covers the full stack through the API client:
 happy path, persistence + list/get round trip, multiple runs coexisting
@@ -430,29 +638,47 @@ happy path, persistence + list/get round trip, multiple runs coexisting
 and the required edge cases — one place, duplicate places, multiple
 cities, empty trip, unavailable opening-hours metadata — plus request
 validation and permission checks (owner/editor/viewer, non-collaborator,
-anti-enumeration 404s matching the Trip Sharing convention). It also
-covers `apply_itinerary`: happy path (`TripStop` before/after DB
-assertions), owner, editor, viewer rejection, cross-user rejection,
-nonexistent itinerary, deleted-place rejection, empty-itinerary rejection,
-duplicate-place rejection, atomic rollback on a rejected apply, repeated
-application, the saved itinerary staying byte-for-byte unchanged after
-apply, `Trip` provenance fields updating, and the analytics event firing
-with the right payload — 358 tests total in the full suite (was 344 before
-this milestone).
+anti-enumeration 404s matching the Trip Sharing convention), `apply_itinerary`
+(happy path with `TripStop` before/after DB assertions, permissions,
+atomicity, repeated application, provenance, analytics), and — new this
+milestone — `strategy: "ortools"` end-to-end (optimize → `strategy_name`
+persisted correctly → coexists with a `greedy_distance` itinerary on the
+same trip in history → applies to `TripStop` exactly like any other
+itinerary, since apply is strategy-agnostic by construction).
+
+**415 tests total in the full suite (was 358 before this milestone; +57 —
+19 + 35 + 3 new integration tests), zero regressions.**
 
 ## Future improvements
 
 Ranked roughly by what unlocks the most value next:
 
-1. **A second strategy** to prove the interface actually decouples cleanly
-   — e.g. an OR-Tools-based strategy that solves opening-hours conflicts
-   for real, or a Google/Apple Maps-backed strategy for real travel times.
-2. **Populate `Place.category`/`Place.opening_hours`** from a real source
+1. **Hard opening-hours time windows in `ortools`** — model opening hours
+   as a routing dimension with real time windows (OR-Tools supports this
+   natively via `AddDimension` + `CumulVar` bounds) so the solver can
+   actually resolve a conflict by reordering, instead of the current
+   soft clip/warning shared with `greedy_distance`. The single biggest
+   remaining gap between "OR-Tools is integrated" and "OR-Tools is used to
+   its full potential" — see "`ortools` strategy → What OR-Tools does not
+   change vs. greedy."
+2. **A first-class multi-day VRP in `ortools`** (one vehicle per day,
+   soft per-day time-budget capacities) instead of the current
+   route-then-cluster post-processing split — would let day assignment and
+   route order be optimized jointly rather than sequentially. Considered
+   and deliberately deferred this milestone (see "`ortools` strategy → What
+   OR-Tools does not change vs. greedy") since it requires vehicle-count
+   minimization tuning to avoid regressions on the "derives day count"
+   behavior already tested for both strategies.
+3. **A Google/Apple Maps-backed strategy** for real travel times (driving/
+   walking/transit) instead of flat haversine-over-25km/h — a third
+   `RouteOptimizationStrategy`, same zero-API-change extension path
+   `ortools` just proved.
+4. **Populate `Place.category`/`Place.opening_hours`** from a real source
    (Google Places, OSM `opening_hours` tags) — until then, every itinerary
-   uses the flat default visit duration and always warns about missing
-   hours.
-3. **Weekday/seasonal opening hours**, not just a flat daily window.
-4. **Apply history** — `Trip.applied_itinerary_id` only tracks the most
-   recent apply; a full log of every apply (who, when, which itinerary)
-   would need a separate table, not attempted here since nothing yet
-   needs more than "what's currently applied."
+   from either strategy uses the flat default visit duration and always
+   warns about missing hours.
+5. **Weekday/seasonal opening hours**, not just a flat daily window.
+6. **Apply history** — `Trip.applied_itinerary_id` only tracks the most
+   recent apply; a full log of every apply (who, when, which itinerary,
+   which strategy) would need a separate table, not attempted here since
+   nothing yet needs more than "what's currently applied."
