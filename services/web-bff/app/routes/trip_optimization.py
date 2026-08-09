@@ -84,3 +84,25 @@ async def get_itinerary(
         if resp.status_code >= 400:
             raise_from_response(resp, request_id=rid)
         return resp.json()
+
+
+@router.post("/itineraries/{itinerary_id}/apply")
+async def apply_itinerary(
+    itinerary_id: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    """
+    Kayıtlı bir itinerary'i Trip'in kanonik TripStop listesine uygular —
+    API parity için mevcut (bkz. docs/trip-optimizer-bff.md), ilk UI iOS'ta.
+    Gövde gerektirmez; core-api'nin kendi endpoint'i de almıyor.
+    """
+    rid = str(uuid.uuid4())[:8]
+    async with web_error_wrapper(request_id=rid):
+        async with internal_client(15.0) as client:
+            resp = await client.post(
+                f"{CORE_API_URL}/internal/itineraries/{itinerary_id}/apply",
+                headers={"x-user-id": str(user_id)},
+            )
+        if resp.status_code >= 400:
+            raise_from_response(resp, request_id=rid)
+        return resp.json()

@@ -218,3 +218,67 @@ def test_optimize_core_api_unreachable_returns_503(client, auth_headers, mock_co
     )
     assert resp.status_code == 503
     assert resp.json()["code"] == "SERVICE_UNAVAILABLE"
+
+
+# ─── apply_itinerary ────────────────────────────────────────────────────────
+
+def test_apply_itinerary_requires_auth(client):
+    resp = client.post("/api/mobile/itineraries/4/apply")
+    assert resp.status_code == 403
+
+
+def test_apply_itinerary_happy_path(client, auth_headers, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(200, {
+        "trip_id": 1, "itinerary_id": 4,
+        "stops": [{"place_id": 12, "name": "Ayasofya", "lat": 41.0086, "lng": 28.9802,
+                   "city": None, "category": None, "day_index": 0, "order_index": 0}],
+        "stops_count": 1, "applied_at": "2026-08-09T10:00:00",
+    })
+
+    resp = client.post("/api/mobile/itineraries/4/apply", headers=auth_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["trip_id"] == 1
+    assert data["itinerary_id"] == 4
+    assert data["stops_count"] == 1
+
+    args, kwargs = mock_core_api.post.call_args
+    assert args[0].endswith("/internal/itineraries/4/apply")
+    assert kwargs["headers"]["x-user-id"] == "1"
+    # Gövde göndermez — core-api'nin apply endpoint'i de almıyor.
+    assert "json" not in kwargs or kwargs.get("json") is None
+
+
+def test_apply_itinerary_propagates_not_found_as_404(client, auth_headers, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(
+        404, {"error": {"code": "ITINERARY_NOT_FOUND", "message": "not found"}}
+    )
+    resp = client.post("/api/mobile/itineraries/999/apply", headers=auth_headers)
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "ITINERARY_NOT_FOUND"
+
+
+def test_apply_itinerary_propagates_permission_denied_as_403(client, auth_headers, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(
+        403, {"error": {"code": "PERMISSION_DENIED", "message": "forbidden"}}
+    )
+    resp = client.post("/api/mobile/itineraries/4/apply", headers=auth_headers)
+    assert resp.status_code == 403
+    assert resp.json()["code"] == "PERMISSION_DENIED"
+
+
+def test_apply_itinerary_propagates_invalid_request_as_400(client, auth_headers, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(
+        400, {"error": {"code": "INVALID_OPTIMIZATION_REQUEST", "message": "silinmiş mekanlar içeriyor"}}
+    )
+    resp = client.post("/api/mobile/itineraries/4/apply", headers=auth_headers)
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "INVALID_OPTIMIZATION_REQUEST"
+
+
+def test_apply_itinerary_core_api_unreachable_returns_503(client, auth_headers, mock_core_api):
+    mock_core_api.post.side_effect = httpx.ConnectError("connection refused")
+
+    resp = client.post("/api/mobile/itineraries/4/apply", headers=auth_headers)
+    assert resp.status_code == 503
+    assert resp.json()["code"] == "SERVICE_UNAVAILABLE"
