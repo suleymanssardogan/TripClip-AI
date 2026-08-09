@@ -54,6 +54,11 @@ enum Endpoint {
     case optimizeTrip(tripID: Int, placeIDs: [Int])
     case itineraries(tripID: Int)
     case itineraryDetail(itineraryID: Int)
+    /// Kayıtlı bir itinerary'i Trip'in kanonik TripStop listesine uygular
+    /// (REPLACE — bkz. docs/trip-optimizer.md "Apply semantics"). Trip
+    /// Builder'ı ilk kez kasıtlı olarak mutasyona uğratan istek. Gövde
+    /// gerektirmez.
+    case applyItinerary(itineraryID: Int)
 
     // Analytics — shared-trip büyüme hunisi (bkz. docs/analytics/shared-trip-events.md)
     case trackAnalyticsEvent(event: String, tripID: Int, source: String)
@@ -87,13 +92,14 @@ extension Endpoint {
         case .optimizeTrip(let id, _):      return "/api/mobile/trips/\(id)/optimize"
         case .itineraries(let id):          return "/api/mobile/trips/\(id)/itineraries"
         case .itineraryDetail(let id):      return "/api/mobile/itineraries/\(id)"
+        case .applyItinerary(let id):       return "/api/mobile/itineraries/\(id)/apply"
         case .trackAnalyticsEvent:          return "/api/mobile/analytics/events"
         }
     }
 
     var method: HTTPMethod {
         switch self {
-        case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl, .createTrip, .optimizeTrip, .trackAnalyticsEvent: return .post
+        case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl, .createTrip, .optimizeTrip, .applyItinerary, .trackAnalyticsEvent: return .post
         case .registerDeviceToken: return .put
         case .updateStopOrder, .updateTripStopOrder: return .patch
         case .deletePlan, .deleteTrip: return .delete

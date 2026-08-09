@@ -33,7 +33,8 @@ struct TripDetailView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     NavigationLink(
                         destination: TripOptimizerView(
-                            mode: .generate(tripID: trip.id, placeIDs: trip.allStops.map(\.placeId))
+                            mode: .generate(tripID: trip.id, placeIDs: trip.allStops.map(\.placeId)),
+                            onApplied: { Task { await vm.load(tripID: tripID, auth: auth) } }
                         )
                     ) {
                         Image(systemName: "sparkles")
@@ -43,7 +44,12 @@ struct TripDetailView: View {
             }
             if let trip = vm.trip, vm.hasItineraryHistory {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    NavigationLink(destination: ItineraryHistoryView(tripID: trip.id)) {
+                    NavigationLink(
+                        destination: ItineraryHistoryView(
+                            tripID: trip.id,
+                            onApplied: { Task { await vm.load(tripID: tripID, auth: auth) } }
+                        )
+                    ) {
                         Image(systemName: "clock.arrow.circlepath")
                             .foregroundStyle(AppColors.accentText)
                     }

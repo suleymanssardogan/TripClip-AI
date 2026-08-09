@@ -22,11 +22,16 @@ struct TripOptimizerView: View {
     }
 
     let mode: Mode
+    /// Başarılı "Trip'e Uygula" sonrası çağrılır — çağıran taraf TripDetailView'i
+    /// yeniden yükler (bkz. docs/ios-trip-optimizer.md "Apply to Trip").
+    var onApplied: (() -> Void)? = nil
 
     @Environment(AuthEnvironment.self) private var auth
     @Environment(\.dismiss) private var dismiss
     @State private var vm = TripOptimizerViewModel()
     @State private var showSavedConfirmation = false
+    @State private var showApplyConfirm = false
+    @State private var showApplySuccess = false
 
     private var navigationTitle: String {
         switch mode {
@@ -65,6 +70,43 @@ struct TripOptimizerView: View {
         } message: {
             Text("Bu itinerary geziye kaydedildi. Gezinin kendisi değişmedi — istediğin zaman tekrar optimize edebilirsin.")
         }
+        .confirmationDialog(
+            "Bu itinerary Trip'e uygulansın mı?",
+            isPresented: $showApplyConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Uygula") {
+                Task { await applyItinerary() }
+            }
+            Button("Vazgeç", role: .cancel) { }
+        } message: {
+            Text("Gezinin mevcut durak listesi bu itinerary ile değiştirilecek. Kayıtlı itinerary geçmişte kalır ve istediğin zaman tekrar uygulanabilir.")
+        }
+        .alert("Uygulandı", isPresented: $showApplySuccess) {
+            Button("Tamam") {
+                onApplied?()
+                dismiss()
+            }
+        } message: {
+            Text("Gezinin durak listesi bu itinerary ile güncellendi.")
+        }
+        .alert(
+            "Uygulanamadı",
+            isPresented: Binding(
+                get: { vm.applyError != nil },
+                set: { if !$0 { vm.applyError = nil } }
+            )
+        ) {
+            Button("Tamam", role: .cancel) { vm.applyError = nil }
+        } message: {
+            Text(vm.applyError ?? "")
+        }
+    }
+
+    private func applyItinerary() async {
+        guard let itinerary = vm.itinerary else { return }
+        let success = await vm.applyToTrip(itineraryID: itinerary.id, auth: auth)
+        if success { showApplySuccess = true }
     }
 
     private func load() async {
@@ -141,9 +183,11 @@ struct TripOptimizerView: View {
                     ItineraryDaySection(day: day)
                 }
 
+                applyButton
+                    .padding(.top, 8)
+
                 if case .generate = mode {
                     footerButton
-                        .padding(.top, 8)
                 }
 
                 Color.clear.frame(height: 24)
@@ -159,11 +203,34 @@ struct TripOptimizerView: View {
         } label: {
             Text("Daha Sonra İçin Kaydet")
                 .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(AppColors.onAccent)
+                .foregroundStyle(AppColors.accentText)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-                .background(AppColors.accent)
+                .background(AppColors.accent.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 14))
         }
+    }
+
+    /// Her iki modda da gösterilir — hem yeni üretilmiş hem kayıtlı bir
+    /// itinerary Trip'e uygulanabilir (Req 10: yalnızca .viewSaved/generated
+    /// sonuçlar için, yani her zaman burada — boş itinerary emptyState'e düşer).
+    private var applyButton: some View {
+        Button {
+            showApplyConfirm = true
+        } label: {
+            ZStack {
+                Text("Trip'e Uygula")
+                    .opacity(vm.isApplying ? 0 : 1)
+                ProgressView().tint(AppColors.onAccent)
+                    .opacity(vm.isApplying ? 1 : 0)
+            }
+            .font(.system(size: 15, weight: .bold))
+            .foregroundStyle(AppColors.onAccent)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(AppColors.accent)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .disabled(vm.isApplying)
     }
 }

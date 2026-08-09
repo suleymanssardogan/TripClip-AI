@@ -36,6 +36,27 @@ enum OptimizerFixtures {
 
     static var emptyDays: [ItineraryDay] { [] }
 
+    static func applyResult(
+        tripId: Int = 1,
+        itineraryId: Int = 4,
+        stopsCount: Int = 2
+    ) -> ApplyItineraryResult {
+        ApplyItineraryResult(
+            tripId: tripId, itineraryId: itineraryId,
+            stops: [
+                AppliedTripStop(
+                    placeId: 12, name: "Ayasofya", lat: 41.0086, lng: 28.9802,
+                    city: "İstanbul", category: "tarihi", dayIndex: 0, orderIndex: 0
+                ),
+                AppliedTripStop(
+                    placeId: 7, name: "Topkapı Sarayı", lat: 41.0115, lng: 28.9833,
+                    city: "İstanbul", category: "tarihi", dayIndex: 0, orderIndex: 1
+                ),
+            ],
+            stopsCount: stopsCount, appliedAt: "2026-08-08T10:05:00"
+        )
+    }
+
     static func summary(
         id: Int,
         score: Double = 87.5,

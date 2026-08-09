@@ -253,4 +253,170 @@ final class TripOptimizerViewModelTests: XCTestCase {
         XCTAssertEqual(fake.callCount, 0)
         XCTAssertNil(vm.itinerary)
     }
+
+    // MARK: - Apply to Trip — bkz. docs/trip-optimizer.md "Apply semantics"
+
+    func test_applyToTrip_initialState_isNotApplying_hasNoError() {
+        let vm = TripOptimizerViewModel()
+        XCTAssertFalse(vm.isApplying)
+        XCTAssertNil(vm.applyError)
+    }
+
+    func test_applyToTrip_success_returnsTrue_clearsApplying_forwardsEndpointAndToken() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.applyResult())
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        let success = await vm.applyToTrip(itineraryID: 4, auth: auth)
+
+        XCTAssertTrue(success)
+        XCTAssertFalse(vm.isApplying)
+        XCTAssertNil(vm.applyError)
+        guard case .applyItinerary(let itineraryID) = fake.lastEndpoint else {
+            XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint)) — .applyItinerary bekleniyordu")
+            return
+        }
+        XCTAssertEqual(itineraryID, 4)
+        XCTAssertEqual(fake.lastToken, "test-token")
+        XCTAssertEqual(fake.callCount, 1)
+    }
+
+    /// Saved itinerary (vm.itinerary) apply sırasında dokunulmadan kalmalı —
+    /// Req 11: apply, önizlemede gösterilen sonucu MUTASYONA UĞRATMAZ.
+    func test_applyToTrip_success_doesNotMutateDisplayedItinerary() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.itinerary(id: 4))
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+        await vm.loadItinerary(itineraryID: 4, auth: auth)
+        XCTAssertNotNil(vm.itinerary)
+
+        fake.result = .success(OptimizerFixtures.applyResult(itineraryId: 4))
+        _ = await vm.applyToTrip(itineraryID: 4, auth: auth)
+
+        XCTAssertEqual(vm.itinerary?.id, 4)
+        XCTAssertEqual(vm.itinerary?.days.first?.stops.count, 2)
+    }
+
+    func test_applyToTrip_serverError_setsApplyError_returnsFalse() async {
+        let fake = FakeAPIClient()
+        fake.result = .failure(APIError.server(code: "PERMISSION_DENIED", message: "Bu geziyi düzenleme yetkin yok."))
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        let success = await vm.applyToTrip(itineraryID: 4, auth: auth)
+
+        XCTAssertFalse(success)
+        XCTAssertFalse(vm.isApplying)
+        XCTAssertEqual(vm.applyError, "Bu geziyi düzenleme yetkin yok.")
+    }
+
+    func test_applyToTrip_networkError_setsApplyError_returnsFalse() async {
+        let fake = FakeAPIClient()
+        fake.result = .failure(APIError.network(URLError(.notConnectedToInternet)))
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        let success = await vm.applyToTrip(itineraryID: 4, auth: auth)
+
+        XCTAssertFalse(success)
+        XCTAssertNotNil(vm.applyError)
+    }
+
+    func test_applyToTrip_unauthorized_logsOutAndDoesNotSetApplyError() async {
+        let fake = FakeAPIClient()
+        fake.result = .failure(APIError.unauthorized(message: nil))
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        XCTAssertTrue(auth.isAuthenticated)
+        let success = await vm.applyToTrip(itineraryID: 4, auth: auth)
+
+        XCTAssertFalse(success)
+        XCTAssertFalse(auth.isAuthenticated)
+        XCTAssertNil(vm.applyError)
+    }
+
+    func test_applyToTrip_noToken_neverCallsAPI_returnsFalse() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.applyResult())
+        let auth = makeAuth(fake: fake, withUser: false)
+        let vm = TripOptimizerViewModel()
+
+        let success = await vm.applyToTrip(itineraryID: 4, auth: auth)
+
+        XCTAssertFalse(success)
+        XCTAssertEqual(fake.callCount, 0)
+    }
+
+    func test_applyToTrip_isApplying_trueWhileRequestInFlight_falseAfterCompletion() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.applyResult())
+        let started = AsyncGate()
+        let proceed = AsyncGate()
+        fake.startedGate = started
+        fake.gate = proceed
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        XCTAssertFalse(vm.isApplying)
+
+        let task = Task { await vm.applyToTrip(itineraryID: 4, auth: auth) }
+        await started.wait()
+
+        XCTAssertTrue(vm.isApplying, "İstek gate'te askıda beklerken isApplying true olmalı")
+
+        await proceed.open()
+        let success = await task.value
+
+        XCTAssertTrue(success)
+        XCTAssertFalse(vm.isApplying)
+    }
+
+    /// Çift-gönderim koruması: isApplying true iken ikinci bir applyToTrip
+    /// çağrısı API'yi tekrar çağırmadan hemen false dönmeli (Req 10: "prevent
+    /// double submission" — deleteTrip/optimize ile aynı re-entrancy deseni).
+    func test_applyToTrip_reentrancyGuard_ignoresSecondCallWhileFirstInFlight() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.applyResult())
+        let started = AsyncGate()
+        let proceed = AsyncGate()
+        fake.startedGate = started
+        fake.gate = proceed
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        let first = Task { await vm.applyToTrip(itineraryID: 4, auth: auth) }
+        await started.wait()
+        XCTAssertTrue(vm.isApplying)
+        XCTAssertEqual(fake.callCount, 1)
+
+        let secondResult = await vm.applyToTrip(itineraryID: 4, auth: auth)
+        XCTAssertFalse(secondResult)
+        XCTAssertEqual(fake.callCount, 1)
+
+        await proceed.open()
+        let firstResult = await first.value
+        XCTAssertTrue(firstResult)
+        XCTAssertEqual(fake.callCount, 1)
+    }
+
+    /// Req 11: apply'ı tekrar çağırmak (aynı zaten-uygulanmış itinerary için)
+    /// hataya düşmemeli — backend idempotent (bkz. sql_optimization_repository
+    /// "repeated application" testi). VM tarafında yalnızca çağrının serbestçe
+    /// tekrarlanabildiğini doğruluyoruz.
+    func test_applyToTrip_repeatedApplication_succeedsAgain() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.applyResult())
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        let first = await vm.applyToTrip(itineraryID: 4, auth: auth)
+        let second = await vm.applyToTrip(itineraryID: 4, auth: auth)
+
+        XCTAssertTrue(first)
+        XCTAssertTrue(second)
+        XCTAssertEqual(fake.callCount, 2)
+    }
 }

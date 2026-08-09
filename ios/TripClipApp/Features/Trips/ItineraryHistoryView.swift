@@ -8,6 +8,9 @@ import SwiftUI
 struct ItineraryHistoryView: View {
 
     let tripID: Int
+    /// TripOptimizerView'a taşınır — başarılı bir "Trip'e Uygula" sonrası
+    /// TripDetailView'i yeniden yükler (bkz. TripDetailView).
+    var onApplied: (() -> Void)? = nil
 
     @Environment(AuthEnvironment.self) private var auth
     @State private var vm = ItineraryHistoryViewModel()
@@ -36,7 +39,7 @@ struct ItineraryHistoryView: View {
         ScrollView {
             LazyVStack(spacing: 10) {
                 ForEach(vm.itineraries) { summary in
-                    NavigationLink(destination: TripOptimizerView(mode: .viewSaved(itineraryID: summary.id))) {
+                    NavigationLink(destination: TripOptimizerView(mode: .viewSaved(itineraryID: summary.id), onApplied: onApplied)) {
                         ItineraryHistoryRowView(summary: summary)
                     }
                     .buttonStyle(PressableButtonStyle())

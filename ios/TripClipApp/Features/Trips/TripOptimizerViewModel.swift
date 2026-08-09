@@ -52,4 +52,37 @@ final class TripOptimizerViewModel {
             self.error = .unknown(statusCode: 0)
         }
     }
+
+    // MARK: - Trip'e Uygula — bkz. docs/trip-optimizer.md "Apply semantics"
+    //
+    // Kayıtlı itinerary'i Trip'in kanonik TripStop listesine yazar. `itinerary`
+    // (görüntülenen önizleme) BİLEREK dokunulmadan kalır — apply saved
+    // itinerary'i mutasyona uğratmaz, yalnızca Trip'i günceller (Req 11).
+    // deleteTrip ile aynı desen: re-entrancy guard, @discardableResult -> Bool.
+
+    private(set) var isApplying = false
+    var applyError: String?
+
+    @discardableResult
+    func applyToTrip(itineraryID: Int, auth: AuthEnvironment) async -> Bool {
+        guard !isApplying, let token = auth.user?.token else { return false }
+        isApplying = true
+        applyError = nil
+        defer { isApplying = false }
+
+        do {
+            let _: ApplyItineraryResult = try await auth.apiClient.send(
+                .applyItinerary(itineraryID: itineraryID), token: token
+            )
+            return true
+        } catch let apiError as APIError {
+            if apiError.isUnauthorized { auth.handleUnauthorized(); return false }
+            applyError = apiError.localizedDescription
+            Logger.network.warning("Apply itinerary failed: \(apiError.localizedDescription ?? "")")
+            return false
+        } catch {
+            applyError = "Itinerary uygulanamadı."
+            return false
+        }
+    }
 }

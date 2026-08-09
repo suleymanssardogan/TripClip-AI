@@ -73,3 +73,32 @@ struct ItinerarySummary: Decodable, Identifiable, Hashable {
 struct ItineraryListResponse: Decodable {
     let itineraries: [ItinerarySummary]
 }
+
+// MARK: - Apply to Trip — bkz. docs/trip-optimizer.md "Apply semantics"
+//
+// mobile-bff /itineraries/{id}/apply route'u trip_optimization.py'nin diğer
+// route'ları gibi ham pass-through (trip_transformer YOK), bu yüzden alan
+// adları core-api'nin ApplyItineraryResponse/TripStopDTO'suyla birebir
+// eşleşir — TripStop'un latitude/longitude'u değil, ItineraryStop'un
+// lat/lng kuralı geçerli.
+
+struct AppliedTripStop: Decodable, Identifiable, Hashable {
+    let placeId:    Int
+    let name:       String
+    let lat:        Double
+    let lng:        Double
+    let city:       String?
+    let category:   String?
+    let dayIndex:   Int
+    let orderIndex: Int
+
+    var id: String { "\(dayIndex)-\(orderIndex)-\(placeId)" }
+}
+
+struct ApplyItineraryResult: Decodable {
+    let tripId:      Int
+    let itineraryId: Int
+    let stops:       [AppliedTripStop]
+    let stopsCount:  Int
+    let appliedAt:   String?
+}
