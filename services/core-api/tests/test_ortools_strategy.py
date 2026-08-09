@@ -251,3 +251,275 @@ def test_determinism_holds_across_fresh_strategy_instances():
     r2 = ORToolsRouteOptimizationStrategy().optimize(places, constraints)
 
     assert _stop_signature(r1) == _stop_signature(r2)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Hard opening-hours time windows (bkz. ortools_strategy.py "Hard opening-
+# hours time windows") — GreedyDistanceStrategy'nin aksine, burada açılış
+# saatleri artık rota SIRALAMASINI etkileyen sert bir kısıt, yalnızca
+# son-işleme sırasında kırpılan/uyarılan yumuşak bir sinyal değil.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ─── Place open all day ──────────────────────────────────────────────────────
+
+def test_place_open_all_day_is_never_constrained_or_warned():
+    result = _run([
+        _place(1, "Her Zaman Açık", 41.00, 29.00, opening_hours="00:00-23:59"),
+        _place(2, "Normal", 41.05, 29.05),
+    ])
+    assert not any("çakışıyor" in w for w in result.warnings)
+    assert not any("gevşetildi" in w for w in result.warnings)
+    ids = sorted(s.place_id for d in result.days for s in d.stops)
+    assert ids == [1, 2]
+
+
+# ─── Narrow opening window forces reordering vs. pure distance ──────────────
+
+def test_narrow_window_forces_reordering_relative_to_pure_distance():
+    """Dört mekan — A(batı), C(orta, YALNIZCA 09:00-09:30 açık), B(doğu),
+    D(güney). Saf mesafe-minimizasyonu C'yi rotanın ortasında bir yere
+    koyar; sert pencere C'yi İLK durağa zorlar — bu, salt son-işlemede
+    'kırpma/uyar' ile ELDE EDİLEMEZ bir sıralama kararı, tam da bu
+    milestone'un kanıtlamak istediği şey."""
+    places = [
+        _place(1, "A-batı", 41.00, 27.50),
+        _place(2, "C-orta", 41.00, 29.00, opening_hours="09:00-09:30"),
+        _place(3, "B-doğu", 41.00, 30.50),
+        _place(4, "D-güney", 39.50, 29.00),
+    ]
+    result = _run(places)
+
+    ids = sorted(s.place_id for d in result.days for s in d.stops)
+    assert ids == [1, 2, 3, 4]  # hiçbir durak kaybolmadı
+    assert not any("gevşetildi" in w for w in result.warnings)  # sağlanabilir, gevşetme yok
+
+    first_stop = result.days[0].stops[0]
+    assert first_stop.place_id == 2  # C-orta zorunlu olarak ilk durak
+    assert first_stop.arrival_time == "09:00"
+
+    # Sert kısıtı sağlamanın bir mesafe bedeli var — bu, salt mesafeyle
+    # asla seçilmeyecek bir sıralama (bkz. docs "Examples").
+    unconstrained_places = [_place(p.place_id, p.name, p.lat, p.lng) for p in places]
+    unconstrained = _run(unconstrained_places)
+    assert result.total_distance_km > unconstrained.total_distance_km
+
+
+# ─── Multiple places with compatible windows ────────────────────────────────
+
+def test_multiple_places_with_compatible_windows_all_satisfied_no_conflicts():
+    result = _run([
+        _place(1, "P1", 41.00, 29.00, opening_hours="09:00-10:00"),
+        _place(2, "P2", 41.05, 29.05, opening_hours="10:15-11:15"),
+        _place(3, "P3", 41.10, 29.10, opening_hours="11:30-12:30"),
+    ])
+    assert not any("çakışıyor" in w for w in result.warnings)
+    assert not any("gevşetildi" in w for w in result.warnings)
+
+    stops_by_id = {s.place_id: s for d in result.days for s in d.stops}
+    assert stops_by_id[1].arrival_time == "09:00"
+    # Her durağın varışı KENDİ penceresi içinde olmalı.
+    windows = {1: ("09:00", "10:00"), 2: ("10:15", "11:15"), 3: ("11:30", "12:30")}
+    for place_id, (open_t, close_t) in windows.items():
+        arrival = stops_by_id[place_id].arrival_time
+        assert open_t <= arrival <= close_t, f"place {place_id}: {arrival} not in [{open_t},{close_t}]"
+
+
+# ─── Incompatible windows → impossible route, graceful fallback ────────────
+
+def test_incompatible_windows_falls_back_to_distance_only_with_warning():
+    """İki mekan, ikisi de yalnızca 09:00-09:30 açık ama ~700km arayla —
+    aynı anda ikisini de bu dar pencerede ziyaret etmek FİZİKSEL OLARAK
+    imkansız. Sonuç asla eksik/geçersiz olmamalı (spesifikasyonun 4.
+    gereksinimi) — her iki mekan da hâlâ tam bir itinerary'de yer almalı,
+    yalnızca sert kısıt gevşetildiğini açıkça belirten bir uyarı eklenir."""
+    result = _run([
+        _place(1, "Yakın", 41.00, 29.00, opening_hours="09:00-09:30"),
+        _place(2, "Uzak", 38.60, 34.80, opening_hours="09:00-09:30"),
+    ])
+    ids = sorted(s.place_id for d in result.days for s in d.stops)
+    assert ids == [1, 2]  # hiçbir durak silinmedi/atlanmadı
+    assert any("gevşetildi" in w for w in result.warnings)
+    # Gevşetme sonrası, mevcut yumuşak çakışma kontrolü yine en az birini işaretler.
+    assert any("çakışıyor" in w for w in result.warnings)
+
+
+def test_incompatible_windows_result_still_has_valid_schema():
+    """İmkansız durumda bile dönen OptimizationResult, normal sonuçla
+    BİREBİR aynı şemayı korur — çağıran taraf özel bir 'hata' dalı
+    işlemek zorunda değil (spesifikasyonun 'existing OptimizationResult
+    contract' gereksinimi)."""
+    result = _run([
+        _place(1, "Yakın", 41.00, 29.00, opening_hours="09:00-09:30"),
+        _place(2, "Uzak", 38.60, 34.80, opening_hours="09:00-09:30"),
+    ])
+    assert isinstance(result.days, list)
+    assert isinstance(result.warnings, list)
+    assert isinstance(result.total_distance_km, float)
+    assert isinstance(result.optimization_score, float)
+    assert 0.0 <= result.optimization_score <= 100.0
+
+
+# ─── Missing opening-hours metadata alongside constrained places ───────────
+
+def test_places_without_hours_remain_optimizable_alongside_constrained_ones():
+    """Spesifikasyonun 3. gereksinimi: açılış saati verisi olmayan mekanlar
+    hâlâ serbestçe optimize edilebilmeli — sert pencereli mekanların
+    ETRAFINA konumlandırılabilirler, kısıtlanmazlar."""
+    places = [
+        _place(1, "Sabit Pencere", 41.00, 29.00, opening_hours="09:00-09:30"),
+        _place(2, "Bilinmiyor A", 41.02, 29.02),
+        _place(3, "Bilinmiyor B", 41.20, 29.20),
+        _place(4, "Bilinmiyor C", 41.40, 29.40),
+    ]
+    result = _run(places)
+    ids = sorted(s.place_id for d in result.days for s in d.stops)
+    assert ids == [1, 2, 3, 4]
+    assert not any("gevşetildi" in w for w in result.warnings)
+    assert any("Açılış saatleri bilinmiyor" in w for w in result.warnings)
+
+
+# ─── Multiple days combined with a hard window ──────────────────────────────
+
+def test_hard_window_combined_with_multi_day_splitting_still_works():
+    """Spesifikasyonun 5. gereksinimi: çok-günlü davranış korunmalı. Sıkı bir
+    günlük bütçe + bir sert pencere birlikte hiçbir durağı kaybettirmemeli,
+    birden fazla gün üretmeye devam etmeli."""
+    places = [
+        _place(i, f"Müze {i}", 41.0 + i * 0.2, 29.0 + i * 0.2, category="museum")
+        for i in range(8)
+    ]
+    places[3] = _place(3, "Müze 3", 41.0 + 3 * 0.2, 29.0 + 3 * 0.2, category="museum", opening_hours="09:00-10:30")
+
+    result = _run(places, preferred_start_time="09:00", preferred_end_time="12:00")
+
+    ids = sorted(s.place_id for d in result.days for s in d.stops)
+    assert ids == list(range(8))
+    assert len(result.days) > 1
+
+
+# ─── Overnight / edge-time window: unsupported by the current model,
+# must degrade gracefully (no crash), not silently drop the place ──────────
+
+def test_overnight_window_does_not_crash_and_falls_back_to_soft_warning():
+    """'22:00-02:00' gibi gece-yarısını aşan pencereler bu modelde
+    desteklenmiyor (bkz. ortools_strategy.py 'Overnight/edge-time
+    limitation' — _parse_opening_hours, GreedyDistanceStrategy'den import
+    edilir ve DEĞİŞTİRİLMEZ, ters aralığı doğru ayrıştırmaz). Bu strateji bu
+    durumda ÇÖKMEMELİ — o tek mekan için sert kısıt atlanır, mevcut yumuşak
+    çakışma uyarısı (değişmedi) yine çalışır."""
+    places = [
+        _place(1, "Gece Kulübü", 41.00, 29.00, opening_hours="22:00-02:00"),
+        _place(2, "Normal", 41.05, 29.05),
+    ]
+    result = _run(places)  # çökmemeli
+
+    ids = sorted(s.place_id for d in result.days for s in d.stops)
+    assert ids == [1, 2]
+    assert any("çakışıyor" in w for w in result.warnings)
+
+
+def test_overnight_window_mixed_with_a_real_hard_window_does_not_crash():
+    """Ters (overnight) bir pencere İLE geçerli bir sert pencerenin AYNI
+    çağrıda bir arada bulunması — solver'a geçersiz bir CumulVar aralığı
+    sızmamalı (bkz. `_valid_hard_window`)."""
+    result = _run([
+        _place(1, "Gece Kulübü", 41.00, 29.00, opening_hours="22:00-02:00"),
+        _place(2, "Sabit Pencere", 41.05, 29.05, opening_hours="09:00-10:00"),
+        _place(3, "Normal", 41.10, 29.10),
+    ])
+    ids = sorted(s.place_id for d in result.days for s in d.stops)
+    assert ids == [1, 2, 3]
+
+
+# ─── Determinism with hard windows active ────────────────────────────────────
+
+def test_determinism_holds_with_hard_windows_active():
+    places = [
+        _place(1, "A-batı", 41.00, 27.50),
+        _place(2, "C-orta", 41.00, 29.00, opening_hours="09:00-09:30"),
+        _place(3, "B-doğu", 41.00, 30.50),
+        _place(4, "D-güney", 39.50, 29.00),
+    ]
+    results = [_run(places) for _ in range(5)]
+    first = _stop_signature(results[0])
+    for other in results[1:]:
+        assert _stop_signature(other) == first
+        assert other.warnings == results[0].warnings
+        assert other.total_distance_km == results[0].total_distance_km
+
+
+def test_determinism_holds_for_impossible_route_fallback():
+    """İmkansız durumda bile (fallback yolu) sonuç deterministik olmalı —
+    her çağrı aynı mesafe-yalnızca sıraya VE aynı 'gevşetildi' uyarısına
+    düşmeli."""
+    places = [
+        _place(1, "Yakın", 41.00, 29.00, opening_hours="09:00-09:30"),
+        _place(2, "Uzak", 38.60, 34.80, opening_hours="09:00-09:30"),
+    ]
+    results = [_run(places) for _ in range(5)]
+    first = _stop_signature(results[0])
+    for other in results[1:]:
+        assert _stop_signature(other) == first
+        assert other.warnings == results[0].warnings
+
+
+# ─── Performance protection: windows must not cause unbounded solving ──────
+
+def test_large_place_set_with_scattered_hard_windows_completes_quickly():
+    """Spesifikasyonun 8. gereksinimi: açılış saati kısıtları sınırsız
+    aramaya yol açmamalı — aynı solution_limit/time_limit güvenlik ağı
+    (bkz. ortools_strategy.py 'Performance protection')."""
+    places = [
+        _place(i, f"Mekan {i}", 36.0 + (i % 17) * 0.3, 27.0 + ((i * 7) % 23) * 0.3)
+        for i in range(40)
+    ]
+    # Her 5 mekandan birine geniş (pratikte serbest) bir pencere ver —
+    # dimension'ı gerçekten devreye sokar ama gerçek bir kısıt getirmez.
+    for i in range(0, 40, 5):
+        places[i] = _place(
+            i, f"Mekan {i}", places[i].lat, places[i].lng, opening_hours="00:00-23:59"
+        )
+
+    start = time.monotonic()
+    result = _run(places, duration_days=None)
+    elapsed = time.monotonic() - start
+
+    ids = [s.place_id for d in result.days for s in d.stops]
+    assert sorted(ids) == list(range(40))
+    assert len(ids) == len(set(ids))
+    # Tek bir sert-kısıtlı solve + (yalnızca gerekirse) tek bir fallback
+    # solve — ikisi de aynı 5s time_limit'e tabi, bu yüzden üst sınır ~10s.
+    assert elapsed < 15.0
+
+
+def test_incompatible_windows_infeasibility_detected_quickly_not_at_time_limit():
+    """İmkansız bir durumun HEMEN (solution_limit'e/time_limit'e dayanmadan)
+    tespit edildiğini doğrular — depo kenarları hep 0 maliyetli olduğundan
+    saf mesafe kısmı her zaman uygun, yalnızca zaman boyutu infeasible;
+    OR-Tools bunu CP-propagation ile hızlıca fark eder."""
+    places = [
+        _place(1, "Yakın", 41.00, 29.00, opening_hours="09:00-09:30"),
+        _place(2, "Uzak", 38.60, 34.80, opening_hours="09:00-09:30"),
+    ]
+    start = time.monotonic()
+    _run(places)
+    elapsed = time.monotonic() - start
+    assert elapsed < 5.0  # tek time_limit'in altında, iki solve'un TOPLAMI dahil
+
+
+# ─── Preserved semantics: score formula, API contract ──────────────────────
+
+def test_score_semantics_preserved_more_warnings_still_reduce_score_by_five():
+    """Skor formülü DEĞİŞMEDİ (bkz. spesifikasyonun 5. gereksinimi) — yeni
+    'gevşetildi' uyarısı da tıpkı diğer uyarılar gibi yalnızca
+    warning_penalty'ye (uyarı başına -5, en fazla -30) katkıda bulunur,
+    ayrı bir puanlama mekanizması eklenmedi."""
+    result = _run([
+        _place(1, "Yakın", 41.00, 29.00, opening_hours="09:00-09:30"),
+        _place(2, "Uzak", 38.60, 34.80, opening_hours="09:00-09:30"),
+    ])
+    warning_penalty = min(30.0, len(result.warnings) * 5)
+    avg_km = result.total_distance_km  # tek segment (n=2), stops-1=1
+    travel_penalty = min(40.0, avg_km * 2)
+    expected_score = round(max(0.0, 100.0 - travel_penalty - warning_penalty), 1)
+    assert result.optimization_score == expected_score
