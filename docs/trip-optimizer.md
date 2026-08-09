@@ -240,7 +240,12 @@ request, not just per deployment.
   clusters/cities, where nearest-neighbor's well-known weakness (a single
   bad early greedy choice compounds) is more likely to leave a visibly
   suboptimal route. Both produce a *valid* itinerary either way — the
-  difference is route quality, not correctness.
+  difference is route quality, not correctness. **Also the only choice**
+  when any selected place has real opening-hours data and the caller wants
+  it genuinely respected (not just clipped/warned) — see "`ortools`
+  strategy → Hard opening-hours time windows." Not a factor today in
+  practice (no pipeline populates `Place.opening_hours` yet), but already
+  fully implemented and tested for whenever that changes.
 
 ## `greedy_distance` strategy
 
@@ -378,29 +383,177 @@ shows route quality is instance-dependent, not a fixed guarantee, which is
 why "Available strategies → When to prefer each" frames this as "worth it for
 larger/messier selections," not a blanket recommendation.
 
-### What OR-Tools does *not* change vs. greedy (deliberate scope)
+### Hard opening-hours time windows
 
-- **Opening-hours conflicts are still soft, not solved.** The `ortools`
-  route search optimizes pure geographic distance; it does not know about
-  opening hours at all — those are applied identically to greedy, as a
-  post-processing clip/warning during the (shared-algorithm) day-clustering
-  walk. OR-Tools *could* model opening hours as hard time windows on the
-  routing dimension — deliberately not attempted here, to keep this
-  milestone scoped to what was actually asked ("optimize stop ordering,
-  geographic travel distance, multi-day distribution") rather than
-  conflating two different concerns. Flagged as a natural v2 for `ortools`
-  specifically in "Future improvements."
-- **Day-splitting is still a post-processing pass, not a first-class
-  OR-Tools model.** A "real" multi-day VRP (one OR-Tools vehicle per day,
-  with per-day time-budget capacities) was considered and deliberately
-  rejected for v1: it requires soft-capacity penalties and vehicle-count
-  minimization tuning to avoid either infeasible solves or spreading a
-  small selection needlessly across many days — meaningful extra
-  complexity for uncertain gain, since day-splitting is fundamentally a
-  scheduling concern that the existing (already-tested) day-clustering
-  algorithm already handles reasonably. What OR-Tools contributes here is
-  a better-ordered path *feeding into* that same clustering step — see
-  "Architecture" above.
+Where `greedy_distance` only ever treats opening hours as a **soft**
+signal (clip an early arrival to the opening time, warn on a late one, but
+never reorder anything), `ortools` treats a place's known opening hours as
+a genuinely **hard constraint on route ordering** — the route search
+itself will refuse orderings that can't visit every constrained place
+within its own window, and will actively reorder unconstrained places
+around the constrained ones to make that possible.
+
+**Model**: the same open-path route-search model described above
+(`_solve_distance_only`'s virtual depot with zero-cost edges) gains one
+additional OR-Tools `RoutingDimension`, `"Time"`, tracking cumulative
+minutes elapsed since the trip's start:
+
+- The virtual depot's cumulative time is pinned to exactly
+  `preferred_start_time` (`CumulVar(Start).SetRange(day_start, day_start)`)
+  — the trip begins there, not at midnight.
+- Each edge's transit cost on this dimension is `service_time(from) +
+  travel_time(from, to)` — visiting a place always takes its category-based
+  visit duration (the same `CATEGORY_VISIT_MINUTES` table `greedy_distance`
+  uses) before the next travel leg begins.
+- A place with a known, valid opening-hours window gets
+  `CumulVar(node).SetRange(open_minutes, close_minutes)` — a hard bound:
+  the solver will only accept an ordering where that place is reached
+  within its window (arriving early and waiting is allowed via the
+  dimension's slack; arriving late is not).
+- A place with **no** opening-hours data gets a maximally permissive range
+  (`(0, 20160)`, i.e. up to two weeks of minutes) — in practice
+  unconstrained, free to be sequenced anywhere. This is exactly requirement
+  3's "places without opening-hours data must remain optimizable": they
+  never compete for a slot, they just fill in around the constrained ones.
+
+This dimension is only added to the model **when at least one place in the
+request has a valid opening-hours window** — if none do (today, the
+overwhelming majority of real requests, since `Place.opening_hours` is
+populated by no pipeline stage — see "Assumptions"), `ortools` falls
+through to the exact same pure-distance model as before this milestone,
+with byte-identical results (confirmed: the "Benchmark" table above is
+unchanged by this change, verified by rerunning the same script). Hard
+time windows are strictly additive functionality, not a rewrite of the
+existing route-search path.
+
+### Examples: constrained vs. unconstrained routes
+
+Four places — A (west), C (middle), B (east), D (south) — where the
+purely geographic optimum visits them in a sweep (`B → C → A → D`,
+461.6 km). Giving **C** a narrow morning window (`09:00-09:30`) forces the
+route to start there instead, since nothing else could reach C in time:
+
+| | Order | Total distance | Notes |
+|---|---|---|---|
+| Unconstrained | B → C → A → D | 461.6 km | Pure nearest-structure sweep |
+| C constrained to 09:00–09:30 | **C** → B → D → A | 545.5 km | +83.9 km (+18.2%) — the price of visiting C first |
+
+This is the concrete trade-off hard time windows introduce: a route that
+respects real business hours can be measurably longer than the pure
+distance optimum — expected and correct, not a regression (see
+`test_narrow_window_forces_reordering_relative_to_pure_distance`).
+
+Three places with **compatible**, sequential windows (each reachable from
+the previous one with margin to spare) are satisfied with zero warnings:
+
+```
+P1  09:00-10:00 window → arrives 09:00
+P2  10:15-11:15 window → arrives 10:17  (17 min travel from P1)
+P3  11:30-12:30 window → arrives 11:33  (16 min travel from P2)
+```
+
+Two places both open **only** 09:00–09:30 but ~700 km apart — no route can
+reach both in time. The result still includes both places (never dropped),
+with the relaxation warning plus the existing per-place conflict warning:
+
+```json
+{
+  "warnings": [
+    "Bazı mekanların açılış saatleri birbiriyle uyumsuz olduğu için sabit zaman kısıtları gevşetildi; rota yalnızca mesafeye göre sıralandı.",
+    "Yakın → Uzak: uzun bir seyahat segmenti (563 km)",
+    "Uzak: planlanan varış saati belirtilen çalışma saatleriyle çakışıyor"
+  ]
+}
+```
+
+### Impossible routes
+
+Two or more hard windows can be mutually unsatisfiable — e.g. two places
+open only 09:00–09:30, hundreds of kilometers apart, that no route could
+visit both within their windows. When that happens, OR-Tools'
+`SolveWithParameters` returns no solution for the constrained model at
+all (the whole routing problem is infeasible, not just one place).
+
+Per requirement 4 ("do not silently produce an invalid itinerary"),
+`ortools` never returns a partial or empty result in this case: it falls
+back to `_solve_distance_only` (identical to the no-windows path — every
+place still included, still a complete, valid itinerary) and adds an
+explicit warning to the response:
+
+> *"Bazı mekanların açılış saatleri birbiriyle uyumsuz olduğu için sabit
+> zaman kısıtları gevşetildi; rota yalnızca mesafeye göre sıralandı."*
+
+The existing per-place soft conflict warnings (unchanged, see
+"Assumptions") then still fire against that fallback ordering, so the
+response also identifies *which* place(s) actually ended up outside their
+window — the summary warning explains *why* (constraints were relaxed),
+the per-place ones explain *what* went wrong.
+
+### Overnight/edge-time windows: unsupported, degrades safely
+
+`_parse_opening_hours` (imported from `greedy_distance_strategy.py`,
+**unmodified** — this milestone's own constraint) does not correctly
+handle a window that crosses midnight, e.g. `"22:00-02:00"`: it returns
+`(1320, 120)` — a structurally "valid" tuple whose `open_minutes` exceeds
+`close_minutes`, not a wraparound range. Handing that directly to OR-Tools'
+`CumulVar.SetRange` **crashes** (confirmed empirically — the C++ solver
+raises `"CP Solver fail"`), since a range with `lower > upper` is an empty,
+invalid domain.
+
+`_valid_hard_window` guards against this: any place whose parsed window
+has `open_minutes > close_minutes` is treated as having **no** hard
+window for the purposes of route-search — same free range as a place with
+no opening-hours data at all, for that one place only (this does not
+affect any other place's constraints, and does not trigger the "impossible
+route" fallback). The existing soft post-processing check still runs on
+the raw tuple unchanged, so the place still gets its "çakışıyor" warning
+during the day-clustering walk — behaviorally identical to how
+`greedy_distance` already (mis)handles the same input, since fixing
+`_parse_opening_hours`'s wraparound support is out of this milestone's
+scope (would require modifying `greedy_distance_strategy.py`).
+
+### Performance protection
+
+The hard-window model reuses the exact same `SOLUTION_LIMIT`/
+`TIME_LIMIT_SECONDS` search parameters as the no-windows path — adding a
+dimension does not introduce a second, unbounded search loop. The only
+extra cost is a possible **second** solve in the impossible-route case
+(the constrained attempt, then the distance-only fallback) — each bounded
+by the same `time_limit`, so total wall time is bounded by roughly 2× a
+single solve's worst case (~10s), never unbounded. In practice, OR-Tools'
+constraint propagation detects infeasibility from conflicting time windows
+almost immediately (empirically <10ms for the two-far-apart-narrow-windows
+case — nowhere near either time limit), and a 40-place set with several
+windows still completes in low single-digit seconds — see "Verification →
+Performance impact" for measured numbers.
+
+### Day-splitting: still a post-processing pass, not a first-class OR-Tools model
+
+A "real" multi-day VRP (one OR-Tools vehicle per day, with per-day
+time-budget capacities, day-aware/modulo time windows) was considered and
+deliberately rejected, both in the previous milestone and again here: it
+requires soft-capacity penalties and vehicle-count minimization tuning to
+avoid either infeasible solves or spreading a small selection needlessly
+across many days — meaningful extra complexity for uncertain gain, since
+day-splitting is fundamentally a scheduling concern the existing
+(already-tested) day-clustering algorithm already handles reasonably. What
+OR-Tools contributes is a single continuous ordering — now hard-window-aware
+— *feeding into* that same clustering step (see "Architecture" above).
+
+**Consequence — the "single continuous timeline" caveat**: the hard-window
+model solves for one continuous sequence starting at `day_start`, with no
+concept of "day 2 restarts the clock." The actual displayed
+arrival/departure times, however, come from the (separate, unchanged)
+day-clustering walk, which *does* reset to `day_start` every time a day's
+budget is exceeded. For a trip that fits in one day, these two views agree
+exactly (same start, same sequence, same running clock) — confirmed by
+"Multiple days" below. For a trip that genuinely needs splitting across
+several days, a place's hard-window-respecting position in the solved
+order might, after the *separate* day-reset, land at a real clock time the
+constraint solver never actually checked. This is a known, deliberate v1
+limitation (see "Limitations") — and essentially never observed in
+production today, since real opening-hours data (the only way to trigger
+this path at all) doesn't exist yet in the pipeline.
 
 ## Extension points
 
@@ -443,9 +596,11 @@ Architecture"), except where noted:
   seasonal, and — as of this writing — **populated by no pipeline stage**.
   In practice every optimizer run today includes the "opening hours
   unavailable" warning for every place, exercised in tests but not yet a
-  real signal in production data. Both strategies treat this identically
-  (soft clip/warning, not a hard constraint) — see "`ortools` strategy →
-  What OR-Tools does not change vs. greedy."
+  real signal in production data. When it *is* present, the two strategies
+  now diverge: `greedy_distance` still only ever treats it as a soft
+  clip/warning signal (unchanged), while `ortools` treats it as a hard
+  ordering constraint — see "`ortools` strategy → Hard opening-hours time
+  windows."
 - **`selected_place_ids` are validated against the *trip owner's* Library**
   (`PlaceSave` rows for `Trip.user_id`), not the requesting collaborator's —
   matching how `Trip.create_trip` already resolves ownership. An editor can
@@ -458,15 +613,32 @@ Architecture"), except where noted:
 
 ## Limitations
 
-- **No re-shuffling for opening-hours conflicts, in either strategy.** If a
-  stop's computed arrival lands after closing, both `greedy_distance` and
-  `ortools` warn but keep the stop where their respective route search put
-  it — neither tries a different day or position to resolve it. `ortools`
-  *could* model this as a hard time-window constraint on the routing
-  dimension — deliberately not attempted in this milestone, kept scoped to
-  ordering/distance/day-distribution (see "`ortools` strategy → What
-  OR-Tools does not change vs. greedy"). Flagged as the natural next
-  OR-Tools enhancement in "Future improvements."
+- **`greedy_distance` never re-shuffles for opening-hours conflicts.** If a
+  stop's computed arrival lands after closing, it warns but keeps the stop
+  where the greedy walk put it — never tries a different day or position.
+  Unchanged, since `greedy_distance_strategy.py` was not modified.
+- **`ortools` respects known opening hours as a hard constraint, but only
+  within a single continuous ordering pass, not day-aware.** See "`ortools`
+  strategy → Hard opening-hours time windows" for the full model, and its
+  "Day-splitting" subsection for the specific caveat: a constrained place's
+  position is solved against one continuous timeline starting at
+  `day_start`, while the actual displayed times come from a *separate*
+  day-clustering walk that resets the clock each day. These agree exactly
+  for single-day trips; for a trip that genuinely splits across several
+  days, a constrained place's real simulated arrival could technically fall
+  outside the window the solver checked. Turning day-splitting itself into
+  a day-aware OR-Tools model (multi-vehicle VRP, per-day capacities) would
+  close this gap but was deliberately deferred — see "`ortools` strategy →
+  Day-splitting" for why.
+- **Mutually incompatible hard windows fall back to distance-only
+  ordering, with a warning** — `ortools` never fails the request or returns
+  an incomplete itinerary; see "`ortools` strategy → Impossible routes."
+- **Overnight/midnight-crossing opening-hours windows aren't correctly
+  parsed by either strategy** (`_parse_opening_hours`, shared,
+  unmodified) — `ortools` additionally guards against this crashing the
+  solver (see "`ortools` strategy → Overnight/edge-time windows"), but
+  doesn't fix the underlying parsing; both strategies' behavior for such
+  input is unchanged from before this milestone.
 - **No real-world travel time, in either strategy.** No traffic, no
   walking-vs-driving distinction, no public transit — flat haversine
   distance over an assumed speed for both `greedy_distance` and `ortools`.
@@ -480,8 +652,8 @@ Architecture"), except where noted:
   default.
 - **`ortools`'s day-splitting is post-processing, not a first-class
   OR-Tools model** (multi-vehicle VRP with per-day capacity) — see
-  "`ortools` strategy → What OR-Tools does not change vs. greedy" for why
-  this was a deliberate v1 scope decision, not an oversight.
+  "`ortools` strategy → Day-splitting" for why this was a deliberate v1
+  scope decision, not an oversight.
 - **The optimization score is not comparable across strategies** or
   validated against real user satisfaction — it's a same-strategy,
   same-run diagnostic, not a benchmark. (Route-length comparison across
@@ -615,13 +787,28 @@ calendar dates, and score bounds. **Unchanged by this milestone** — same
 19 tests, still passing, confirming `GreedyDistanceStrategy` itself was
 never touched.
 
-`test_ortools_strategy.py` (19 tests, new) mirrors that same structure for
-`ortools` — the required edge cases (0/1/2 places, duplicate places,
-multiple cities, impossible day budgets, identical/degenerate coordinates,
-missing opening hours, multi-day splitting, a 60-place set completing in
-about a second) plus two determinism tests (5 repeated solves of the same
-15-place input byte-identical; a fresh strategy instance each time still
-agrees).
+`test_ortools_strategy.py` (33 tests) mirrors `test_optimization_strategy.py`'s
+structure for `ortools` — the required edge cases (0/1/2 places, duplicate
+places, multiple cities, impossible day budgets, identical/degenerate
+coordinates, missing opening hours, multi-day splitting, a 60-place set
+completing in about a second) plus two determinism tests (5 repeated
+solves of the same 15-place input byte-identical; a fresh strategy
+instance each time still agrees) — 19 from the strategy's original
+milestone, plus **14 new this milestone** covering hard opening-hours time
+windows specifically: a place open all day (never constrained/warned), a
+narrow window forcing a measurably costlier reorder vs. pure distance
+(`test_narrow_window_forces_reordering_relative_to_pure_distance`, the
+461.6→545.5 km example in "`ortools` strategy → Examples"), multiple
+places with compatible sequential windows all satisfied with zero
+warnings, mutually incompatible windows falling back with the relaxation
+warning (plus a schema-still-valid check), unconstrained places staying
+freely optimizable alongside a constrained one, a hard window combined
+with forced multi-day splitting, two overnight/edge-time tests (no crash,
+alone and mixed with a real window), determinism under both the
+constrained and the impossible-route-fallback paths, a 40-place set with
+scattered wide-open windows completing well within the existing time
+budget, an infeasibility-detected-quickly timing check, and a score-formula
+preservation check.
 
 `test_strategy_comparison.py` (35 tests, new) runs both strategies over
 the same six fixtures and asserts the shared contract without requiring
@@ -646,29 +833,35 @@ persisted correctly → coexists with a `greedy_distance` itinerary on the
 same trip in history → applies to `TripStop` exactly like any other
 itinerary, since apply is strategy-agnostic by construction).
 
-**415 tests total in the full suite (was 358 before this milestone; +57 —
-19 + 35 + 3 new integration tests), zero regressions.**
+**429 tests total in the full suite (was 415 before this milestone; +14
+hard-opening-hours tests in `test_ortools_strategy.py`), zero
+regressions** — `test_optimization_strategy.py` (`greedy_distance`,
+untouched), `test_strategy_comparison.py`, and `test_trip_optimization.py`
+all pass completely unchanged, since this milestone only added new code
+paths to `ortools_strategy.py` (gated behind "at least one place has a
+valid opening-hours window") without modifying anything either of those
+suites already exercised.
 
 ## Future improvements
 
 Ranked roughly by what unlocks the most value next:
 
-1. **Hard opening-hours time windows in `ortools`** — model opening hours
-   as a routing dimension with real time windows (OR-Tools supports this
-   natively via `AddDimension` + `CumulVar` bounds) so the solver can
-   actually resolve a conflict by reordering, instead of the current
-   soft clip/warning shared with `greedy_distance`. The single biggest
-   remaining gap between "OR-Tools is integrated" and "OR-Tools is used to
-   its full potential" — see "`ortools` strategy → What OR-Tools does not
-   change vs. greedy."
-2. **A first-class multi-day VRP in `ortools`** (one vehicle per day,
-   soft per-day time-budget capacities) instead of the current
-   route-then-cluster post-processing split — would let day assignment and
-   route order be optimized jointly rather than sequentially. Considered
-   and deliberately deferred this milestone (see "`ortools` strategy → What
-   OR-Tools does not change vs. greedy") since it requires vehicle-count
-   minimization tuning to avoid regressions on the "derives day count"
-   behavior already tested for both strategies.
+1. **Day-aware hard time windows in `ortools`** — turn day-splitting into
+   a first-class multi-vehicle OR-Tools model (one vehicle per day, each
+   with its own `day_start`-anchored time dimension, soft per-day
+   capacities) so a constrained place's hard window is checked against its
+   *actual* post-split arrival time, not a single continuous pre-split
+   timeline — closes the "single continuous timeline" caveat in "`ortools`
+   strategy → Day-splitting," and would let day assignment and route order
+   be optimized jointly rather than sequentially. Considered and
+   deliberately deferred again this milestone (as it was the previous one)
+   since it requires vehicle-count minimization tuning to avoid regressing
+   the already-tested "derives day count" behavior. The natural next step
+   now that per-place hard windows exist within a single ordering pass.
+2. **Fix `_parse_opening_hours`'s overnight/midnight-crossing support** —
+   would need to touch `greedy_distance_strategy.py` (explicitly out of
+   scope for both this and the previous OR-Tools milestone), benefiting
+   both strategies at once.
 3. **A Google/Apple Maps-backed strategy** for real travel times (driving/
    walking/transit) instead of flat haversine-over-25km/h — a third
    `RouteOptimizationStrategy`, same zero-API-change extension path
@@ -676,7 +869,8 @@ Ranked roughly by what unlocks the most value next:
 4. **Populate `Place.category`/`Place.opening_hours`** from a real source
    (Google Places, OSM `opening_hours` tags) — until then, every itinerary
    from either strategy uses the flat default visit duration and always
-   warns about missing hours.
+   warns about missing hours, and `ortools`'s hard-window machinery, while
+   fully implemented and tested, has no real production data to act on yet.
 5. **Weekday/seasonal opening hours**, not just a flat daily window.
 6. **Apply history** — `Trip.applied_itinerary_id` only tracks the most
    recent apply; a full log of every apply (who, when, which itinerary,
