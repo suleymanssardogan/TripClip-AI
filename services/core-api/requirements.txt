@@ -54,6 +54,11 @@ bcrypt==4.0.1
 PyJWT==2.8.0
 email-validator==2.1.0
 
+# Route optimization — deterministic constraint solver (NOT an AI/LLM
+# dependency), second RouteOptimizationStrategy implementation. numpy/
+# pandas/protobuf pins already satisfied by existing ML deps above.
+ortools==9.9.3963
+
 # Vector Database
 qdrant-client==1.7.3
 sentence-transformers==2.3.1

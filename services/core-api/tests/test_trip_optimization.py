@@ -330,6 +330,67 @@ def test_unknown_strategy_name_is_rejected(client, bff_headers):
     assert resp.json()["error"]["code"] == "INVALID_OPTIMIZATION_REQUEST"
 
 
+# ─── OR-Tools strategy selection (bkz. docs/trip-optimizer.md "Available strategies") ──
+
+def test_optimize_trip_with_ortools_strategy_end_to_end(client, bff_headers):
+    """`strategy: "ortools"` uçtan uca — API/servis katmanının hiçbir şey
+    bilmeden yeni stratejiyi çözebildiğini kanıtlar (bu milestone'un asıl
+    hedefi)."""
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=3)
+
+    resp = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids, "strategy": "ortools"},
+        headers=bff_headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["trip_id"] == trip_id
+    assert data["strategy_name"] == "ortools"
+    assert 0.0 <= data["optimization_score"] <= 100.0
+    assert sum(len(d["stops"]) for d in data["days"]) == 3
+
+
+def test_ortools_itinerary_is_persisted_and_listable_alongside_greedy_ones(client, bff_headers):
+    """İki farklı stratejiyle üretilmiş itinerary'ler aynı trip için yan
+    yana var olabilir — apply/history akışları strateji-agnostik (bkz.
+    docs/trip-optimizer.md "Apply semantics")."""
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=2)
+
+    greedy_id = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids, "strategy": "greedy_distance"},
+        headers=bff_headers,
+    ).json()["id"]
+    ortools_id = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids, "strategy": "ortools"},
+        headers=bff_headers,
+    ).json()["id"]
+
+    listing = client.get(f"/internal/trips/{trip_id}/itineraries", headers=bff_headers).json()
+    strategy_names = {item["id"]: item["strategy_name"] for item in listing["itineraries"]}
+    assert strategy_names[greedy_id] == "greedy_distance"
+    assert strategy_names[ortools_id] == "ortools"
+
+
+def test_ortools_itinerary_can_be_applied_to_trip(client, bff_headers):
+    """Apply akışı stratejiden bağımsız — bkz. sql_optimization_repository.
+    apply_itinerary, strategy_name'i hiç bilmez."""
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=2)
+
+    itinerary_id = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids, "strategy": "ortools"},
+        headers=bff_headers,
+    ).json()["id"]
+
+    resp = client.post(f"/internal/itineraries/{itinerary_id}/apply", headers=bff_headers)
+    assert resp.status_code == 200
+    assert resp.json()["stops_count"] == 2
+    assert len(_trip_stops_db(trip_id)) == 2
+
+
 def test_invalid_time_format_is_rejected(client, bff_headers):
     trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=1)
 
