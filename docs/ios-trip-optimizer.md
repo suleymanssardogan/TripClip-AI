@@ -5,14 +5,19 @@ The iOS UI for the [AI Trip Optimizer](trip-optimizer.md), consuming the
 generate a preview itinerary from an existing Trip Builder trip's stops,
 and revisit any previously generated one — never mutates the trip itself.
 
-Two milestones so far:
+Three milestones so far:
 - **v1 — Generate & preview**: "Optimize Trip" entry point on
   `TripDetailView`, a fresh itinerary generated and shown in
   `TripOptimizerView`.
-- **v2 — Itinerary History** (this update): a second entry point,
-  "Optimization History", lists every itinerary ever generated for a
-  trip; selecting one reopens the same `TripOptimizerView` presentation
-  loaded from the saved record — the optimizer is never re-run.
+- **v2 — Itinerary History**: a second entry point, "Optimization
+  History", lists every itinerary ever generated for a trip; selecting
+  one reopens the same `TripOptimizerView` presentation loaded from the
+  saved record — the optimizer is never re-run.
+- **v3 — Apply to Trip** (this update): an explicit "Trip'e Uygula"
+  action, available in both `.generate` and `.viewSaved` modes, that
+  copies the displayed itinerary's stops into the Trip's canonical
+  `TripStop` list — the first (and still only) action in this feature
+  that intentionally mutates the Trip. See "Apply to Trip" below.
 
 ## Screen flow
 
@@ -30,22 +35,35 @@ TripOptimizerView                    ItineraryHistoryView
   │  .task { auto-optimizes }        │  exact 4-branch pattern
   │                                  │
   ├─ loading → "Gezi optimize        │  each row: NavigationLink(destination:
-  │            ediliyor…"            │    TripOptimizerView(mode: .viewSaved(itineraryID:)))
-  ├─ error   → retry                 ▼
-  ├─ empty                     TripOptimizerView
-  └─ success → footer:         (.viewSaved mode)
-     "Daha Sonra İçin Kaydet"    │  .task { loads saved detail — never re-optimizes }
-                                 │
-                                 ├─ loading → "İtinerary yükleniyor…"
-                                 ├─ error   → retry (e.g. deleted itinerary → 404)
-                                 ├─ empty
-                                 └─ success → same OptimizerScoreBadge/
-                                              ItineraryWarningsSection/
-                                              ItineraryDaySection as .generate,
-                                              NO footer button (nothing new to save)
+  │            ediliyor…"            │    TripOptimizerView(mode: .viewSaved(itineraryID:),
+  ├─ error   → retry                 │                       onApplied: onApplied))
+  ├─ empty                           ▼
+  └─ success → "Trip'e Uygula" +   TripOptimizerView
+     footer "Daha Sonra İçin      (.viewSaved mode)
+     Kaydet"                        │  .task { loads saved detail — never re-optimizes }
+                                     │
+                                     ├─ loading → "İtinerary yükleniyor…"
+                                     ├─ error   → retry (e.g. deleted itinerary → 404)
+                                     ├─ empty
+                                     └─ success → same OptimizerScoreBadge/
+                                                  ItineraryWarningsSection/
+                                                  ItineraryDaySection as .generate,
+                                                  "Trip'e Uygula" (NO "Daha Sonra
+                                                  İçin Kaydet" — nothing new to save)
+
+  Both modes, whenever a non-empty result is shown:
+    "Trip'e Uygula" → .confirmationDialog ("mevcut durak listesi değiştirilecek")
+       → Uygula → vm.applyToTrip() → success alert → onApplied?() → dismiss()
+                                    → failure alert bound to vm.applyError (recoverable, dialog stays reachable)
 
   toolbar leading "Kapat" — always available, in every state, dismisses immediately
 ```
+
+`onApplied` is threaded from `TripDetailView` through both paths to
+`TripOptimizerView` — directly for `.generate`, through
+`ItineraryHistoryView`'s own `onApplied` passthrough parameter for
+`.viewSaved` — so a successful apply from *either* entry point refreshes
+`TripDetailViewModel.trip` in the background (see "Apply to Trip" below).
 
 `TripOptimizerView`/`ItineraryHistoryView` never appear in Trip Builder's
 own flow unmodified — both are new destinations reached from new,
@@ -73,15 +91,76 @@ only in what the user is told:
 
 This is a deliberate, honest design choice, not a shortcut — inventing a
 fake "discard" behavior would be worse than not having one, since nothing
-on the backend actually supports it yet (see `docs/trip-optimizer.md`
-"Future improvements" — an explicit apply screen is the natural next step
-once this pattern needs to become real).
+on the backend actually supports it.
 
 **Now that Itinerary History exists**, `.viewSaved` mode (opened from a
-history row) hides the footer button entirely rather than showing a
-redundant "save" for something that's already, definitionally, history —
-it was saved the moment it was generated. Only `.generate` mode (a fresh
-run) shows "Daha Sonra İçin Kaydet".
+history row) hides the "Daha Sonra İçin Kaydet" footer button entirely
+rather than showing a redundant "save" for something that's already,
+definitionally, history — it was saved the moment it was generated. Only
+`.generate` mode (a fresh run) shows it.
+
+**"Trip'e Uygula" (Apply to Trip) is the one deliberate exception** to
+"nothing here mutates the Trip" — see the next section. Unlike Close/Save,
+which are both no-ops server-side, Apply is a real, explicit, confirmed
+mutation.
+
+## Apply to Trip
+
+The only action anywhere in this feature that intentionally changes the
+Trip's canonical `TripStop` list (see `docs/trip-optimizer.md` "Apply
+semantics" for the full backend contract, atomicity, and safety
+guarantees). Shown as a "Trip'e Uygula" button whenever a non-empty
+itinerary result is displayed — in **both** `.generate` and `.viewSaved`
+modes, since both show a fully-formed, applicable itinerary; there's
+nothing mode-specific about which itineraries are eligible.
+
+Flow, entirely within `TripOptimizerView`:
+
+1. Tap "Trip'e Uygula" → `.confirmationDialog` explains the current Trip
+   stop list will be replaced (mirrors `TripDetailView`'s own delete
+   confirmation pattern — same `.confirmationDialog` + `titleVisibility:
+   .visible` recipe).
+2. Confirm → `vm.applyToTrip(itineraryID:auth:)` — the button shows a
+   `ProgressView` in place of its label while `vm.isApplying` is true, and
+   is `.disabled` for the same duration (double-submission is additionally
+   guarded inside the ViewModel itself, not just the button state — see
+   below).
+3. Success → a confirmation `.alert` ("durak listesi güncellendi"); tapping
+   "Tamam" calls `onApplied?()` then `dismiss()`.
+4. Failure → a separate `.alert` bound to `vm.applyError` (the same
+   `Binding(get:set:)`-clears-on-dismiss pattern `TripDetailView` uses for
+   `stopEditError`) — recoverable: the screen stays exactly as it was, the
+   user can retry the same button.
+
+No auto-apply: applying only ever happens from this explicit, confirmed
+button tap — never as a side effect of generating or loading an itinerary
+(`optimize`/`loadItinerary` are completely unchanged by this milestone).
+
+### Refreshing `TripDetailView` after a successful apply
+
+`TripOptimizerView` takes an optional `var onApplied: (() -> Void)? = nil`.
+`TripDetailView` wires it, for its own `.generate` `NavigationLink`, to
+`{ Task { await vm.load(tripID: tripID, auth: auth) } }` — reloading the
+trip (now showing the newly-applied stops) the moment the success alert is
+dismissed. `ItineraryHistoryView` gained the same `onApplied` parameter,
+purely as a passthrough to its own `.viewSaved` `NavigationLink`, so a
+`.viewSaved` apply — reached one level deeper in the nav stack — refreshes
+`TripDetailViewModel` the same way. Since `TripDetailView` stays alive on
+the navigation stack the whole time (SwiftUI never deallocates a pushed
+view until it's popped), calling `vm.load` in the background works even
+before the user has navigated back to it — by the time `TripDetailView`
+is visible again, `vm.trip` already reflects the applied stops.
+
+### Why the saved itinerary and displayed preview are untouched
+
+Applying reads the itinerary and writes to the trip — it never writes to
+the itinerary. `vm.itinerary` (what `TripOptimizerView` renders) is not
+reassigned anywhere in `applyToTrip`; a test
+(`test_applyToTrip_success_doesNotMutateDisplayedItinerary`) asserts the
+displayed itinerary is byte-for-byte identical before and after a
+successful apply. Reopening the same itinerary from Itinerary History
+afterward still shows the original result — matching core-api's own
+guarantee (see `docs/trip-optimizer.md`).
 
 ## ViewModel
 
@@ -127,8 +206,46 @@ final class TripOptimizerViewModel {
             self.error = .unknown(statusCode: 0)
         }
     }
+
+    // Apply to Trip — independent isApplying/applyError pair, deliberately
+    // NOT sharing `run`'s isLoading/error: applying is a different action
+    // than loading, can happen after a load already completed, and must
+    // never be confused with it in the UI.
+    private(set) var isApplying = false
+    var applyError: String?
+
+    @discardableResult
+    func applyToTrip(itineraryID: Int, auth: AuthEnvironment) async -> Bool {
+        guard !isApplying, let token = auth.user?.token else { return false }
+        isApplying = true; applyError = nil
+        defer { isApplying = false }
+
+        do {
+            let _: ApplyItineraryResult = try await auth.apiClient.send(
+                .applyItinerary(itineraryID: itineraryID), token: token
+            )
+            return true
+        } catch let apiError as APIError {
+            if apiError.isUnauthorized { auth.handleUnauthorized(); return false }
+            applyError = apiError.localizedDescription
+            return false
+        } catch {
+            applyError = "Itinerary uygulanamadı."
+            return false
+        }
+    }
 }
 ```
+
+`applyToTrip` follows `TripDetailViewModel.deleteTrip`'s exact shape
+(`@discardableResult ... -> Bool`, `guard !isApplying` re-entrancy, a
+plain mutable `var applyError: String?` rather than `private(set)` — same
+precedent as `stopEditError`/`deleteError`, since the View needs to clear
+it on alert dismissal) rather than `optimize`/`loadItinerary`'s shared
+`run` helper — applying isn't a "fetch and populate `itinerary`" operation,
+it's a fire-and-report-success/failure one, so forcing it through `run`
+would have meant either misusing `isLoading` for an unrelated action or
+adding awkward branches to a helper built for a different shape.
 
 `loadItinerary` calls `GET /itineraries/{id}` — it **never** calls
 `POST /trips/{id}/optimize`. Selecting a row in Itinerary History cannot,
@@ -222,7 +339,7 @@ pages' `getStats()` handling).
 ## API integration
 
 Routes only through the Mobile BFF (`http://<host>:8001/api/mobile/...`)
-— **never** talks to core-api directly, per the requirement. Three new
+— **never** talks to core-api directly, per the requirement. Four
 `Endpoint` cases (`Core/Network/Endpoint.swift`), following the exact
 convention every other endpoint uses (central enum, not per-feature files):
 
@@ -231,13 +348,19 @@ convention every other endpoint uses (central enum, not per-feature files):
 | `.optimizeTrip(tripID:placeIDs:)` | `/api/mobile/trips/{id}/optimize` | POST |
 | `.itineraries(tripID:)` | `/api/mobile/trips/{id}/itineraries` | GET |
 | `.itineraryDetail(itineraryID:)` | `/api/mobile/itineraries/{id}` | GET |
+| `.applyItinerary(itineraryID:)` | `/api/mobile/itineraries/{id}/apply` | POST |
 
-All three endpoints are now in active use: `.optimizeTrip` from
+All four endpoints are in active use: `.optimizeTrip` from
 `TripOptimizerView(.generate)`, `.itineraries` from both
 `ItineraryHistoryView` (the list) and `TripDetailViewModel` (the
-history-exists flag), `.itineraryDetail` from `TripOptimizerView(.viewSaved)`.
+history-exists flag), `.itineraryDetail` from
+`TripOptimizerView(.viewSaved)`, `.applyItinerary` from
+`TripOptimizerViewModel.applyToTrip` (both modes — see "Apply to Trip").
+`.applyItinerary` sends no body — it falls through to `Endpoint.body`'s
+`default: return nil`, matching core-api's and both BFFs' own no-body
+apply routes.
 
-The POST body intentionally omits `start_date`/`duration_days`/
+The `optimize` POST body intentionally omits `start_date`/`duration_days`/
 `preferred_start_time`/`preferred_end_time`/`strategy` — core-api's own
 `OptimizeTripRequest` defaults apply (09:00–18:00, `greedy_distance`).
 There's no date/duration picker in this v1; see "Future UI improvements."
@@ -245,8 +368,17 @@ There's no date/duration picker in this v1; see "Future UI improvements."
 New Codable models (`Core/Models/OptimizerModels.swift`) mirror core-api's
 `OptimizeTripResponse` field-for-field (`Itinerary`, `ItineraryDay`,
 `ItineraryStop`, plus `ItinerarySummary`/`ItineraryListResponse` for the
-list endpoint), decoded via `APIClient`'s existing `.convertFromSnakeCase`
-— no custom `CodingKeys` needed anywhere.
+list endpoint, plus `AppliedTripStop`/`ApplyItineraryResult` for the apply
+response), decoded via `APIClient`'s existing `.convertFromSnakeCase` — no
+custom `CodingKeys` needed anywhere.
+
+`AppliedTripStop` deliberately uses `lat`/`lng` (matching `ItineraryStop`'s
+naming), **not** `TripStop`'s `latitude`/`longitude` — because the mobile-bff
+`apply` route, like the rest of `trip_optimization.py`, is a raw
+pass-through with no field-renaming transformer (unlike `trips.py`'s
+routes, which do rename `lat`/`lng` → `latitude`/`longitude` via
+`trip_transformer.py`). See `docs/trip-optimizer-bff.md` "Request/response
+contracts → apply" for the exact wire shape this mirrors.
 
 ### Backend change required for this milestone
 
@@ -334,13 +466,14 @@ result presentation — it does not add any new way to mutate a `Trip`:
   `GET /itineraries/{id}` — never `POST /trips/{id}/optimize`. There is no
   code path from browsing history to generating a new optimization run.
 - `TripStop` (Trip Builder's canonical stop list) is never read or
-  written anywhere in this feature, in either mode. Confirmed by the
-  existing `test_optimize_does_not_mutate_existing_trip_stops` core-api
-  test, unaffected by this milestone since nothing about the mutation
-  surface changed.
-- No Apply-to-trip action exists — `.viewSaved` mode doesn't even show
-  the "Daha Sonra İçin Kaydet" button, since there's nothing left to
-  offer beyond "Kapat" for something that's already saved history.
+  written by *browsing* history, in either mode — `GET` requests only.
+  Confirmed by the existing `test_optimize_does_not_mutate_existing_trip_stops`
+  core-api test.
+- The one exception, added in v3, is the explicit "Trip'e Uygula" button
+  — an intentional, confirmed, user-initiated mutation, never a side
+  effect of viewing or generating an itinerary. See "Apply to Trip" above
+  for the full flow and its safeguards (confirmation dialog, no
+  auto-apply, double-submission guard).
 
 ## Enabling change: completing the `APIClientProtocol` DI seam
 
@@ -386,7 +519,7 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
-34 tests, four files:
+44 tests, four files:
 
 - **`Support/FakeAPIClient.swift`** — `APIClientProtocol` test double.
   Returns a canned `Result<Any, Error>`; two independent `AsyncGate`s (a
@@ -401,15 +534,24 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   that passed the first several runs, then failed once under
   scheduler load (a genuinely flaky assertion, not a one-off fluke),
   which is why it was replaced with this explicit signal instead.
-- **`TripOptimizerViewModelTests.swift`** (15 tests) — the original 10
+- **`TripOptimizerViewModelTests.swift`** (25 tests) — the original 10
   `optimize()` tests (initial state, success, server/network errors, a
   401 logs the session out *without* setting `error`, no-token
   short-circuit, deterministic loading-state + re-entrancy via
-  `AsyncGate`) plus 5 new `loadItinerary()` tests: fetches and populates
+  `AsyncGate`) plus 5 `loadItinerary()` tests: fetches and populates
   the saved itinerary, **calls only `.itineraryDetail`, never
   `.optimizeTrip`** (the test that directly proves "selecting history
   never triggers a new optimization request"), server error, 401, and
-  no-token.
+  no-token — plus 10 new `applyToTrip()` tests: initial state, success
+  (forwards `.applyItinerary(itineraryID:)` + the bearer token, clears
+  `isApplying`), **the displayed `vm.itinerary` stays byte-for-byte
+  unchanged after a successful apply** (the test that directly proves
+  "apply never mutates the preview"), server error, network error, a 401
+  logs out *without* setting `applyError`, no-token short-circuit,
+  deterministic `isApplying` via `AsyncGate`, a re-entrancy guard (second
+  call while the first is in flight returns `false` immediately, API
+  called only once), and repeated application succeeding twice in a row
+  (mirrors core-api's own "can be applied repeatedly" guarantee).
 - **`ItineraryHistoryViewModelTests.swift`** (10 tests, new) — initial
   state; `load()` happy path with an assertion on the exact endpoint
   called (`.itineraries(tripID:)`); **newest-first ordering**, both as a
@@ -431,19 +573,22 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
 
 ```
 Test Suite 'All tests' passed
-Executed 34 tests, with 0 failures (0 unexpected) in 0.042-0.053s
+Executed 44 tests, with 0 failures (0 unexpected) in 0.053-0.075s
 ```
 
 Verified stable across 5 repeated full-suite `xcodebuild test` runs (not
 just once) — same discipline the prior milestone's flaky-test discovery
-established as necessary. Full `xcodebuild build`/`clean build` (both
-`TripClipApp` and `TripClipShare` targets, via the `TripClipApp` scheme,
-which builds both) also verified clean, no new warnings.
+established as necessary. Full `xcodebuild build` also verified clean, no
+new warnings.
 
-core-api's own suite grew by 2 tests for the `days_count`/`stops_count`
-enrichment (`test_list_itineraries_includes_days_and_stops_count`,
-`test_list_itineraries_newest_first`) — full core-api suite: 344 passed
-(was 342).
+core-api's own suite grew by 14 tests for `apply_itinerary` (happy path,
+owner, editor, viewer rejection, cross-user rejection, nonexistent
+itinerary, deleted place, empty itinerary, duplicate places, atomic
+rollback, repeated application, saved-itinerary-unchanged, provenance
+fields, analytics event) — full core-api suite: 358 passed (was 344).
+mobile-bff and web-bff each grew by 6 tests for the `apply` proxy route
+(auth, forwarding, and 404/403/400/503 propagation) — 102 passed (was 96)
+and 59 passed (was 53) respectively.
 
 ## Assumptions / limitations (v2 — Itinerary History)
 
@@ -472,28 +617,46 @@ enrichment (`test_list_itineraries_includes_days_and_stops_count`,
   again here via the real Mobile BFF, that the real spinner renders
   normally, same `ProgressView` code already shipping elsewhere in the app).
 
+## Assumptions / limitations (v3 — Apply to Trip)
+
+- **No visible diff before applying.** The confirmation dialog explains,
+  in words, that the current stop list will be replaced, but doesn't show
+  a before/after comparison of exactly which stops would change. Matches
+  core-api's own v1 scope — a diff view would need new backend support to
+  compute cheaply.
+- **No apply-history UI** — only the single most-recent
+  `applied_itinerary_id`/`itinerary_applied_at` pointer is ever shown (via
+  `TripDetail`, exposed by `GET /trips/{id}` but not yet surfaced anywhere
+  in `TripDetailView`'s own UI). See "Future UI improvements" below.
+- **Apply is available from a saved itinerary's history row even if it's
+  old** — there's no "this itinerary is outdated" warning if the trip's
+  places have since changed (e.g. a place removed from the Library). This
+  matches the backend's behavior: an apply against an itinerary containing
+  a since-deleted place is rejected at apply time (`400`), not proactively
+  flagged in the history list beforehand.
+
 ## Future UI improvements
 
 Ranked by what unlocks the most value next:
 
-1. **Apply-to-trip action** — once there's a reason to actually commit an
-   itinerary into `TripStop` (the backend explicitly deferred this, see
-   `docs/trip-optimizer.md` "Future improvements" #2), add a real "Apply"
-   button — both `.generate` and `.viewSaved` modes in `TripOptimizerView`
-   are structured to make this a small, additive change (one more
-   conditional footer button, same pattern as today's "Daha Sonra İçin
-   Kaydet").
-2. **Date/duration/time-window controls** — expose the constraints
+1. **Date/duration/time-window controls** — expose the constraints
    core-api already accepts (`start_date`, `duration_days`,
    `preferred_start_time`/`preferred_end_time`) instead of always using
    its defaults.
-3. **Place selection** — right now "Optimize Trip" always uses *all* of
+2. **Place selection** — right now "Optimize Trip" always uses *all* of
    the trip's current stops; letting the user deselect a subset before
    generating (mirroring Library's own multi-select UI) is a reasonable
    next increment once the all-stops case has real usage.
-4. **Map view of the optimized route** — `TripMapView` already exists and
+3. **Map view of the optimized route** — `TripMapView` already exists and
    accepts a route polyline (used by `TripDetailView`); reusing it here to
    visualize the optimized order geographically is a low-effort addition.
-5. **Delete a history entry** — needs a new core-api `DELETE
+4. **Delete a history entry** — needs a new core-api `DELETE
    /internal/itineraries/{id}` (+ BFF proxy) first; today history is
    append-only.
+5. **Apply history / undo** — `Trip.applied_itinerary_id` only tracks the
+   most recently applied itinerary; there's no way to see or revert to an
+   earlier apply. Would need a core-api apply-history table first (see
+   `docs/trip-optimizer.md` "Future improvements").
+6. **Web UI** — web-bff already exposes the full owner/editor surface
+   including `apply` (parity with mobile-bff), but no web page calls any
+   of it yet; this milestone, like the two before it, is iOS-only.

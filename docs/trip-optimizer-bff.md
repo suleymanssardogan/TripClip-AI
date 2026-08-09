@@ -48,6 +48,7 @@ registered — `app.include_router(trip_optimization.router, prefix="/api/mobile
 | POST | `/api/mobile/trips/{trip_id}/optimize` | `/api/web/trips/{trip_id}/optimize` | `POST /internal/trips/{trip_id}/optimize` | required (owner/editor) |
 | GET | `/api/mobile/trips/{trip_id}/itineraries` | `/api/web/trips/{trip_id}/itineraries` | `GET /internal/trips/{trip_id}/itineraries` | required (owner/editor/viewer) |
 | GET | `/api/mobile/itineraries/{itinerary_id}` | `/api/web/itineraries/{itinerary_id}` | `GET /internal/itineraries/{itinerary_id}` | required (owner/editor/viewer) |
+| POST | `/api/mobile/itineraries/{itinerary_id}/apply` | `/api/web/itineraries/{itinerary_id}/apply` | `POST /internal/itineraries/{itinerary_id}/apply` | required (owner/editor) |
 
 "Required" means a valid `Authorization: Bearer <JWT>` — role enforcement
 (owner/editor vs. viewer) happens in core-api's `OptimizationService`, not
@@ -136,6 +137,38 @@ shape.
 No request body. Response: the same `OptimizeTripResponse` shape as the
 `optimize` endpoint (full detail, not the summary).
 
+### `POST /itineraries/{itinerary_id}/apply`
+
+No request body — matches core-api's own route, which also takes none.
+Copies the itinerary's stops into the trip's canonical `TripStop` list
+(see `docs/trip-optimizer.md` "Apply semantics" for the full behavior,
+atomicity, and safety guarantees). Response: core-api's
+`ApplyItineraryResponse`, unchanged:
+
+```json
+{
+  "trip_id": 1,
+  "itinerary_id": 4,
+  "stops": [
+    {
+      "place_id": 12, "name": "Ayasofya", "lat": 41.0086, "lng": 28.9802,
+      "city": "İstanbul", "category": "tarihi",
+      "day_index": 0, "order_index": 0
+    }
+  ],
+  "stops_count": 3,
+  "applied_at": "2026-08-08T10:05:00"
+}
+```
+
+Note the field-naming split this response inherits by being a raw
+pass-through: `lat`/`lng` here (matching `ItineraryStop`'s convention),
+**not** `latitude`/`longitude` (the name `trip_transformer.py` uses for
+`trips.py`'s routes) — because, like every other route in this file,
+`trip_optimization.py` has no transformer at all. A client parsing this
+response needs the `ItineraryStop` field convention, not the `TripStop`
+one, even though the data ends up in the same canonical stop list.
+
 ## Differences from the core API
 
 These are the only places BFF behavior isn't a byte-for-byte mirror of
@@ -188,10 +221,12 @@ cd services/mobile-bff && pytest tests/test_trip_optimization.py -v
 cd services/web-bff     && pytest tests/test_trip_optimization.py -v
 ```
 
-16 tests per service, in four groups (mirrors the file's own section
-comments):
+22 tests per service, in four groups (mirrors the file's own section
+comments) across the four routes — the original 16 (four groups × the
+first three routes) plus 6 for `apply` (requires-auth, happy-path with
+forwarding assertions, and one propagation test each for 404/403/400/503):
 
-- **Authentication** — all three routes reject a missing token (403 on
+- **Authentication** — all four routes reject a missing token (403 on
   mobile-bff's `HTTPBearer(auto_error=True)`, 401 on web-bff's manual
   check — a pre-existing difference, not introduced here; see
   `test_trip_sharing.py`'s `test_create_share_requires_auth` for the same
@@ -203,7 +238,8 @@ comments):
   unchanged; an all-defaults request round-trips with exactly core-api's
   own defaults (this is the test that would catch the BFF's `OptimizeTripRequest`
   silently drifting out of sync with core-api's); the response body passes
-  through byte-for-byte.
+  through byte-for-byte. (`apply` takes no body, so this group is N/A for
+  it — covered instead by its own forwarding-assertion test.)
 - **Error propagation** — `INVALID_OPTIMIZATION_REQUEST` (400),
   `TRIP_NOT_FOUND`/`ITINERARY_NOT_FOUND` (404), `PERMISSION_DENIED` (403),
   `INTERNAL_SERVER_ERROR` (500 mobile / 503 web), and an unreachable
@@ -212,12 +248,14 @@ comments):
 Full suite (confirms no regressions on existing routes):
 
 ```bash
-cd services/mobile-bff && pytest tests/ -q   # 96 passed (80 pre-existing + 16 new)
-cd services/web-bff     && pytest tests/ -q   # 53 passed (37 pre-existing + 16 new)
+cd services/mobile-bff && pytest tests/ -q   # 102 passed (96 pre-existing + 6 new)
+cd services/web-bff     && pytest tests/ -q   # 59 passed (53 pre-existing + 6 new)
 ```
 
 ## What's still missing
 
-No mobile/web UI calls these routes yet — this milestone is BFF-only, same
-scope discipline as the optimizer's own backend milestone. See
-`docs/trip-optimizer.md` "Future improvements" for the ranked next steps.
+`optimize`/`list itineraries`/`get itinerary` are consumed by iOS (see
+`docs/ios-trip-optimizer.md`); `apply` is consumed by iOS's "Trip'e Uygula"
+action (same doc). No web UI calls any of these four routes yet — web-bff
+exposes the full surface for parity, but the first web consumer hasn't
+been built (see `docs/trip-optimizer.md` "Future improvements").

@@ -33,10 +33,13 @@ app/application/
     dto/optimization_dto.py       — request/response Pydantic schemas
     services/optimization_service.py — validation, orchestration, dedup
 app/api/internal/
-    trip_optimization.py — POST /trips/{id}/optimize, GET .../itineraries, GET /itineraries/{id}
+    trip_optimization.py — POST /trips/{id}/optimize, GET .../itineraries,
+                            GET /itineraries/{id}, POST /itineraries/{id}/apply
 app/models/
     trip_itinerary.py, trip_itinerary_stop.py — persistence
     place.py — +opening_hours (nullable)
+    trip.py  — +applied_itinerary_id (FK→trip_itineraries, ondelete=SET NULL),
+               +itinerary_applied_at — provenance for "apply to trip" (see below)
 ```
 
 This mirrors the existing `domain/infrastructure/application/api` split used
@@ -65,7 +68,7 @@ nearest-neighbor code inside `greedy_distance_strategy.py`. That's cheaper
 than a cross-boundary dependency. Trip Builder's `create_trip` path is
 completely untouched by this feature.
 
-### Why itineraries aren't written into `TripStop`
+### Why itineraries aren't written into `TripStop` — until explicitly applied
 
 `update_stop_order` (Trip Builder) treats `TripStop` as the trip's one
 canonical stop list. If `optimize_trip` also wrote to `TripStop`, every
@@ -75,8 +78,116 @@ against each other or against the manual arrangement. Instead, each
 `optimize_trip` call creates a new `TripItinerary` + `TripItineraryStop`
 rows, standalone from `TripStop`. Running the optimizer is always a safe,
 non-destructive "preview" — nothing about the Trip Builder API's behavior
-changes. See "Future improvements" for the natural next step (an explicit
-"apply this itinerary" action).
+changes as a side effect of generating or viewing an itinerary.
+
+**Applying an itinerary is the one explicit, opt-in exception** — see
+"Apply semantics" below. It's a deliberate, separate action the user takes
+on a specific saved itinerary; it never happens automatically as a side
+effect of `optimize_trip`.
+
+## Apply semantics
+
+`POST /internal/itineraries/{itinerary_id}/apply` copies a saved
+`TripItinerary`'s stops into the Trip's canonical `TripStop` list — the
+first (and still only) way an optimizer artifact intentionally mutates
+Trip Builder data.
+
+### Design decision: REPLACE, not merge or reorder
+
+Three options were considered:
+
+- **Replace** (chosen): delete the trip's existing `TripStop` rows, insert
+  one row per itinerary stop, in the itinerary's own day/order. Exactly
+  `update_stop_order`'s existing delete-and-reinsert transaction shape —
+  no new mutation pattern introduced.
+- **Merge**: union manual stops with itinerary stops. Rejected — `TripStop`
+  carries no "source" or "locked" flag, so there's no principled way to
+  decide which of two conflicting orderings for the same place wins, and
+  a merge that silently drops or duplicates stops is worse than a full,
+  predictable replace (e.g. what should happen to a manually-added stop
+  the itinerary never considered, or a place appearing in both).
+- **Reorder-only**: keep the existing stop set, only apply the itinerary's
+  ordering. Rejected — an itinerary can reference a different subset of
+  places than the trip's current stops (the optimizer runs against
+  `selected_place_ids`, not "all current stops"), so a pure reorder can't
+  express "this itinerary dropped/added a place."
+
+Replace is lossless here because `TripStop` has no metadata beyond
+`place_id`/`day_index`/`order_index` (see `TripStopDTO`) — nothing manual
+exists to accidentally destroy. If `TripStop` ever grows per-stop notes or
+similar, this decision would need revisiting.
+
+### What happens, precisely
+
+1. Validate: itinerary exists and its trip is resolvable; requester has
+   `owner`/`editor` access to that trip (same `resolve_access` check as
+   every other trip-mutating endpoint); every `TripItineraryStop` row still
+   resolves to a live `Place` (see "Safety" below); the itinerary has at
+   least one stop; no duplicate `place_id` across its stops.
+2. Delete the trip's current `TripStop` rows, insert new ones from the
+   itinerary's days/stops, set `Trip.applied_itinerary_id` and
+   `Trip.itinerary_applied_at`.
+3. Single `commit()` — see "Atomicity" below.
+4. Best-effort: fire the `shared_trip_itinerary_applied` analytics event
+   (see "Analytics" below) — a failure here never rolls back step 2.
+
+**The saved `TripItinerary` itself is never touched** — applying is a read
+of the itinerary and a write to the trip, never a write to the itinerary.
+Reopening the same itinerary from Itinerary History after applying it
+still shows the exact original result.
+
+### Atomicity
+
+All reads and validation happen before any write; the delete+reinsert+
+provenance-update sequence shares one SQLAlchemy session and one final
+`commit()` — a rejected apply (any validation failure) leaves the existing
+`TripStop` rows completely untouched, never partially updated. Verified by
+`test_apply_itinerary_atomic_rollback_leaves_existing_stops_untouched`.
+
+### Repeated application
+
+Applying the same itinerary twice (or a different itinerary after an
+earlier apply) is always safe — each apply is a fresh replace, not additive.
+`Trip.applied_itinerary_id`/`itinerary_applied_at` simply reflect whichever
+itinerary was applied *most recently*, not a history of every apply. Full
+apply history, if ever needed, would have to come from a separate log —
+out of scope here (see "Future improvements").
+
+### Optimizer provenance
+
+`Trip.applied_itinerary_id` (nullable FK → `trip_itineraries.id`,
+`ondelete=SET NULL`) + `Trip.itinerary_applied_at` are the smallest schema
+addition that answers "which itinerary, if any, produced this trip's
+current stops" — both `None` until the first apply. Deliberately placed on
+`Trip`, not on `TripStop`: every apply replaces the *entire* stop set at
+once, so per-stop provenance would be redundant (all stops from one apply
+share the same source) and would wrongly couple the canonical route model
+(`TripStop`) to the optimizer domain (`TripItinerary`). A single pointer on
+`Trip` captures exactly the fact that exists, no more.
+
+### Safety
+
+| Failure | Response |
+|---|---|
+| Itinerary doesn't exist | `404 ITINERARY_NOT_FOUND` |
+| Itinerary belongs to a trip the requester has no relationship to | `404 ITINERARY_NOT_FOUND` (anti-enumeration — not 403, same convention as Trip Sharing) |
+| Requester is a viewer (not owner/editor) | `403 PERMISSION_DENIED` |
+| Trip no longer exists | `404 TRIP_NOT_FOUND` |
+| A referenced `Place` was deleted (`TripItineraryStop.place_id` → `NULL` via `ondelete=SET NULL`) | `400 INVALID_OPTIMIZATION_REQUEST` |
+| Itinerary has zero stops | `400 INVALID_OPTIMIZATION_REQUEST` |
+| Itinerary has a duplicate `place_id` across its stops | `400 INVALID_OPTIMIZATION_REQUEST` |
+| Applying an already-applied itinerary again | `200` — no-op-equivalent, safe to repeat (see above) |
+
+### Analytics
+
+`shared_trip_itinerary_applied` (`kind="trip"`) — server-only, fired from
+inside `apply_itinerary` itself, **not** in `CLIENT_FIREABLE_EVENTS`
+(verified by a smoke test asserting membership is `False`). No existing
+event fits: `SHARED_TRIP_INVITE_SENT`/`DECLINED`/`EXPIRED` are specific to
+the collaboration/invite flow, and `SHARED_TRIP_CREATED`/`DELETED` are
+`kind="video"` (video-plan lifecycle, unrelated to the optimizer). Payload:
+`trip_id`, `user_id` (the applier), `kind="trip"`, and
+`metadata={"itinerary_id", "stops_count"}`.
 
 ## Algorithm ("simple heuristic" — v1: `greedy_distance`)
 
@@ -195,15 +306,15 @@ reordering stops — both flagged as v1 limitations below.
 - **The optimization score is not comparable across strategies** or
   validated against real user satisfaction — it's a same-strategy,
   same-run diagnostic, not a benchmark.
-- **No "apply to trip" action yet.** An itinerary is a standalone,
-  persisted preview; nothing currently copies it into `TripStop`. See
-  "Future improvements."
+- **Apply keeps only the most recent provenance pointer**, not a full
+  history of every apply — see "Apply semantics → Repeated application."
 
 ## API
 
-All routes are internal (`verify_internal_secret`), proxied by a BFF the
-same way Trip Builder/Trip Sharing are — no BFF route exists yet for this
-feature (see "Future improvements": the highest-impact next step).
+All routes are internal (`verify_internal_secret`), proxied by both BFFs
+the same way Trip Builder/Trip Sharing are — see `docs/trip-optimizer-bff.md`
+for the full proxy contract and `docs/ios-trip-optimizer.md` for the iOS
+consumer.
 
 ### `POST /internal/trips/{trip_id}/optimize`
 
@@ -269,6 +380,35 @@ Summary list, newest first, for anyone with any access to the trip
 Full detail (same shape as the `optimize` response), for anyone with access
 to the itinerary's trip.
 
+### `POST /internal/itineraries/{itinerary_id}/apply`
+
+Requires `x-user-id` header (owner or editor of the itinerary's trip). No
+request body. See "Apply semantics" above for the full behavior.
+
+```json
+{
+  "trip_id": 1,
+  "itinerary_id": 4,
+  "stops": [
+    {
+      "place_id": 12, "name": "Ayasofya", "lat": 41.0086, "lng": 28.9802,
+      "city": "İstanbul", "category": "tarihi",
+      "day_index": 0, "order_index": 0
+    }
+  ],
+  "stops_count": 3,
+  "applied_at": "2026-08-08T10:05:00"
+}
+```
+
+`stops` is `TripStopDTO` — the same shape `GET /trips/{trip_id}` already
+returns for `days` (flattened, not day-grouped, since the caller just
+applied a specific day/order and doesn't need it re-nested).
+
+Errors: `404 ITINERARY_NOT_FOUND`, `404 TRIP_NOT_FOUND`,
+`403 PERMISSION_DENIED`, `400 INVALID_OPTIMIZATION_REQUEST` (deleted place,
+empty itinerary, duplicate places — see "Apply semantics → Safety").
+
 ## Testing
 
 ```bash
@@ -286,28 +426,33 @@ and score bounds.
 
 `test_trip_optimization.py` covers the full stack through the API client:
 happy path, persistence + list/get round trip, multiple runs coexisting
-(no overwrite), Trip Builder's `TripStop` staying untouched, and the
-required edge cases — one place, duplicate places, multiple cities, empty
-trip, unavailable opening-hours metadata — plus request validation and
-permission checks (owner/editor/viewer, non-collaborator, anti-enumeration
-404s matching the Trip Sharing convention).
+(no overwrite), Trip Builder's `TripStop` staying untouched by generation,
+and the required edge cases — one place, duplicate places, multiple
+cities, empty trip, unavailable opening-hours metadata — plus request
+validation and permission checks (owner/editor/viewer, non-collaborator,
+anti-enumeration 404s matching the Trip Sharing convention). It also
+covers `apply_itinerary`: happy path (`TripStop` before/after DB
+assertions), owner, editor, viewer rejection, cross-user rejection,
+nonexistent itinerary, deleted-place rejection, empty-itinerary rejection,
+duplicate-place rejection, atomic rollback on a rejected apply, repeated
+application, the saved itinerary staying byte-for-byte unchanged after
+apply, `Trip` provenance fields updating, and the analytics event firing
+with the right payload — 358 tests total in the full suite (was 344 before
+this milestone).
 
 ## Future improvements
 
 Ranked roughly by what unlocks the most value next:
 
-1. **BFF proxy + a UI.** This milestone is backend-only by design (see
-   the task's own "do not implement multiple roadmap items at once").
-   Nothing in mobile-bff/web-bff or iOS/web can call this yet.
-2. **"Apply itinerary to trip"** — an explicit action that copies a chosen
-   `TripItinerary`'s stops into `TripStop`, so a user can generate several
-   candidates and pick a winner. Currently the only such destructive write
-   is Trip Builder's own `update_stop_order`.
-3. **A second strategy** to prove the interface actually decouples cleanly
+1. **A second strategy** to prove the interface actually decouples cleanly
    — e.g. an OR-Tools-based strategy that solves opening-hours conflicts
    for real, or a Google/Apple Maps-backed strategy for real travel times.
-4. **Populate `Place.category`/`Place.opening_hours`** from a real source
+2. **Populate `Place.category`/`Place.opening_hours`** from a real source
    (Google Places, OSM `opening_hours` tags) — until then, every itinerary
    uses the flat default visit duration and always warns about missing
    hours.
-5. **Weekday/seasonal opening hours**, not just a flat daily window.
+3. **Weekday/seasonal opening hours**, not just a flat daily window.
+4. **Apply history** — `Trip.applied_itinerary_id` only tracks the most
+   recent apply; a full log of every apply (who, when, which itinerary)
+   would need a separate table, not attempted here since nothing yet
+   needs more than "what's currently applied."
