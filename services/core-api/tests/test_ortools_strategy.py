@@ -324,39 +324,52 @@ def test_multiple_places_with_compatible_windows_all_satisfied_no_conflicts():
         assert open_t <= arrival <= close_t, f"place {place_id}: {arrival} not in [{open_t},{close_t}]"
 
 
-# ─── Incompatible windows → impossible route, graceful fallback ────────────
+# ─── Incompatible-within-a-single-day windows → day-aware resolves them ────
+#
+# NOT: Bu test, day-aware milestone'dan ÖNCE "impossible route, gevşetildi"
+# bekliyordu (tek-sürekli-zaman-çizelgesi modeliyle küresel olarak
+# imkansızdı). Artık bu senaryonun GÜN-FARKINDA doğru cevabı var (biri 1.
+# güne, diğeri 2. güne) — bkz. modül docstring "The single-continuous-
+# timeline bug" ve aşağıdaki
+# `test_two_incompatible_same_window_places_satisfied_across_separate_days`
+# (spesifikasyonun 8. "critical regression test" gereksinimi).
 
-def test_incompatible_windows_falls_back_to_distance_only_with_warning():
-    """İki mekan, ikisi de yalnızca 09:00-09:30 açık ama ~700km arayla —
-    aynı anda ikisini de bu dar pencerede ziyaret etmek FİZİKSEL OLARAK
-    imkansız. Sonuç asla eksik/geçersiz olmamalı (spesifikasyonun 4.
-    gereksinimi) — her iki mekan da hâlâ tam bir itinerary'de yer almalı,
-    yalnızca sert kısıt gevşetildiğini açıkça belirten bir uyarı eklenir."""
+def test_two_far_apart_same_window_places_no_longer_falsely_relaxed():
+    """Bir önceki (day-aware olmayan) modelde bu senaryo 'imkansız' sayılıp
+    HER İKİ sert kısıt da atılıyordu. Day-aware modelde artık HİÇ gevşetme
+    olmadan, ikisi de kendi gününde tam zamanında karşılanıyor."""
     result = _run([
         _place(1, "Yakın", 41.00, 29.00, opening_hours="09:00-09:30"),
         _place(2, "Uzak", 38.60, 34.80, opening_hours="09:00-09:30"),
     ])
     ids = sorted(s.place_id for d in result.days for s in d.stops)
     assert ids == [1, 2]  # hiçbir durak silinmedi/atlanmadı
-    assert any("gevşetildi" in w for w in result.warnings)
-    # Gevşetme sonrası, mevcut yumuşak çakışma kontrolü yine en az birini işaretler.
-    assert any("çakışıyor" in w for w in result.warnings)
+    assert not any("gevşetildi" in w for w in result.warnings)
+    assert not any("çakışıyor" in w for w in result.warnings)
+    assert len(result.days) == 2
+
+    stops_by_id = {s.place_id: s for d in result.days for s in d.stops}
+    assert stops_by_id[1].arrival_time == "09:00"
+    assert stops_by_id[2].arrival_time == "09:00"
 
 
-def test_incompatible_windows_result_still_has_valid_schema():
-    """İmkansız durumda bile dönen OptimizationResult, normal sonuçla
-    BİREBİR aynı şemayı korur — çağıran taraf özel bir 'hata' dalı
-    işlemek zorunda değil (spesifikasyonun 'existing OptimizationResult
-    contract' gereksinimi)."""
+def test_incompatible_windows_result_still_has_valid_schema_when_genuinely_infeasible():
+    """`duration_days=1` iki mekanı TEK bir güne zorlar — bu durumda
+    senaryo GERÇEKTEN imkansız (bkz.
+    `test_impossible_multi_day_schedule_still_relaxes_gracefully` aşağıda).
+    Dönen OptimizationResult yine de normal sonuçla BİREBİR aynı şemayı
+    korur — çağıran taraf özel bir 'hata' dalı işlemek zorunda değil."""
     result = _run([
         _place(1, "Yakın", 41.00, 29.00, opening_hours="09:00-09:30"),
         _place(2, "Uzak", 38.60, 34.80, opening_hours="09:00-09:30"),
-    ])
+    ], duration_days=1)
     assert isinstance(result.days, list)
     assert isinstance(result.warnings, list)
     assert isinstance(result.total_distance_km, float)
     assert isinstance(result.optimization_score, float)
     assert 0.0 <= result.optimization_score <= 100.0
+    ids = sorted(s.place_id for d in result.days for s in d.stops)
+    assert ids == [1, 2]
 
 
 # ─── Missing opening-hours metadata alongside constrained places ───────────
@@ -523,3 +536,268 @@ def test_score_semantics_preserved_more_warnings_still_reduce_score_by_five():
     travel_penalty = min(40.0, avg_km * 2)
     expected_score = round(max(0.0, 100.0 - travel_penalty - warning_penalty), 1)
     assert result.optimization_score == expected_score
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Day-aware scheduling (bkz. ortools_strategy.py "Day-aware scheduling") —
+# açılış saati kısıtları artık HANGİ GÜNE denk geldiklerine göre, o günün
+# KENDİ yerel saatine karşı değerlendiriliyor; tek-sürekli-zaman-çizelgesi
+# kusurunun (bkz. modül docstring "The single-continuous-timeline bug")
+# kapatıldığını doğrudan kanıtlayan testler.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ─── Critical regression test (spesifikasyonun 8. gereksinimi) ─────────────
+
+def test_two_incompatible_same_window_places_satisfied_across_separate_days():
+    """BU, spesifikasyonun 8. 'critical regression test' gereksinimidir:
+    eski (tek-sürekli-zaman-çizelgesi) modelde bu tam senaryo — iki mekan,
+    ikisi de yalnızca 09:00-09:30 açık, aralarında saatlerce sürecek bir
+    mesafe — KÜRESEL OLARAK İMKANSIZ sayılıyor ve HER İKİ sert kısıt da
+    tamamen atılıyordu (ampirik olarak doğrulandı — bkz. bu milestone'un
+    tasarım notları). Day-aware modelde artık doğru cevap bulunuyor: biri
+    1. güne, diğeri 2. güne — ikisi de KENDİ gününün açılış saatinde,
+    HİÇBİR gevşetme olmadan karşılanıyor. Bu test, eski davranışa asla geri
+    dönülmediğini garanti eder."""
+    result = _run([
+        _place(1, "Yakın", 41.00, 29.00, opening_hours="09:00-09:30"),
+        _place(2, "Uzak", 38.60, 34.80, opening_hours="09:00-09:30"),
+    ])
+
+    assert not any("gevşetildi" in w for w in result.warnings)
+    assert not any("çakışıyor" in w for w in result.warnings)
+    assert len(result.days) == 2
+
+    ids = sorted(s.place_id for d in result.days for s in d.stops)
+    assert ids == [1, 2]
+
+    stops_by_id = {s.place_id: s for d in result.days for s in d.stops}
+    for place_id in (1, 2):
+        arrival = stops_by_id[place_id].arrival_time
+        assert "09:00" <= arrival <= "09:30", f"place {place_id}: {arrival} dışında pencere"
+
+    # İki mekan da FARKLI günlere düşmeli — ikisi AYNI güne konsaydı
+    # (09:00-09:30 penceresi ikisi için de aynı anda geçerli olamayacağından)
+    # bu genuinely infeasible olurdu.
+    day_of = {s.place_id: d.day_index for d in result.days for s in d.stops}
+    assert day_of[1] != day_of[2]
+
+
+# ─── Constrained stop on Day 1 / Day 2 ───────────────────────────────────────
+
+def test_constrained_stop_scheduled_on_day_one():
+    """Sert pencereli mekan, hemen yanındaki bir mekanla birlikte 1. güne
+    (day_index=0) rahatça sığar; üçüncü (uzak) mekan kendi günü gerektirir.
+    1. günün mekanı, o günün KENDİ yerel saatine karşı doğru karşılanmalı."""
+    places = [
+        _place(1, "Sabit", 41.00, 29.00, opening_hours="09:00-09:45"),
+        _place(2, "Yakın", 41.02, 29.02),   # Sabit'e çok yakın -- aynı güne sığar
+        _place(3, "Uzak", 41.80, 29.80),    # uzak -- kendi günü gerekir
+    ]
+    result = _run(places, preferred_start_time="09:00", preferred_end_time="11:00")
+
+    day0_ids = {s.place_id for s in result.days[0].stops}
+    assert 1 in day0_ids, f"Sabit (place_id=1) 1. güne düşmedi: {day0_ids}"
+
+    stop1 = next(s for d in result.days for s in d.stops if s.place_id == 1)
+    assert stop1.day_index == 0
+    assert "09:00" <= stop1.arrival_time <= "09:45"
+    assert not any("çakışıyor" in w for w in result.warnings)
+    assert not any("gevşetildi" in w for w in result.warnings)
+
+
+def test_constrained_stop_scheduled_on_day_two():
+    """Aynı senaryo, ama sert pencereli mekan diğer iki mekandan SONRA
+    planlanacak biçimde — 2. güne (day_index=1) düşmeli ve 2. GÜNÜN KENDİ
+    (dünden bağımsız, taze) yerel saatine karşı doğru karşılanmalı. Bu,
+    spesifikasyonun 1. gereksinimini ('Day 2 stop must be checked against
+    Day 2's timeline, not the previous day's cumulative minutes') doğrudan
+    sınar."""
+    places = [
+        _place(1, "Diger1", 41.00, 29.00),
+        _place(2, "Diger2", 41.30, 29.30),
+        _place(3, "Sabit", 41.60, 29.60, opening_hours="09:00-09:45"),
+    ]
+    result = _run(places, preferred_start_time="09:00", preferred_end_time="11:00")
+
+    assert len(result.days) >= 2  # üç mekan, sıkı bütçe -> birden fazla gün gerekiyor
+    stop3 = next(s for d in result.days for s in d.stops if s.place_id == 3)
+    # Hangi güne düşerse düşsün (solver kararı), o günün KENDİ yerel saatine
+    # göre pencere karşılanmalı — day 1'in "dünden miras" bir zamanına göre değil.
+    assert "09:00" <= stop3.arrival_time <= "09:45"
+    assert not any("çakışıyor" in w for w in result.warnings)
+    assert not any("gevşetildi" in w for w in result.warnings)
+
+
+# ─── Same opening hours on multiple days / compatible multi-day windows ────
+
+def test_same_opening_hours_on_multiple_days_each_satisfied_locally():
+    """Dört mekan, HEPSİ aynı '09:00-09:45' penceresini paylaşıyor — her
+    biri KENDİ gününde bu pencereyi karşılamalı (aynı HH:MM değeri, her gün
+    yeniden kullanılabilir — bkz. docs 'Assumptions: opening hours are
+    daily-only'). Hiçbiri gevşetilmemeli."""
+    places = [
+        _place(i, f"M{i}", 41.0 + i * 0.3, 29.0 + i * 0.3, opening_hours="09:00-09:45")
+        for i in range(4)
+    ]
+    result = _run(places, preferred_start_time="09:00", preferred_end_time="10:30")
+
+    assert len(result.days) == 4  # her mekan aynı dar pencereyi istiyor -> birer gün
+    assert not any("gevşetildi" in w for w in result.warnings)
+    assert not any("çakışıyor" in w for w in result.warnings)
+    for day in result.days:
+        assert len(day.stops) == 1
+        assert "09:00" <= day.stops[0].arrival_time <= "09:45"
+
+
+def test_compatible_multi_day_windows_different_times_each_day():
+    """Farklı (ama her biri kendi gününde tek başına rahatça karşılanabilir)
+    pencerelere sahip birkaç mekan — sıkı gün bütçesi çok-günlü dağılıma
+    zorluyor, hepsi gevşetmeden karşılanmalı."""
+    places = [
+        _place(1, "Sabah", 41.00, 29.00, opening_hours="09:00-10:00"),
+        _place(2, "Öğlen", 41.30, 29.30, opening_hours="09:30-10:30"),
+        _place(3, "İkindi", 41.60, 29.60, opening_hours="09:15-10:15"),
+    ]
+    result = _run(places, preferred_start_time="09:00", preferred_end_time="11:00")
+
+    ids = sorted(s.place_id for d in result.days for s in d.stops)
+    assert ids == [1, 2, 3]
+    assert not any("gevşetildi" in w for w in result.warnings)
+    assert not any("çakışıyor" in w for w in result.warnings)
+
+
+# ─── Travel across a day boundary ────────────────────────────────────────────
+
+def test_travel_to_next_still_computed_across_day_boundary():
+    """Bir günün SON durağının 'sıradaki durağa seyahat' bilgisi, mevcut
+    davranışla aynı şekilde, gün sınırını AŞARAK (bir sonraki günün İLK
+    durağına) hesaplanmaya devam etmeli — bkz. modül docstring
+    '_walk_day_groups'. total_distance_km/total_travel_time_minutes de bu
+    gün-arası bacağı içermeli."""
+    places = [
+        _place(1, "Sabit", 41.00, 29.00, opening_hours="09:00-09:45"),
+        _place(2, "Diger1", 41.30, 29.30),
+        _place(3, "Diger2", 41.60, 29.60),
+    ]
+    result = _run(places, preferred_start_time="09:00", preferred_end_time="11:00")
+    assert len(result.days) >= 2
+
+    # Son gün HARİÇ her günün son durağı, sıradaki (başka gündeki) durağa
+    # dair seyahat bilgisini taşımalı (None OLMAMALI).
+    for day in result.days[:-1]:
+        last_stop = day.stops[-1]
+        assert last_stop.travel_time_to_next_minutes is not None
+        assert last_stop.travel_distance_to_next_km is not None
+    # Yalnızca EN SON günün EN SON durağı None olmalı (sıradaki durak yok).
+    assert result.days[-1].stops[-1].travel_time_to_next_minutes is None
+    assert result.total_distance_km > 0.0
+
+
+# ─── Service duration crossing a day boundary ───────────────────────────────
+
+def test_service_duration_alone_exceeding_budget_still_scheduled_not_dropped():
+    """Tek başına gün bütçesini aşan bir ziyaret süresi (90dk müze, 60dk
+    bütçe) — mevcut 'tek durak günü aşabilir' kuralının bu modeldeki
+    karşılığı: mekan KAYBOLMAMALI, bir güne (gerekirse zorunlu son güne)
+    planlanmalı, asla sessizce düşürülmemeli."""
+    places = [
+        _place(1, "Uzun Ziyaret", 41.00, 29.00, category="museum"),  # 90dk
+        _place(2, "Sabit", 41.30, 29.30, opening_hours="09:00-09:30"),
+    ]
+    result = _run(places, preferred_start_time="09:00", preferred_end_time="10:00", duration_days=2)
+
+    ids = sorted(s.place_id for d in result.days for s in d.stops)
+    assert ids == [1, 2]  # hiçbir mekan kaybolmadı
+    stop1 = next(s for d in result.days for s in d.stops if s.place_id == 1)
+    assert stop1.visit_duration_minutes == 90
+
+
+def test_non_final_day_never_lets_a_stop_silently_spill_past_day_end():
+    """Spesifikasyonun 5. gereksinimi: 'A stop must not silently spill into
+    another day.' Zorunlu OLMAYAN bir günde, bir durağın dahil edilmesi
+    o günün bütçesini (birden fazla durak nedeniyle) aşacaksa, solver o
+    durağı YARINA erteler — bugüne sessizce sığdırmaz."""
+    # 3 mekan, her biri 60dk ziyaret + aralarında belirgin seyahat -- 60dk'lık
+    # bir günlük bütçeye asla ikisi birden sığmaz.
+    places = [
+        _place(1, "A", 41.00, 29.00),
+        _place(2, "B", 41.30, 29.30),
+        _place(3, "C", 41.60, 29.60),
+    ]
+    result = _run(places, preferred_start_time="09:00", preferred_end_time="10:00")
+    for day in result.days:
+        assert len(day.stops) == 1, "60dk'lık günlük bütçeye birden fazla 60dk'lık ziyaret sığmamalı"
+
+
+# ─── Impossible multi-day schedule ───────────────────────────────────────────
+
+def test_impossible_multi_day_schedule_still_relaxes_gracefully():
+    """`duration_days=1`, iki uzak-ve-aynı-dar-pencereli mekanı TEK bir güne
+    zorluyor — bu durumda day-aware model bile gerçekten imkansız (gün
+    sayısı kısıtlı, ayrı günlere bölünemiyor). Mevcut gevşetme/fallback
+    davranışı devreye girmeli: hiçbir mekan kaybolmaz, açık bir uyarı eklenir."""
+    result = _run([
+        _place(1, "Yakın", 41.00, 29.00, opening_hours="09:00-09:30"),
+        _place(2, "Uzak", 38.60, 34.80, opening_hours="09:00-09:30"),
+    ], duration_days=1)
+
+    ids = sorted(s.place_id for d in result.days for s in d.stops)
+    assert ids == [1, 2]
+    assert len(result.days) == 1
+    assert any("gevşetildi" in w for w in result.warnings)
+
+
+# ─── Missing opening hours (day-aware path) ─────────────────────────────────
+
+def test_missing_opening_hours_in_multi_day_trip_stays_freely_optimizable():
+    """Karma bir çok-günlü gezi: bazı mekanların sert penceresi var, bazılarının
+    hiç açılış-saati verisi yok — kısıtsız olanlar HERHANGİ bir güne serbestçe
+    yerleştirilebilmeli (spesifikasyonun 3. gereksinimi), day-aware döngüde de."""
+    places = [
+        _place(1, "Sabit", 41.00, 29.00, opening_hours="09:00-09:45"),
+        _place(2, "Bilinmiyor A", 41.30, 29.30),
+        _place(3, "Bilinmiyor B", 41.60, 29.60),
+        _place(4, "Bilinmiyor C", 41.90, 29.90),
+    ]
+    result = _run(places, preferred_start_time="09:00", preferred_end_time="10:30")
+    ids = sorted(s.place_id for d in result.days for s in d.stops)
+    assert ids == [1, 2, 3, 4]
+    assert any("Açılış saatleri bilinmiyor" in w for w in result.warnings)
+    assert not any("gevşetildi" in w for w in result.warnings)
+
+
+# ─── Deterministic repeated execution (day-aware path) ──────────────────────
+
+def test_day_aware_schedule_is_deterministic_across_repeated_runs():
+    """Gün-farkında çok-günlü döngü de deterministik olmalı — her günün
+    solve çağrısı deterministik VE günler her zaman aynı sırada
+    çözüldüğünden, tüm çok-günlü sonuç da deterministiktir."""
+    places = [
+        _place(1, "Sabit1", 41.00, 29.00, opening_hours="09:00-09:45"),
+        _place(2, "Sabit2", 41.30, 29.30, opening_hours="09:15-10:00"),
+        _place(3, "Diger1", 41.60, 29.60),
+        _place(4, "Diger2", 41.90, 29.90),
+        _place(5, "Diger3", 42.20, 30.20),
+    ]
+    results = [_run(places, preferred_start_time="09:00", preferred_end_time="11:00") for _ in range(5)]
+
+    first = _stop_signature(results[0])
+    for other in results[1:]:
+        assert _stop_signature(other) == first
+        assert other.warnings == results[0].warnings
+        assert other.total_distance_km == results[0].total_distance_km
+        assert len(other.days) == len(results[0].days)
+
+
+def test_day_aware_critical_regression_scenario_is_deterministic():
+    """Kritik regresyon senaryosunun (bkz. yukarısı) kendisi de deterministik
+    olmalı — 5 ardışık çağrı hep aynı gün atamasını/sırasını üretmeli."""
+    places = [
+        _place(1, "Yakın", 41.00, 29.00, opening_hours="09:00-09:30"),
+        _place(2, "Uzak", 38.60, 34.80, opening_hours="09:00-09:30"),
+    ]
+    results = [_run(places) for _ in range(5)]
+    first = _stop_signature(results[0])
+    for other in results[1:]:
+        assert _stop_signature(other) == first
+        assert other.warnings == results[0].warnings

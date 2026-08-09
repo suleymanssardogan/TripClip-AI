@@ -22,8 +22,7 @@ sessizce ayrışmaz; yalnızca gün-bölme akışının KONTROL YAPISI tekrarlan
 ki bu zaten her stratejinin kendi "sıralama/zamanlama/gün dağılımı"
 sorumluluğudur (bkz. RouteOptimizationStrategy'nin kendi docstring'i) —
 OptimizationService'teki yetkilendirme/sahiplik/dedup/persistence/API
-orkestrasyonuyla karıştırılmamalı (bu milestone'un "no business logic
-duplication" kısıtı tam olarak o orkestrasyonu hedefliyor).
+orkestrasyonuyla karıştırılmamalı.
 
 ## Neden OR-Tools, elle yazılmış bir 2-opt değil
 
@@ -45,84 +44,139 @@ mesafelerinin toplamını minimize etmek, tıpkı bir TSP yolu gibi.
 ## Determinism
 
 `solution_limit` (iyileştirici çözüm SAYISI) birincil durdurma koşulu —
-makine hızından bağımsız, bu yüzden aynı girdi her zaman aynı sırayı üretir
-(bkz. test_ortools_strategy.py'deki determinism testleri, ampirik olarak da
-doğrulandı: aynı girdiyle 10 ardışık çağrı bit-bir-bit aynı sonucu verdi).
+makine hızından bağımsız, bu yüzden aynı girdi her zaman aynı sırayı üretir.
 `time_limit` yalnızca patolojik derecede büyük girdilere karşı bir güvenlik
-ağıdır (gezi boyutlarında — onlarca durak — hiç tetiklenmez, `solution_limit`
-çok daha önce durdurur). GUIDED_LOCAL_SEARCH metasezgiseli rastgelelik
-KULLANMAZ (simulated annealing'in aksine) — sabit sırayla komşuluk arar,
-iyileştiren hamleleri kabul eder.
+ağıdır. GUIDED_LOCAL_SEARCH metasezgiseli rastgelelik KULLANMAZ (simulated
+annealing'in aksine) — sabit sırayla komşuluk arar, iyileştiren hamleleri
+kabul eder. Gün-farkında çok-günlü döngü de (aşağıya bkz.) bu özelliği miras
+alır: her günün kendi solve çağrısı deterministiktir, ve günler SIRAYLA
+(rastgele değil) çözüldüğünden tüm döngü de deterministiktir.
 
-## Hard opening-hours time windows
+## Hard opening-hours time windows — day-aware
 
-Açılış saati bilgisi mevcut mekanlar için, açılış saatleri artık rota
-SIRALAMASINI etkileyen SERT bir kısıt — önceki milestone'da yalnızca
-son-işleme aşamasında (varışı açılışa kırp, kapanıştan sonraysa uyar ama
-YENİDEN SIRALAMA yapma) kullanılıyordu. Bkz. `_solve_with_time_windows`.
+Açılış saati bilgisi mevcut mekanlar için, açılış saatleri rota
+SIRALAMASINI etkileyen SERT bir kısıt — yalnızca son-işleme aşamasında
+kırpılan/uyarılan yumuşak bir sinyal değil. **Bu kısıt artık GÜN-FARKINDA
+değerlendiriliyor** — bir önceki milestone'un tek-sürekli-zaman-çizelgesi
+modelinin kusurunu (aşağıya bkz. "Day-aware scheduling → The single-
+continuous-timeline bug") kapatıyor.
 
-**Model**: `_solve_distance_only`'nin aynı açık-yol modeline (sanal depo,
-0-maliyetli depo kenarları) bir OR-Tools "Time" dimension eklenir —
-kümülatif değişken, depodan itibaren dakika cinsinden geçen süreyi
-(seyahat + ziyaret süresi) izler. Sanal aracın başlangıcı
-`CumulVar(Start).SetRange(day_start, day_start)` ile `preferred_start_time`'a
-sabitlenir. Açılış saati BİLİNEN her mekan için
-`CumulVar(node).SetRange(open_minutes, close_minutes)` — sert bir alt/üst
-sınır: solver, o düğüme varışın bu aralığın dışına düşeceği hiçbir sıralamayı
-kabul etmez (gerekirse önce oraya erken varıp örtük biçimde "bekler" — dimension
-slack'i bunu modeller, ayrı bir "bekleme" değişkenine gerek yoktur). Açılış
-saati BİLİNMEYEN mekanlar `SetRange(0, HORIZON_MINUTES)` alır — pratikte
-kısıtsız, yalnızca gerçek pencereli düğümlerin etrafında serbestçe
-konumlandırılabilirler (spesifikasyonun 3. gereksinimi: "places without
-opening-hours data must remain optimizable").
+### Day-aware scheduling
 
-**Neden yalnızca gerçek pencere varken bu yola girilir**: `_solve_visit_order`
-hiçbir mekanda kullanılabilir bir açılış saati yoksa (bugünkü üretim
-verisinin neredeyse tamamı — bkz. docs "Assumptions") doğrudan
-`_solve_distance_only`'ye düşer — bu, bir önceki milestone'un modeliyle
-BİREBİR AYNI, sıfır davranış değişikliği (aynı test sonuçları, aynı
-benchmark sayıları). Zaman dimension'ı yalnızca gerçekten en az bir sert
-pencere varken modele eklenir.
+**Model**: `_solve_distance_only`'nin aynı açık-yol modeli (sanal depo,
+0-maliyetli depo kenarları) — ama artık TEK bir sürekli zaman çizelgesi
+üzerinde DEĞİL, GÜN BAŞINA ayrı ayrı çözülüyor (`_solve_day`,
+`_solve_day_aware_schedule` tarafından döngüsel çağrılır):
 
-### Impossible routes (eşzamanlı sağlanamayan pencereler)
+- Her günün kendi TAZE bir OR-Tools "Time" dimension'ı var — kapasitesi
+  o günün kendi bütçesi (`day_end - day_start`), `fix_start_cumul_to_zero=True`
+  ile 0 = O GÜNÜN `day_start`'ı (dünün kümülatif zamanından bağımsız).
+  Bu, bir sert pencerenin SetRange'i artık gerçekten "bugünün saat kaçı"
+  sorusuna karşı kontrol ediliyor demek — dünden miras kalan, alakasız bir
+  sayıya karşı değil.
+- Açılış saati BİLİNEN bir mekan için pencere `day_start/day_end`'e göre
+  GÜNE-GÖRELİ dakikalara çevrilir (`open_minutes - day_start` vb., [0,
+  day_budget] aralığına kırpılır) ve `CumulVar(node).SetRange(...)` ile
+  sertçe uygulanır — HANGİ güne denk gelirse gelsin, aynı (deterministik)
+  çeviri kullanılır, çünkü `preferred_start_time`/`preferred_end_time` her
+  gün İÇİN AYNI (bkz. docs "Assumptions: opening hours are daily-only").
+- Açılış saati BİLİNMEYEN (veya bu güne hiç sığmayan — aşağıya bkz.)
+  mekanlar `SetRange(0, day_budget)` alır — o günün kısıtsız serbest
+  aralığı, sert pencereli mekanların ETRAFINA konumlandırılabilirler
+  (spesifikasyonun 3. gereksinimi).
+- Her mekan `AddDisjunction([node], DISJUNCTION_PENALTY)` ile o gün için
+  OPSİYONELDİR (istisna: zorunlu son gün — aşağıya bkz.) — solver'ın
+  KENDİSİ "bugüne kim sığar, kim yarına kalır" kararını verir; elle
+  yazılmış bir "taşma tespit et → günü kapat → aynı durağı yeniden dene"
+  döngüsüne (önceki modelin kusurunun asıl kaynağı) hiç gerek kalmaz.
+  `DISJUNCTION_PENALTY`, gerçekçi HERHANGİ bir günlük rota mesafesinden kat
+  kat büyük — solver bir mekanı yalnızca zaman bütçesi/penceresi GERÇEKTEN
+  izin vermediğinde düşürür, asla salt mesafe tasarrufu için değil.
 
-İki veya daha fazla açılış-saati kısıtı AYNI ANDA sağlanamıyorsa (ör. birbirinden
-çok uzak iki mekan, ikisi de yalnızca aynı dar sabah aralığında açık) —
-`SolveWithParameters` bu durumda `None` döner (infeasible). Bu spesifikasyonun
-kendi gereksinimi gereği ("do not silently produce an invalid itinerary"),
-sonuç asla eksik/geçersiz bırakılmaz: `_solve_visit_order`, sert kısıtlar
-olmadan `_solve_distance_only`'ye düşer (yine TÜM mekanları içeren, geçerli
-bir itinerary) ve `optimize()` açıkça bir uyarı ekler — "sert zaman kısıtları
-gevşetildi" — ardından mevcut son-işleme aşamasının kendi çakışma uyarıları
-(değişmedi) hangi mekanların etkilendiğini tek tek listeler.
+Bu, spesifikasyonun kendi "Do not introduce vehicle-routing complexity
+unless the current architecture genuinely requires it" kısıtına saygılı,
+en küçük doğru model: TEK araçlı model KORUNUYOR (çoklu-araç/vardiya
+kavramı yok), yalnızca AYNI modelin gün başına TEKRAR TEKRAR (her seferinde
+taze bir saatle) çağrılması yoluyla gün-farkındalık kazandırılıyor.
+
+### The single-continuous-timeline bug (bir önceki milestone'da)
+
+Bir önceki milestone'un `_solve_with_time_windows`'u TEK bir zaman
+dimension'ı kullanıyordu — `day_start`'tan başlayıp trip boyunca hiç
+sıfırlanmadan büyüyen bir saat. Gün bölme ise TAMAMEN AYRI bir son-işleme
+adımıydı (mevcut yürüyüş). Bu iki mekanizma birbirinden HABERSİZDİ:
+solver'ın "sert kısıt sağlandı" kararı HAM, sınırsız kümülatif dakikalara
+karşı veriliyordu — o mekanın GERÇEKTE hangi güne düştüğüne ve o günün
+KENDİ yerel saatine karşı değil.
+
+Matematiksel olarak kanıtlanabilir ki (ve ampirik olarak doğrulandı):
+gerçek gün-yerel varış her zaman <= solver'ın ham kümülatif değeri (gün
+sıfırlamaları zamanı yalnızca AZALTABİLİR, hiç artıramaz) — bu yüzden bu
+kusur asla "solver OK dedi ama gerçek varış kapanıştan SONRAYA düştü"
+biçiminde SESSİZCE ortaya çıkamaz (mevcut yumuşak kontrol erken varışları
+sessizce açılışa kırptığı için, geç yönde sapma hep görünür bir uyarıya
+dönüşürdü zaten). Asıl gözlemlenen, doğrulanan kusur şuydu:
+
+**Aynı dar pencereyi paylaşan, coğrafi olarak birbirinden uzak iki mekan**
+(ör. ikisi de yalnızca 09:00-09:30 açık, aralarında saatlerce sürecek bir
+mesafe) — gün-farkında doğru cevap trivial: birini 1. güne, diğerini 2.
+güne koy, ikisi de KENDİ gününün 09:00'ında açılışta karşılanır. Eski model
+bunu KÜRESEL OLARAK İMKANSIZ sanıyordu (ikisi de aynı sınırsız hamsaatin
+aynı dilimi için yarışıyordu) ve HER İKİ sert kısıtı da tamamen atıp
+mesafe-yalnızca'ya düşüyordu — gün-farkında bir modelin ikisini de kusursuzca
+karşılayabileceği bir durumda. Ayrıca, o düşme (relaxation) yolunun KENDİ
+yürüyüşünde de bağımsız bir "bayat varış" kusuru tespit edildi: gün-taşması
+tespit edilip `flush_day()+continue` ile aynı durak yeniden denenmeden ÖNCE,
+açılış-saati çakışma kontrolü flush-ÖNCESİ (dünden miras, alakasız) `arrival`
+değeriyle çalıştırılıyor ve `warnings`'e GERİ ALINAMAZ biçimde ekleniyordu —
+gerçek (flush-sonrası) varış tam zamanında olsa bile sahte bir "çakışıyor"
+uyarısı üretebiliyordu. Bu yeni day-aware modelde bu kusurun HİÇBİRİ artık
+mümkün değil — her günün gerçek yerel saatine karşı, o günün KENDİ solve
+çağrısında, YAPISAL OLARAK doğru kontrol ediliyor, tahmin/tesadüf değil.
+`test_ortools_strategy.py`'deki
+`test_two_incompatible_same_window_places_satisfied_across_separate_days`
+bu tam senaryoyu (spesifikasyonun 8. "critical regression test"
+gereksinimi) hem eski modelin kusurunu hem yeni modelin düzeltmesini
+doğrudan kanıtlıyor.
+
+### Impossible routes (day-aware)
+
+Bir mekanın penceresi `day_start`/`day_end` ile HİÇ örtüşmüyorsa (ör.
+pencere günün tamamı kapandıktan sonra başlıyor) — bu, HANGİ güne
+konursa konsun asla karşılanamaz (her gün AYNI `day_start`/`day_end`'i
+paylaştığından). Bu tür mekanlar baştan tespit edilip sert kısıtsız kabul
+edilir. Ayrıca, ZORUNLU SON GÜNDE (bkz. aşağı) kalan mekanların pencereleri
+eşzamanlı sağlanamıyorsa, o gün mesafe-yalnızca'ya düşer. Her iki durumda
+da: hiçbir mekan kaybolmaz, ve `optimize()` açıkça bir uyarı ekler — "sert
+zaman kısıtları gevşetildi."
+
+### Day boundaries — zorunlu son gün
+
+`duration_days` verildiyse, SON izin verilen gün (`day_index == max_days-1`)
+ZORUNLUDUR — o güne kadar hâlâ kalan TÜM mekanlar, bütçeye sığsın sığmasın,
+o güne eklenir (`AddDisjunction` KULLANILMAZ) — mevcut "forced_last_day"
+davranışıyla birebir aynı, tek seferlik bir "sığmayan duraklar... eklendi"
+uyarısıyla. `duration_days` verilmediyse gün sayısı kendiliğinden türer —
+tüm mekanlar planlanana kadar (veya `len(places)` güvenlik sınırına
+ulaşılana kadar — pratikte hiç tetiklenmez) döngü devam eder.
 
 ### Overnight/edge-time limitation
 
-`_parse_opening_hours` (greedy'den import, DEĞİŞTİRİLMEDİ) gece-yarısını aşan
-pencereleri ("22:00-02:00" gibi) doğru ayrıştırmıyor — `open_minutes >
-close_minutes` gibi ters bir aralık döner. OR-Tools'a böyle bir aralığı
-`CumulVar.SetRange` ile doğrudan vermek çöker (ampirik olarak doğrulandı: "CP
-Solver fail" exception'ı). `_valid_hard_window` bu durumu tespit edip o TEK
-düğüm için sert kısıtı ATLAR (mekan kısıtsız kabul edilir) — bu bir düğümün
-kısıtını gevşetmek, `_solve_with_time_windows`'un TAMAMEN None dönmesinden
-farklıdır. Mevcut yumuşak son-işleme çakışma uyarısı (değişmedi) yine de bu
-mekan için tetiklenir, tıpkı greedy'de olduğu gibi — bu, "the current model"
-zaten desteklemediği bir durum, bu milestone'un kapsamı `_parse_opening_hours`'u
-düzeltmek değil (bkz. "Do not change GreedyDistanceStrategy").
+`_parse_opening_hours` (greedy'den import, DEĞİŞTİRİLMEDİ) gece-yarısını
+aşan pencereleri ("22:00-02:00" gibi) doğru ayrıştırmıyor. `_valid_hard_window`
+bu durumu tespit edip o mekan için sert kısıtı ATLAR — bu, her gün için
+ayrı ayrı geçerli, davranış önceki milestone'la aynı.
 
 ### Performance protection
 
-Sert-kısıtlı çözüm AYNI `SOLUTION_LIMIT`/`TIME_LIMIT_SECONDS` parametrelerini
-kullanır — dimension eklemek arama uzayını büyütür ama durdurma koşulunu
-DEĞİŞTİRMEZ. İmkansız bir durumda tek bir ek `_solve_distance_only` çağrısı
-yapılır (kendi, ayrı `TIME_LIMIT_SECONDS` sınırıyla) — bu yüzden en kötü
-durumda toplam solve süresi tek bir stratejinin `time_limit`'inin ~2 katını
-geçmez (10s), yine de kesin biçimde SINIRLI — hiçbir sınırsız/tekrarlı arama
-döngüsü yok. Gerçek gezi boyutlarında (bkz. test_large_place_set... ve yeni
-determinism/performance testleri) her iki çağrı da milisaniyeler-saniyeler
-içinde tamamlanır.
+Her günün solve'u AYNI `SOLUTION_LIMIT`/`TIME_LIMIT_SECONDS`'a tabi —
+gün-farkında döngü sınırsız aramaya YOL AÇMAZ, yalnızca AYNI sınırlı
+işlemi gün sayısı kadar tekrarlar. Gerçek gezi boyutlarında (bkz.
+Verification → Benchmark) toplam süre milisaniyeler-birkaç saniye arasında
+kalır; performans etkisi doğrudan ölçülüp docs/trip-optimizer.md'de
+belgelenmiştir.
 """
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
@@ -153,12 +207,10 @@ SOLUTION_LIMIT = 200
 TIME_LIMIT_SECONDS = 5
 DISTANCE_SCALE = 1000  # km -> metre (OR-Tools tamsayı kenar maliyeti ister)
 
-# ── Zaman dimension'ı ayarları (bkz. modül docstring "Hard opening-hours time windows") ──
-# 14 gün — herhangi bir gerçekçi durak sayısı için cömert bir üst sınır
-# (yüzlerce durak x saatlerce ziyaret bile bu sınırın çok altında kalır),
-# ama CP çözücü için ihmal edilebilir boyutta bir tamsayı alanı.
-HORIZON_MINUTES = 14 * 24 * 60
-NO_WINDOW_RANGE = (0, HORIZON_MINUTES)
+# Bir mekanı bir günden düşürmenin "maliyeti" (bkz. modül docstring "Day-aware
+# scheduling") — DISTANCE_SCALE birimlerinde (metre), gerçekçi HERHANGİ bir
+# günlük rota mesafesinden (binlerce km bile olsa) kat kat büyük.
+DISJUNCTION_PENALTY = 100_000_000
 
 
 def _valid_hard_window(place: PlaceInput) -> Optional[Tuple[int, int]]:
@@ -175,12 +227,22 @@ def _valid_hard_window(place: PlaceInput) -> Optional[Tuple[int, int]]:
     return open_m, close_m
 
 
+def _window_overlaps_day(window: Tuple[int, int], day_start: int, day_end: int) -> bool:
+    """Bir pencere `[day_start, day_end]` ile HİÇ örtüşmüyorsa (ör. mekan
+    günün tamamı kapandıktan sonra açılıyor) — bu HANGİ güne konursa konsun
+    asla karşılanamaz, çünkü her gün AYNI day_start/day_end'i paylaşır (bkz.
+    modül docstring "Impossible routes")."""
+    open_m, close_m = window
+    return not (close_m < day_start or open_m > day_end)
+
+
 def _solve_distance_only(places: List[PlaceInput]) -> List[PlaceInput]:
     """Saf mesafe-minimizasyonu açık-yol TSP'si — açılış saati kısıtı
-    UYGULANMAZ. Bir önceki milestone'daki `_solve_visit_order` ile birebir
-    aynı model/davranış (bkz. modül docstring "Neden yalnızca gerçek pencere
-    varken bu yola girilir") — açılış saati verisi olmayan (bugün üretimdeki
-    her durum) çağrılar için sıfır regresyon garantisi."""
+    UYGULANMAZ. Hem (a) hiçbir mekanda kullanılabilir açılış saati yokken
+    TEK geçişlik global sıralama için, hem de (b) day-aware döngüde bir
+    günün sert kısıtları eşzamanlı sağlanamadığında o günün gevşetilmiş
+    (mesafe-yalnızca) sıralaması için kullanılır — bkz. modül docstring
+    "Impossible routes"."""
     n = len(places)
     if n <= 2:
         return list(places)
@@ -227,17 +289,38 @@ def _solve_distance_only(places: List[PlaceInput]) -> List[PlaceInput]:
     return ordered
 
 
-def _solve_with_time_windows(
-    places: List[PlaceInput],
+def _solve_day(
+    remaining: List[PlaceInput],
     day_start: int,
-    hard_windows: Dict[int, Tuple[int, int]],
-) -> Optional[List[PlaceInput]]:
-    """`_solve_distance_only` ile aynı açık-yol mesafe modeli + bir "Time"
-    dimension — `hard_windows`'taki indeksler (places listesindeki konum)
-    kendi (open_minutes, close_minutes) aralığına SERTÇE kilitlenir, diğerleri
-    `NO_WINDOW_RANGE` (kısıtsız) alır. Eşzamanlı sağlanamıyorsa `None` döner
-    (bkz. modül docstring "Impossible routes")."""
-    n = len(places)
+    day_end: int,
+    mandatory: bool,
+    unconstrained_ids: Set[int],
+) -> Optional[Tuple[List[PlaceInput], List[PlaceInput]]]:
+    """Tek bir GÜNÜN açık-yol TSP + zaman-penceresi modelini çözer —
+    `_solve_distance_only` ile aynı temel model (sanal depo, 0-maliyetli
+    depo kenarları), ama "Time" dimension'ı BU GÜNE ÖZGÜ taze bir saatle
+    başlar: kapasite = `day_end - day_start`, `fix_start_cumul_to_zero=True`
+    ile 0 = bu günün `day_start`'ı (bkz. modül docstring "Day-aware
+    scheduling").
+
+    `mandatory=False` iken her mekan `AddDisjunction` ile OPSİYONELDİR
+    (büyük bir ceza karşılığında düşürülebilir) — solver'ın kendisi "bugüne
+    kim sığar" kararını verir. `mandatory=True` (zorunlu son gün) tüm
+    mekanlar ZORUNLUDUR — mevcut "forced_last_day" davranışıyla birebir
+    aynı, hiçbir yer düşmez.
+
+    `unconstrained_ids`: bu day_start/day_end ile HİÇBİR günde asla
+    karşılanamayacak (bkz. `_window_overlaps_day`) mekanların place_id'leri —
+    bunlar için sert kısıt hiç uygulanmaz.
+
+    Döner: (bugün ziyaret edilenler sırayla, yarına kalanlar) —
+    `mandatory=True` iken eşzamanlı sağlanamazsa `None`."""
+    n = len(remaining)
+    if n == 0:
+        return [], []
+
+    day_budget = day_end - day_start
+
     manager = pywrapcp.RoutingIndexManager(n + 1, 1, 0)
     routing = pywrapcp.RoutingModel(manager)
 
@@ -246,7 +329,7 @@ def _solve_with_time_windows(
         to_node = manager.IndexToNode(to_index)
         if from_node == 0 or to_node == 0:
             return 0
-        a, b = places[from_node - 1], places[to_node - 1]
+        a, b = remaining[from_node - 1], remaining[to_node - 1]
         return int(round(haversine_km(a.lat, a.lng, b.lat, b.lng) * DISTANCE_SCALE))
 
     transit_callback_index = routing.RegisterTransitCallback(distance_callback)
@@ -256,27 +339,48 @@ def _solve_with_time_windows(
         from_node = manager.IndexToNode(from_index)
         to_node = manager.IndexToNode(to_index)
         service = 0 if from_node == 0 else CATEGORY_VISIT_MINUTES.get(
-            places[from_node - 1].category, DEFAULT_VISIT_MINUTES
+            remaining[from_node - 1].category, DEFAULT_VISIT_MINUTES
         )
         if from_node == 0 or to_node == 0:
             travel = 0
         else:
-            a, b = places[from_node - 1], places[to_node - 1]
+            a, b = remaining[from_node - 1], remaining[to_node - 1]
             travel = int(round((haversine_km(a.lat, a.lng, b.lat, b.lng) / AVG_SPEED_KMH) * 60))
         return service + travel
 
-    time_callback_index = routing.RegisterTransitCallback(time_callback)
-    # slack_max == capacity == HORIZON_MINUTES: bir düğüme erken varıp
-    # açılışını "beklemek" serbestçe mümkün olmalı (bkz. modül docstring) —
-    # slack=0 bunu yasaklardı (varışı tam toplamda sabitler, bekleme yok).
-    routing.AddDimension(time_callback_index, HORIZON_MINUTES, HORIZON_MINUTES, False, "Time")
-    time_dimension = routing.GetDimensionOrDie("Time")
-    time_dimension.CumulVar(routing.Start(0)).SetRange(day_start, day_start)
+    # Dimension kapasitesi day_budget'a SIKI SIKIYA bağlı DEĞİL — bilerek
+    # cömert (bkz. aşağıdaki EXIT_CAP açıklaması). Her GERÇEK düğümün kendi
+    # CumulVar'ı (varış zamanı) ayrı ayrı [0, day_budget] veya sert pencereye
+    # sabitlenir; kapasite yalnızca bir üst güvenlik sınırı.
+    exit_cap = day_budget + max(CATEGORY_VISIT_MINUTES.values(), default=DEFAULT_VISIT_MINUTES) + DEFAULT_VISIT_MINUTES
 
-    for idx in range(n):
+    time_callback_index = routing.RegisterTransitCallback(time_callback)
+    routing.AddDimension(time_callback_index, exit_cap, exit_cap, True, "Time")
+    time_dimension = routing.GetDimensionOrDie("Time")
+
+    # EXIT (depoya dönüş) geçişi, en son ziyaret edilen düğümün KENDİ ziyaret
+    # süresini "üstlenir" (bkz. time_callback: from_node==gerçek düğümse
+    # service dahil edilir) — bu yüzden depo/EXIT'in kendi CumulVar'ı
+    # day_budget'a değil, cömert `exit_cap`'e bırakılmalı. Aksi halde, TEK
+    # başına bile day_budget'ı aşan bir ziyaret süresine sahip bir mekan
+    # (ör. günün TEK durağı) yapay biçimde infeasible görünür — mevcut
+    # "tek durak günü aşabilir" kuralının (bkz. GreedyDistanceStrategy'nin
+    # aynı davranışı) bu modeldeki karşılığı budur.
+    time_dimension.CumulVar(routing.End(0)).SetRange(0, exit_cap)
+
+    for idx, place in enumerate(remaining):
         node_index = manager.NodeToIndex(idx + 1)
-        open_m, close_m = hard_windows.get(idx, NO_WINDOW_RANGE)
-        time_dimension.CumulVar(node_index).SetRange(open_m, close_m)
+        window = None if place.place_id in unconstrained_ids else _valid_hard_window(place)
+        if window is not None:
+            open_m, close_m = window
+            rel_open = max(0, open_m - day_start)
+            rel_close = min(day_budget, close_m - day_start)
+            time_dimension.CumulVar(node_index).SetRange(rel_open, rel_close)
+        else:
+            time_dimension.CumulVar(node_index).SetRange(0, day_budget)
+
+        if not mandatory:
+            routing.AddDisjunction([node_index], DISJUNCTION_PENALTY)
 
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
     search_parameters.first_solution_strategy = (
@@ -292,39 +396,197 @@ def _solve_with_time_windows(
     if solution is None:
         return None
 
+    visited_positions: Set[int] = set()
     ordered: List[PlaceInput] = []
     index = routing.Start(0)
     while not routing.IsEnd(index):
         node = manager.IndexToNode(index)
         if node != 0:
-            ordered.append(places[node - 1])
+            pos = node - 1
+            ordered.append(remaining[pos])
+            visited_positions.add(pos)
         index = solution.Value(routing.NextVar(index))
-    return ordered
+
+    leftover = [p for pos, p in enumerate(remaining) if pos not in visited_positions]
+    return ordered, leftover
 
 
-def _solve_visit_order(places: List[PlaceInput], day_start: int) -> Tuple[List[PlaceInput], bool]:
-    """Sıralamayı çözer. İkinci eleman `hard_constraints_relaxed` — yalnızca
-    en az bir sert pencere varken VE eşzamanlı sağlanamadığında True (bkz.
-    modül docstring "Impossible routes"); bu durumda dönen sıra
-    `_solve_distance_only`'nin ürettiği, mesafe-yalnızca sıradır (hiçbir
-    durak kaybolmaz)."""
-    n = len(places)
-    if n <= 1:
-        return list(places), False
+def _solve_day_aware_schedule(
+    places: List[PlaceInput],
+    day_start: int,
+    day_end: int,
+    max_days: Optional[int],
+) -> Tuple[List[List[PlaceInput]], bool]:
+    """Açılış saatlerini GÜN-FARKINDA sert kısıt olarak uygulayan çok-günlü
+    çözücü döngüsü (bkz. modül docstring "Day-aware scheduling"). Her gün
+    `_solve_day` ile KENDİ taze [0, day_budget] saatiyle ayrı ayrı çözülür —
+    bu, tek-sürekli-zaman-çizelgesi kusurunu YAPISAL OLARAK ortadan kaldırır.
 
-    hard_windows = {
-        idx: window
-        for idx, place in enumerate(places)
-        if (window := _valid_hard_window(place)) is not None
-    }
-    if not hard_windows:
-        return _solve_distance_only(places), False
+    Döner: (day_groups, hard_constraints_relaxed). `day_groups[i]` i.
+    günün ziyaret sırasıdır (PlaceInput listesi). `hard_constraints_relaxed`
+    yalnızca en az bir mekanın penceresi hiçbir günde/gün-içi
+    karşılanamadığında True olur."""
+    day_budget = day_end - day_start
 
-    ordered = _solve_with_time_windows(places, day_start, hard_windows)
-    if ordered is not None:
-        return ordered, False
+    # Bu day_start/day_end ile HİÇBİR günde asla karşılanamayacak pencereler
+    # (her gün AYNI pencere tekrarlandığından — bkz. docs "Assumptions:
+    # opening hours are daily-only" — bugün karşılanamıyorsa yarın da
+    # karşılanamaz) baştan tespit edilip gevşetilir.
+    unconstrained_ids: Set[int] = set()
+    for place in places:
+        window = _valid_hard_window(place)
+        if window is not None and not _window_overlaps_day(window, day_start, day_end):
+            unconstrained_ids.add(place.place_id)
 
-    return _solve_distance_only(places), True
+    relaxed = bool(unconstrained_ids)
+
+    remaining = list(places)
+    day_groups: List[List[PlaceInput]] = []
+    max_iterations = max_days if max_days is not None else len(places)
+    day_index = 0
+
+    while remaining and day_index < max_iterations:
+        is_final = day_index == max_iterations - 1
+        result = _solve_day(remaining, day_start, day_end, mandatory=is_final, unconstrained_ids=unconstrained_ids)
+
+        if result is None:
+            # Yalnızca is_final=True iken olur (bkz. modül docstring
+            # "Impossible routes") — bu günün kalan mekanları eşzamanlı
+            # sağlanamadı. Sert kısıtsız (mesafe-yalnızca) çöz, kalan
+            # HERKESİ bu güne ekle — hiçbir mekan kaybolmaz.
+            visited, leftover = _solve_distance_only(remaining), []
+            relaxed = True
+        else:
+            visited, leftover = result
+            if not visited and remaining:
+                # Solver hiçbir mekanı dahil etmedi (hepsi opsiyonel olarak
+                # düşürüldü) — ilerleme sağlanamıyor, sıkışma önleme.
+                visited, leftover = _solve_distance_only(remaining), []
+                relaxed = True
+
+        day_groups.append(visited)
+        remaining = leftover
+        day_index += 1
+
+    if remaining:
+        # Güvenlik ağı — yukarıdaki dallar `remaining`'i hep tükettiği için
+        # pratikte hiç tetiklenmemeli, ama hiçbir mekanı asla kaybetmemek
+        # için: kalanları son bir ekstra güne zorla ekle.
+        day_groups.append(_solve_distance_only(remaining))
+        relaxed = True
+
+    return day_groups, relaxed
+
+
+def _walk_day_groups(
+    day_groups: List[List[PlaceInput]],
+    day_start: int,
+    day_end: int,
+    max_days: Optional[int],
+    start_date: Optional[str],
+) -> Tuple[List[OptimizedDay], List[str], float, float]:
+    """`day_groups` (zaten day-aware çözücü tarafından doğru günlere
+    bölünmüş) üzerinde TEK bir geçişte yürür — eski modelin "taşma tespit
+    et → günü kapat → aynı durağı yeniden dene" mantığına GEREK YOK, çünkü
+    gün sınırları zaten `_solve_day_aware_schedule` tarafından doğru
+    biçimde belirlendi. Bu da eski modeldeki "bayat varış" kusurunu
+    (bkz. modül docstring) yapısal olarak ortadan kaldırır: her durağın
+    açılış-saati kontrolü, o durağın GERÇEK (bu geçişte hesaplanan) varış
+    değeriyle, tam bir kez çalışır."""
+    days: List[OptimizedDay] = []
+    warnings: List[str] = []
+    missing_hours_names: List[str] = []
+    overflow_warned = False
+    total_distance = 0.0
+    total_travel_minutes = 0.0
+
+    flat: List[Tuple[int, PlaceInput]] = [
+        (day_idx, place) for day_idx, group in enumerate(day_groups) for place in group
+    ]
+    n = len(flat)
+    if n == 0:
+        return days, warnings, total_distance, total_travel_minutes
+
+    current_day_stops: List[OptimizedStop] = []
+    active_day_idx = flat[0][0]
+    current_time = day_start
+
+    for i, (day_idx, place) in enumerate(flat):
+        if day_idx != active_day_idx:
+            if current_day_stops:
+                days.append(OptimizedDay(
+                    day_index=active_day_idx,
+                    date=_date_for(start_date, active_day_idx),
+                    stops=current_day_stops,
+                ))
+            current_day_stops = []
+            active_day_idx = day_idx
+            current_time = day_start
+
+        arrival = current_time
+        open_close = _parse_opening_hours(place.opening_hours)
+        if open_close is None:
+            if place.opening_hours is None:
+                missing_hours_names.append(place.name)
+        else:
+            open_m, close_m = open_close
+            if arrival < open_m:
+                arrival = open_m  # açılışı bekle — sessizce
+            if arrival >= close_m:
+                warnings.append(
+                    f"{place.name}: planlanan varış saati belirtilen çalışma saatleriyle çakışıyor"
+                )
+
+        visit_minutes = CATEGORY_VISIT_MINUTES.get(place.category, DEFAULT_VISIT_MINUTES)
+        departure = arrival + visit_minutes
+
+        forced_last_day = max_days is not None and day_idx >= max_days - 1
+        if forced_last_day and departure > day_end and not overflow_warned:
+            warnings.append(
+                "İstenen gün sayısına sığmayan duraklar son güne eklendi (zaman bütçesi aşıldı)."
+            )
+            overflow_warned = True
+
+        stop = OptimizedStop(
+            place_id=place.place_id, name=place.name, lat=place.lat, lng=place.lng,
+            day_index=day_idx, order_index=len(current_day_stops),
+            arrival_time=_format_minutes(arrival), departure_time=_format_minutes(departure),
+            visit_duration_minutes=visit_minutes,
+        )
+        current_day_stops.append(stop)
+        current_time = departure
+
+        if i + 1 < n:
+            next_day_idx, nxt = flat[i + 1]
+            dist = haversine_km(place.lat, place.lng, nxt.lat, nxt.lng)
+            travel_minutes = (dist / AVG_SPEED_KMH) * 60
+            stop.travel_distance_to_next_km = round(dist, 2)
+            stop.travel_time_to_next_minutes = round(travel_minutes, 1)
+            total_distance += dist
+            total_travel_minutes += travel_minutes
+            if dist >= LONG_SEGMENT_KM_THRESHOLD:
+                warnings.append(
+                    f"{place.name} → {nxt.name}: uzun bir seyahat segmenti ({round(dist)} km)"
+                )
+            if next_day_idx == day_idx:
+                current_time += travel_minutes
+            # farklı günse: current_time bir sonraki iterasyonun başında
+            # zaten day_start'a resetlenecek.
+
+    if current_day_stops:
+        days.append(OptimizedDay(
+            day_index=active_day_idx,
+            date=_date_for(start_date, active_day_idx),
+            stops=current_day_stops,
+        ))
+
+    if missing_hours_names:
+        warnings.append(
+            f"Açılış saatleri bilinmiyor: {len(missing_hours_names)} mekan için "
+            "program bu kısıt dikkate alınmadan oluşturuldu."
+        )
+
+    return days, warnings, total_distance, total_travel_minutes
 
 
 class ORToolsRouteOptimizationStrategy(RouteOptimizationStrategy):
@@ -354,110 +616,119 @@ class ORToolsRouteOptimizationStrategy(RouteOptimizationStrategy):
 
         max_days = constraints.duration_days if (constraints.duration_days and constraints.duration_days >= 1) else None
 
-        ordered, hard_constraints_relaxed = _solve_visit_order(places, day_start)
-        n = len(ordered)
+        has_hard_windows = any(_valid_hard_window(p) is not None for p in places)
 
-        # ── Cluster-second: GreedyDistanceStrategy.optimize ile aynı gün-
-        # bölme/zamanlama kontrol akışı (bkz. modül docstring) — bilerek
-        # yeniden yazıldı, import edilmedi.
-        days: List[OptimizedDay] = []
-        warnings: List[str] = []
-        missing_hours_names: List[str] = []
-        overflow_warned = False
-
-        if hard_constraints_relaxed:
-            # bkz. modül docstring "Impossible routes" — en az iki açılış
-            # saati kısıtı eşzamanlı sağlanamadı, mesafe-yalnızca sıraya
-            # düşüldü. Aşağıdaki döngü yine de hangi mekan(lar)ın çakıştığını
-            # tek tek işaretleyecek (mevcut, değişmemiş yumuşak kontrol).
-            warnings.append(
-                "Bazı mekanların açılış saatleri birbiriyle uyumsuz olduğu için "
-                "sabit zaman kısıtları gevşetildi; rota yalnızca mesafeye göre "
-                "sıralandı."
+        if has_hard_windows:
+            # ── Day-aware yol (bkz. modül docstring "Day-aware scheduling") ──
+            day_groups, hard_constraints_relaxed = _solve_day_aware_schedule(
+                places, day_start, day_end, max_days
             )
-
-        day_index = 0
-        current_time = day_start
-        current_day_stops: List[OptimizedStop] = []
-        total_distance = 0.0
-        total_travel_minutes = 0.0
-
-        def flush_day() -> None:
-            nonlocal day_index, current_time, current_day_stops
-            if current_day_stops:
-                days.append(OptimizedDay(
-                    day_index=day_index,
-                    date=_date_for(constraints.start_date, day_index),
-                    stops=current_day_stops,
-                ))
-                day_index += 1
-            current_day_stops = []
-            current_time = day_start
-
-        i = 0
-        while i < n:
-            place = ordered[i]
-            forced_last_day = max_days is not None and day_index >= max_days - 1
-            arrival = current_time
-
-            open_close = _parse_opening_hours(place.opening_hours)
-            if open_close is None:
-                if place.opening_hours is None:
-                    missing_hours_names.append(place.name)
-            else:
-                open_m, close_m = open_close
-                if arrival < open_m:
-                    arrival = open_m  # açılışı bekle — sessizce
-                if arrival >= close_m:
-                    warnings.append(
-                        f"{place.name}: planlanan varış saati belirtilen çalışma saatleriyle çakışıyor"
-                    )
-
-            visit_minutes = CATEGORY_VISIT_MINUTES.get(place.category, DEFAULT_VISIT_MINUTES)
-            departure = arrival + visit_minutes
-
-            if current_day_stops and not forced_last_day and departure > day_end:
-                flush_day()
-                continue  # aynı durağı temiz bir günde yeniden dene
-
-            if forced_last_day and departure > day_end and not overflow_warned:
-                warnings.append(
-                    "İstenen gün sayısına sığmayan duraklar son güne eklendi (zaman bütçesi aşıldı)."
+            days, warnings, total_distance, total_travel_minutes = _walk_day_groups(
+                day_groups, day_start, day_end, max_days, constraints.start_date
+            )
+            if hard_constraints_relaxed:
+                warnings.insert(
+                    0,
+                    "Bazı mekanların açılış saatleri birbiriyle uyumsuz olduğu için "
+                    "sabit zaman kısıtları gevşetildi; rota yalnızca mesafeye göre "
+                    "sıralandı."
                 )
-                overflow_warned = True
+            n = sum(len(g) for g in day_groups)
 
-            stop = OptimizedStop(
-                place_id=place.place_id, name=place.name, lat=place.lat, lng=place.lng,
-                day_index=day_index, order_index=len(current_day_stops),
-                arrival_time=_format_minutes(arrival), departure_time=_format_minutes(departure),
-                visit_duration_minutes=visit_minutes,
-            )
-            current_day_stops.append(stop)
-            current_time = departure
+        else:
+            # ── Sert pencere yok: önceki milestone'un modeliyle BİREBİR
+            # AYNI, DEĞİŞTİRİLMEMİŞ tek-geçişlik yol — sıfır davranış
+            # değişikliği (bkz. modül docstring "Day-aware scheduling").
+            ordered = _solve_distance_only(places)
+            n = len(ordered)
 
-            if i + 1 < n:
-                nxt = ordered[i + 1]
-                dist = haversine_km(place.lat, place.lng, nxt.lat, nxt.lng)
-                travel_minutes = (dist / AVG_SPEED_KMH) * 60
-                stop.travel_distance_to_next_km = round(dist, 2)
-                stop.travel_time_to_next_minutes = round(travel_minutes, 1)
-                total_distance += dist
-                total_travel_minutes += travel_minutes
-                if dist >= LONG_SEGMENT_KM_THRESHOLD:
+            days: List[OptimizedDay] = []
+            warnings: List[str] = []
+            missing_hours_names: List[str] = []
+            overflow_warned = False
+
+            day_index = 0
+            current_time = day_start
+            current_day_stops: List[OptimizedStop] = []
+            total_distance = 0.0
+            total_travel_minutes = 0.0
+
+            def flush_day() -> None:
+                nonlocal day_index, current_time, current_day_stops
+                if current_day_stops:
+                    days.append(OptimizedDay(
+                        day_index=day_index,
+                        date=_date_for(constraints.start_date, day_index),
+                        stops=current_day_stops,
+                    ))
+                    day_index += 1
+                current_day_stops = []
+                current_time = day_start
+
+            i = 0
+            while i < n:
+                place = ordered[i]
+                forced_last_day = max_days is not None and day_index >= max_days - 1
+                arrival = current_time
+
+                open_close = _parse_opening_hours(place.opening_hours)
+                if open_close is None:
+                    if place.opening_hours is None:
+                        missing_hours_names.append(place.name)
+                else:
+                    open_m, close_m = open_close
+                    if arrival < open_m:
+                        arrival = open_m  # açılışı bekle — sessizce
+                    if arrival >= close_m:
+                        warnings.append(
+                            f"{place.name}: planlanan varış saati belirtilen çalışma saatleriyle çakışıyor"
+                        )
+
+                visit_minutes = CATEGORY_VISIT_MINUTES.get(place.category, DEFAULT_VISIT_MINUTES)
+                departure = arrival + visit_minutes
+
+                if current_day_stops and not forced_last_day and departure > day_end:
+                    flush_day()
+                    continue  # aynı durağı temiz bir günde yeniden dene
+
+                if forced_last_day and departure > day_end and not overflow_warned:
                     warnings.append(
-                        f"{place.name} → {nxt.name}: uzun bir seyahat segmenti ({round(dist)} km)"
+                        "İstenen gün sayısına sığmayan duraklar son güne eklendi (zaman bütçesi aşıldı)."
                     )
-                current_time += travel_minutes
+                    overflow_warned = True
 
-            i += 1
+                stop = OptimizedStop(
+                    place_id=place.place_id, name=place.name, lat=place.lat, lng=place.lng,
+                    day_index=day_index, order_index=len(current_day_stops),
+                    arrival_time=_format_minutes(arrival), departure_time=_format_minutes(departure),
+                    visit_duration_minutes=visit_minutes,
+                )
+                current_day_stops.append(stop)
+                current_time = departure
 
-        flush_day()
+                if i + 1 < n:
+                    nxt = ordered[i + 1]
+                    dist = haversine_km(place.lat, place.lng, nxt.lat, nxt.lng)
+                    travel_minutes = (dist / AVG_SPEED_KMH) * 60
+                    stop.travel_distance_to_next_km = round(dist, 2)
+                    stop.travel_time_to_next_minutes = round(travel_minutes, 1)
+                    total_distance += dist
+                    total_travel_minutes += travel_minutes
+                    if dist >= LONG_SEGMENT_KM_THRESHOLD:
+                        warnings.append(
+                            f"{place.name} → {nxt.name}: uzun bir seyahat segmenti ({round(dist)} km)"
+                        )
+                    current_time += travel_minutes
 
-        if missing_hours_names:
-            warnings.append(
-                f"Açılış saatleri bilinmiyor: {len(missing_hours_names)} mekan için "
-                "program bu kısıt dikkate alınmadan oluşturuldu."
-            )
+                i += 1
+
+            flush_day()
+
+            if missing_hours_names:
+                warnings.append(
+                    f"Açılış saatleri bilinmiyor: {len(missing_hours_names)} mekan için "
+                    "program bu kısıt dikkate alınmadan oluşturuldu."
+                )
 
         avg_km = (total_distance / (n - 1)) if n > 1 else 0.0
         travel_penalty = min(40.0, avg_km * 2)
