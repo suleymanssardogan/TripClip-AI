@@ -11,17 +11,21 @@ from sqlalchemy.orm import Session
 from app.domain.repositories.optimization_repository import AbstractOptimizationRepository
 from app.domain.optimization.models import PlaceInput, OptimizationResult
 from app.models.trip import Trip
+from app.models.trip_stop import TripStop
 from app.models.trip_collaborator import TripCollaborator
 from app.models.place import Place
 from app.models.place_save import PlaceSave
 from app.models.trip_itinerary import TripItinerary
 from app.models.trip_itinerary_stop import TripItineraryStop
+from app.core.analytics_events import AnalyticsEvent
+from app.application.services.analytics_service import AnalyticsService, get_analytics_service
 
 
 class SqlOptimizationRepository(AbstractOptimizationRepository):
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, analytics: Optional[AnalyticsService] = None):
         self._db = db
+        self._analytics = analytics or get_analytics_service()
 
     # ── Erişim ────────────────────────────────────────────────────────────────
     # SqlTripRepository.resolve_access ile bilinçli olarak aynı sorgu şekli —
@@ -200,3 +204,101 @@ class SqlOptimizationRepository(AbstractOptimizationRepository):
             }
             for it in rows
         ]
+
+    # ── Apply: TripItinerary → kanonik TripStop (REPLACE) ───────────────────
+    #
+    # bkz. docs/trip-optimizer.md "Apply semantics" — update_stop_order ile
+    # AYNI transactional "sil + yeniden ekle" deseni, kaynak yalnızca farklı
+    # (client payload'ı değil, kayıtlı TripItineraryStop satırları). Tüm
+    # doğrulama, HİÇBİR yazma işlemi başlamadan önce, zaten commit edilmiş
+    # durum üzerinden tamamlanır — atomiklik bu sıralamadan gelir: ya tüm
+    # kontroller geçer ve tek bir commit ile tüm değişiklikler yazılır, ya da
+    # bir kontrol başarısız olur ve HİÇBİR satır dokunulmamış kalır.
+
+    def apply_itinerary(self, itinerary_id: int, user_id: int) -> Dict[str, Any]:
+        itinerary = self._db.query(TripItinerary).filter(TripItinerary.id == itinerary_id).first()
+        if itinerary is None:
+            return {"status": "not_found"}
+
+        # Anti-enumeration: get_itinerary ile aynı ilke — itinerary'nin bağlı
+        # olduğu trip'e hiç erişimi olmayan biri için "yok" ile "yasak"
+        # ayrımı sızdırılmaz.
+        access = self.resolve_access(itinerary.trip_id, user_id)
+        if access is None:
+            return {"status": "not_found"}
+        if access not in ("owner", "editor"):
+            return {"status": "forbidden"}
+
+        trip = self._db.query(Trip).filter(Trip.id == itinerary.trip_id).first()
+        if trip is None:
+            # Pratikte olamaz (trip_itineraries.trip_id ON DELETE CASCADE ile
+            # trips'e bağlı — trip silinirse itinerary de gider) ama
+            # resolve_access zaten trip üzerinden çalıştığı için savunmacı.
+            return {"status": "not_found"}
+
+        stop_rows = (
+            self._db.query(TripItineraryStop, Place)
+            .outerjoin(Place, Place.id == TripItineraryStop.place_id)
+            .filter(TripItineraryStop.itinerary_id == itinerary_id)
+            .order_by(TripItineraryStop.day_index.asc(), TripItineraryStop.order_index.asc())
+            .all()
+        )
+        if not stop_rows:
+            return {"status": "empty"}
+
+        # `place` (JOIN sonucu) kontrol edilir, `stop.place_id` (ham FK
+        # kolonu) DEĞİL — ikisi teorik olarak aynı olmalı (Place silinince
+        # ondelete=SET NULL ile stop.place_id de null olur) ama bu, DB'nin
+        # FK enforcement'ı gerçekten açık olmasına bağlı (SQLite'ta testler
+        # sırasında bu VARSAYIM tuttu, ama JOIN sonucunu kontrol etmek her
+        # koşulda doğru olan tek şey: "bu Place şu an gerçekten var mı".
+        # İlk sürüm stop.place_id'ye güvenmişti ve tam bu yüzden AttributeError
+        # ile patladı — bu test SQLite'ta gerçek FK cascade'i tetiklemedi.
+        if any(place is None for _, place in stop_rows):
+            return {"status": "invalid_places"}
+
+        place_ids = [place.id for _, place in stop_rows]
+        if len(place_ids) != len(set(place_ids)):
+            return {"status": "duplicate_places"}
+
+        now = datetime.utcnow()
+
+        # ── Mutasyon: doğrulama tamamen bitti, buradan sonrası tek commit'e kadar geri dönüşsüz değil (rollback edilebilir) ──
+        self._db.query(TripStop).filter(TripStop.trip_id == trip.id).delete()
+        for stop, place in stop_rows:
+            self._db.add(TripStop(
+                trip_id=trip.id, place_id=place.id,
+                day_index=stop.day_index, order_index=stop.order_index,
+            ))
+        trip.applied_itinerary_id = itinerary.id
+        trip.itinerary_applied_at = now
+        self._db.commit()
+
+        # Best-effort — apply zaten commit edildi, analytics yazımı başarısız
+        # olsa bile kullanıcıya hata dönmemeli (AnalyticsService.track kendi
+        # içinde asla fırlatmaz, bkz. o modülün docstring'i).
+        self._analytics.track(
+            event=AnalyticsEvent.SHARED_TRIP_ITINERARY_APPLIED,
+            trip_id=trip.id,
+            platform="server",
+            user_id=user_id,
+            source="itinerary_apply",
+            kind="trip",
+            metadata={"itinerary_id": itinerary.id, "stops_count": len(stop_rows)},
+        )
+
+        return {
+            "status": "ok",
+            "trip_id": trip.id,
+            "itinerary_id": itinerary.id,
+            "stops": [
+                {
+                    "place_id": place.id, "name": place.name, "lat": place.lat, "lng": place.lng,
+                    "city": place.city, "category": place.category,
+                    "day_index": stop.day_index, "order_index": stop.order_index,
+                }
+                for stop, place in stop_rows
+            ],
+            "stops_count": len(stop_rows),
+            "applied_at": now.isoformat(),
+        }

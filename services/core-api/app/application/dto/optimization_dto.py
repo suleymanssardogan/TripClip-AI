@@ -4,6 +4,8 @@ Trip Optimizer DTO'ları — API request/response şemaları.
 from pydantic import BaseModel
 from typing import Optional, List
 
+from app.application.dto.trip_dto import TripStopDTO
+
 
 class OptimizeTripRequest(BaseModel):
     selected_place_ids: List[int]
@@ -62,3 +64,15 @@ class ItinerarySummaryResponse(BaseModel):
 
 class ItineraryListResponse(BaseModel):
     itineraries: List[ItinerarySummaryResponse]
+
+
+class ApplyItineraryResponse(BaseModel):
+    """bkz. docs/trip-optimizer.md 'Apply semantics'. `stops`, TripStopDTO'yu
+    aynen kullanır — TripDetailResponse'ın kendi durak şekliyle bire bir
+    aynı, bu yüzden REPLACE'in gerçekten ne yazdığını doğrulamak için ek bir
+    dönüşüm gerekmez."""
+    trip_id: int
+    itinerary_id: int
+    stops: List[TripStopDTO]
+    stops_count: int
+    applied_at: str

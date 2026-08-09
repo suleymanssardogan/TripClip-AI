@@ -131,6 +131,8 @@ class SqlTripRepository(AbstractTripRepository):
             "stops_count": len(rows),
             "owner_id": trip.user_id,
             "your_role": access,
+            "applied_itinerary_id": trip.applied_itinerary_id,
+            "itinerary_applied_at": trip.itinerary_applied_at.isoformat() if trip.itinerary_applied_at else None,
         }
 
     def list_trips(self, user_id: int) -> List[Dict[str, Any]]:

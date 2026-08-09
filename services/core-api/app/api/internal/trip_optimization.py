@@ -12,6 +12,7 @@ from app.application.dto.optimization_dto import (
     OptimizeTripRequest,
     OptimizeTripResponse,
     ItineraryListResponse,
+    ApplyItineraryResponse,
 )
 from app.infrastructure.repositories.sql_optimization_repository import SqlOptimizationRepository
 
@@ -62,3 +63,19 @@ def get_itinerary(
 ):
     user_id = _require_user(x_user_id)
     return service.get_itinerary(itinerary_id, user_id)
+
+
+@router.post("/internal/itineraries/{itinerary_id}/apply", response_model=ApplyItineraryResponse)
+def apply_itinerary(
+    itinerary_id: int,
+    service: OptimizationService = Depends(get_optimization_service),
+    x_user_id: Optional[int] = Header(default=None),
+):
+    """
+    Kayıtlı bir itinerary'i, Trip'in kanonik TripStop listesine uygular
+    (REPLACE — bkz. docs/trip-optimizer.md "Apply semantics"). Trip Builder'ı
+    ilk kez kasıtlı olarak mutasyona uğratan optimizer işlemi; TripItinerary'nin
+    kendisi hiçbir zaman değişmez, aynı itinerary güvenle tekrar uygulanabilir.
+    """
+    user_id = _require_user(x_user_id)
+    return service.apply_itinerary(itinerary_id, user_id)

@@ -51,3 +51,16 @@ class AbstractOptimizationRepository(ABC):
     def list_itineraries(self, trip_id: int, user_id: int) -> Optional[List[Dict[str, Any]]]:
         """Trip yoksa ya da erişim yoksa None; aksi halde en yeniden eskiye özet liste."""
         ...
+
+    @abstractmethod
+    def apply_itinerary(self, itinerary_id: int, user_id: int) -> Dict[str, Any]:
+        """
+        Kayıtlı bir itinerary'i Trip'in kanonik TripStop listesine uygular
+        (REPLACE semantiği — bkz. docs/trip-optimizer.md "Apply semantics").
+        TripItinerary/TripItineraryStop'a ASLA yazmaz, yalnızca okur — aynı
+        itinerary güvenle tekrar tekrar uygulanabilir.
+
+        Döner: {"status": "ok", ...} ya da
+        {"status": "not_found" | "forbidden" | "empty" | "invalid_places" | "duplicate_places"}.
+        """
+        ...

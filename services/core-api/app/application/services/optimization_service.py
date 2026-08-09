@@ -15,6 +15,7 @@ from app.application.dto.optimization_dto import (
     OptimizeTripResponse,
     ItineraryListResponse,
     ItinerarySummaryResponse,
+    ApplyItineraryResponse,
 )
 from app.infrastructure.optimization.strategy_registry import get_strategy, available_strategies
 from app.core.exceptions import (
@@ -137,3 +138,37 @@ class OptimizationService:
         if data is None:
             raise ItineraryNotFoundException(itinerary_id)
         return OptimizeTripResponse(**data)
+
+    def apply_itinerary(self, itinerary_id: int, user_id: int) -> ApplyItineraryResponse:
+        """bkz. docs/trip-optimizer.md 'Apply semantics' — REPLACE, atomik,
+        TripItinerary/TripItineraryStop hiçbir zaman değişmez."""
+        result = self._repo.apply_itinerary(itinerary_id, user_id)
+        status = result["status"]
+
+        if status == "not_found":
+            raise ItineraryNotFoundException(itinerary_id)
+        if status == "forbidden":
+            raise PermissionDeniedException(
+                "Bu geziyi düzenleme yetkiniz yok — yalnızca sahibi ve editörler itinerary uygulayabilir."
+            )
+        if status == "empty":
+            raise InvalidOptimizationRequestException("Bu itinerary hiçbir durak içermiyor, uygulanamaz.")
+        if status == "invalid_places":
+            raise InvalidOptimizationRequestException(
+                "Bu itinerary artık var olmayan (silinmiş) mekanlar içeriyor, uygulanamaz."
+            )
+        if status == "duplicate_places":
+            raise InvalidOptimizationRequestException("Bu itinerary tekrarlı mekanlar içeriyor, uygulanamaz.")
+
+        # Pydantic, list[TripStopDTO] alanı için ham dict listesini otomatik
+        # coerce eder — get_itinerary'nin **data ile days'i inşa etmesiyle
+        # aynı desen, tek tek TripStopDTO(...) sarmalamaya gerek yok. Alanlar
+        # tek tek geçiriliyor (result["status"] burada bilerek dışarıda
+        # bırakılıyor — ApplyItineraryResponse'ta karşılığı yok).
+        return ApplyItineraryResponse(
+            trip_id=result["trip_id"],
+            itinerary_id=result["itinerary_id"],
+            stops=result["stops"],
+            stops_count=result["stops_count"],
+            applied_at=result["applied_at"],
+        )

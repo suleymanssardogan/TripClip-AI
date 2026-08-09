@@ -38,6 +38,11 @@ class TripDetailResponse(BaseModel):
     # rolü. İstemci bunu düzenleme/silme kontrollerini göstermek/gizlemek için
     # kullanır (sunucu zaten her isteği ayrıca doğruluyor, bu yalnızca UI ipucu).
     your_role: str
+    # Hangi TripItinerary'nin en son uygulandığı — bkz. docs/trip-optimizer.md
+    # "Apply semantics" / "Optimizer Provenance". İkisi de hiç apply
+    # yapılmadıysa None.
+    applied_itinerary_id: Optional[int] = None
+    itinerary_applied_at: Optional[str] = None
 
 
 class TripSummaryResponse(BaseModel):

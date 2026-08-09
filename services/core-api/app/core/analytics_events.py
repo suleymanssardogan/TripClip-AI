@@ -14,6 +14,15 @@ Her event burada tanımlı olsa da hepsi bir tetikleyiciye bağlı değildir.
 için henüz karşılık gelen bir event YOK — `accept_by_token` hiçbir analytics
 çağrısı yapmıyor; "davet kabul edildi" büyüme sinyali bugün gözlemlenemiyor
 (bkz. docs/shared-trip-analytics.md).
+
+`shared_trip_itinerary_applied` (`kind="trip"`), `SqlOptimizationRepository.
+apply_itinerary`'den tetiklenir — bir kayıtlı optimizer sonucunun Trip'in
+kanonik TripStop'una yazıldığı an (bkz. docs/trip-optimizer.md "Apply
+semantics"). Taksonomideki hiçbir mevcut event bunu karşılamıyor:
+INVITE_SENT/DECLINED/EXPIRED collaboration akışıyla ilgili, CREATED/DELETED
+Video/Plan (kind="video") kind'inde ve tamamen farklı bir yaşam döngüsü
+adımını temsil ediyor — "bir itinerary Trip'e uygulandı" hiçbirinin
+yeniden yorumlanmış hali değil, gerçekten yeni bir eylem.
 """
 from enum import Enum
 
@@ -28,6 +37,7 @@ class AnalyticsEvent(str, Enum):
     SHARED_TRIP_DECLINED            = "shared_trip_declined"
     SHARED_TRIP_EXPIRED             = "shared_trip_expired"
     SHARED_TRIP_DELETED             = "shared_trip_deleted"
+    SHARED_TRIP_ITINERARY_APPLIED   = "shared_trip_itinerary_applied"
 
 
 # İstemcinin (web/iOS) doğrudan beacon endpoint'i üzerinden gönderebileceği
@@ -36,7 +46,10 @@ class AnalyticsEvent(str, Enum):
 # edilirse herkes var olmayan bir "trip" için sahte olay üretebilirdi.
 # INVITE_SENT/DECLINED/EXPIRED de dışarıda: bunlar da sunucu tarafından
 # (SqlSharingRepository) tetiklenir — istemcinin doğrudan tetikleyebileceği
-# bir kullanıcı eylemi değiller.
+# bir kullanıcı eylemi değiller. ITINERARY_APPLIED de aynı gerekçeyle
+# dışarıda: apply, sunucunun kendi TripStop mutasyonunun bir sonucu —
+# istemciden kabul edilirse gerçekleşmemiş bir "apply" sahte biçimde
+# raporlanabilirdi.
 CLIENT_FIREABLE_EVENTS = frozenset({
     AnalyticsEvent.SHARED_TRIP_LINK_COPIED,
     AnalyticsEvent.SHARED_TRIP_SHARE_SHEET_OPENED,

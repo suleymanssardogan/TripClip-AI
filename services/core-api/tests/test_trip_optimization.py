@@ -1,8 +1,9 @@
 """
 Trip Optimizer entegrasyon testleri: uçtan uca API (optimize → persist →
-list/get), yetkilendirme, ve request-hijyeni (dedup/validasyon) senaryoları.
+list/get/apply), yetkilendirme, ve request-hijyeni (dedup/validasyon) senaryoları.
 """
 import uuid
+from unittest import mock
 
 from conftest import TestingSessionLocal
 
@@ -75,6 +76,59 @@ def _setup_trip_with_places(client, headers, n: int = 2) -> tuple[int, list[int]
     place_ids = _library_place_ids(client, headers)
     trip_id = _make_trip(client, headers, place_ids)
     return trip_id, place_ids
+
+
+def _trip_stops_db(trip_id: int) -> list[tuple[int, int, int]]:
+    """(place_id, day_index, order_index) — DB'den doğrudan, API'den değil."""
+    from app.models.trip_stop import TripStop
+
+    db = TestingSessionLocal()
+    try:
+        rows = db.query(TripStop).filter(TripStop.trip_id == trip_id).order_by(TripStop.order_index).all()
+        return [(r.place_id, r.day_index, r.order_index) for r in rows]
+    finally:
+        db.close()
+
+
+def _make_raw_itinerary(trip_id: int, stops: list[dict]) -> int:
+    """optimize_trip API'sinin normalde önlediği durumları (boş/tekrarlı
+    place_id) test edebilmek için TripItinerary/TripItineraryStop'u doğrudan
+    DB'ye yazar — optimizer'ın kendi dedup/validasyonunu bilerek atlar."""
+    from app.models.trip_itinerary import TripItinerary
+    from app.models.trip_itinerary_stop import TripItineraryStop
+
+    db = TestingSessionLocal()
+    try:
+        itinerary = TripItinerary(
+            trip_id=trip_id, strategy_name="greedy_distance",
+            optimization_score=90.0, total_distance_km=1.0, total_travel_time_minutes=5.0,
+            warnings=[],
+        )
+        db.add(itinerary)
+        db.flush()
+        for s in stops:
+            db.add(TripItineraryStop(
+                itinerary_id=itinerary.id,
+                place_id=s.get("place_id"),
+                day_index=s.get("day_index", 0),
+                order_index=s.get("order_index", 0),
+                visit_duration_minutes=s.get("visit_duration_minutes", 60),
+            ))
+        db.commit()
+        return itinerary.id
+    finally:
+        db.close()
+
+
+def _delete_place_db(place_id: int) -> None:
+    from app.models.place import Place
+
+    db = TestingSessionLocal()
+    try:
+        db.query(Place).filter(Place.id == place_id).delete()
+        db.commit()
+    finally:
+        db.close()
 
 
 # ─── Happy path ───────────────────────────────────────────────────────────────
@@ -408,3 +462,211 @@ def test_list_itineraries_requires_trip_access(client, bff_headers):
 
     resp = client.get(f"/internal/trips/{trip_id}/itineraries", headers=outsider_headers)
     assert resp.status_code == 404
+
+
+# ─── apply_itinerary ────────────────────────────────────────────────────────
+
+def test_apply_itinerary_happy_path_replaces_trip_stops(client, bff_headers):
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=3)
+    itinerary = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids}, headers=bff_headers,
+    ).json()
+
+    before = _trip_stops_db(trip_id)
+    assert len(before) == 3  # create_trip zaten TripStop'ları doldurdu
+
+    resp = client.post(f"/internal/itineraries/{itinerary['id']}/apply", headers=bff_headers)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["trip_id"] == trip_id
+    assert data["itinerary_id"] == itinerary["id"]
+    assert data["stops_count"] == 3
+    assert len(data["stops"]) == 3
+    assert "applied_at" in data
+
+    after = _trip_stops_db(trip_id)
+    assert len(after) == 3
+    # Uygulanan itinerary'nin sırası TripStop'a birebir yansımalı.
+    itinerary_order = [s["place_id"] for day in itinerary["days"] for s in day["stops"]]
+    assert [pid for pid, _, _ in after] == itinerary_order
+
+
+def test_apply_itinerary_editor_can_apply(client, bff_headers):
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=1)
+    itinerary_id = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids}, headers=bff_headers,
+    ).json()["id"]
+
+    _, editor_headers = _second_user(client)
+    share = client.post(
+        f"/internal/trips/{trip_id}/shares", json={"role": "editor"}, headers=bff_headers,
+    ).json()
+    client.post("/internal/shares/accept", json={"token": share["token"]}, headers=editor_headers)
+
+    resp = client.post(f"/internal/itineraries/{itinerary_id}/apply", headers=editor_headers)
+    assert resp.status_code == 200
+
+
+def test_apply_itinerary_viewer_forbidden(client, bff_headers):
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=1)
+    itinerary_id = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids}, headers=bff_headers,
+    ).json()["id"]
+
+    _, viewer_headers = _second_user(client)
+    share = client.post(
+        f"/internal/trips/{trip_id}/shares", json={"role": "viewer"}, headers=bff_headers,
+    ).json()
+    client.post("/internal/shares/accept", json={"token": share["token"]}, headers=viewer_headers)
+
+    resp = client.post(f"/internal/itineraries/{itinerary_id}/apply", headers=viewer_headers)
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "PERMISSION_DENIED"
+
+
+def test_apply_itinerary_cross_user_rejected(client, bff_headers):
+    """Trip'e HİÇBİR bağlantısı olmayan biri — anti-enumeration: 404, 403 değil."""
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=1)
+    itinerary_id = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids}, headers=bff_headers,
+    ).json()["id"]
+
+    _, outsider_headers = _second_user(client)
+    resp = client.post(f"/internal/itineraries/{itinerary_id}/apply", headers=outsider_headers)
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "ITINERARY_NOT_FOUND"
+
+
+def test_apply_nonexistent_itinerary_404(client, bff_headers):
+    resp = client.post("/internal/itineraries/999999/apply", headers=bff_headers)
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "ITINERARY_NOT_FOUND"
+
+
+def test_apply_itinerary_requires_auth(client):
+    resp = client.post("/internal/itineraries/1/apply")
+    assert resp.status_code == 401
+
+
+def test_apply_itinerary_with_deleted_place_rejected(client, bff_headers):
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=2)
+    itinerary_id = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids}, headers=bff_headers,
+    ).json()["id"]
+
+    _delete_place_db(place_ids[0])  # ondelete=SET NULL -> TripItineraryStop.place_id NULL olur
+
+    resp = client.post(f"/internal/itineraries/{itinerary_id}/apply", headers=bff_headers)
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "INVALID_OPTIMIZATION_REQUEST"
+
+
+def test_apply_itinerary_empty_rejected(client, bff_headers):
+    trip_id, _ = _setup_trip_with_places(client, bff_headers, n=1)
+    itinerary_id = _make_raw_itinerary(trip_id, stops=[])
+
+    resp = client.post(f"/internal/itineraries/{itinerary_id}/apply", headers=bff_headers)
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "INVALID_OPTIMIZATION_REQUEST"
+
+
+def test_apply_itinerary_duplicate_places_rejected(client, bff_headers):
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=1)
+    itinerary_id = _make_raw_itinerary(trip_id, stops=[
+        {"place_id": place_ids[0], "order_index": 0},
+        {"place_id": place_ids[0], "order_index": 1},  # aynı mekan iki kez
+    ])
+
+    resp = client.post(f"/internal/itineraries/{itinerary_id}/apply", headers=bff_headers)
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "INVALID_OPTIMIZATION_REQUEST"
+
+
+def test_apply_itinerary_atomic_rollback_leaves_existing_stops_untouched(client, bff_headers):
+    """Reddedilen bir apply, mevcut TripStop'lara HİÇ dokunmamalı — kısmi
+    güncelleme olmamalı (bkz. spesifikasyonun 'atomic' gereksinimi)."""
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=2)
+    before = _trip_stops_db(trip_id)
+    assert len(before) == 2
+
+    bad_itinerary_id = _make_raw_itinerary(trip_id, stops=[])  # boş -> reddedilecek
+
+    resp = client.post(f"/internal/itineraries/{bad_itinerary_id}/apply", headers=bff_headers)
+    assert resp.status_code == 400
+
+    after = _trip_stops_db(trip_id)
+    assert after == before  # birebir aynı — silinip yeniden eklenmedi
+
+
+def test_apply_itinerary_can_be_applied_repeatedly(client, bff_headers):
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=2)
+    itinerary_id = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids}, headers=bff_headers,
+    ).json()["id"]
+
+    first = client.post(f"/internal/itineraries/{itinerary_id}/apply", headers=bff_headers)
+    assert first.status_code == 200
+    second = client.post(f"/internal/itineraries/{itinerary_id}/apply", headers=bff_headers)
+    assert second.status_code == 200
+
+    assert first.json()["stops"] == second.json()["stops"]
+    assert len(_trip_stops_db(trip_id)) == 2  # tekrar uygulama durakları çoğaltmadı
+
+
+def test_apply_itinerary_does_not_mutate_saved_itinerary(client, bff_headers):
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=2)
+    before = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids}, headers=bff_headers,
+    ).json()
+
+    client.post(f"/internal/itineraries/{before['id']}/apply", headers=bff_headers)
+
+    after = client.get(f"/internal/itineraries/{before['id']}", headers=bff_headers).json()
+    assert after == before  # apply, itinerary'nin kendisini hiçbir şekilde değiştirmedi
+
+
+def test_apply_itinerary_updates_trip_provenance_fields(client, bff_headers):
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=1)
+    itinerary_id = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids}, headers=bff_headers,
+    ).json()["id"]
+
+    trip_before = client.get(f"/internal/trips/{trip_id}", headers=bff_headers).json()
+    assert trip_before["applied_itinerary_id"] is None
+    assert trip_before["itinerary_applied_at"] is None
+
+    client.post(f"/internal/itineraries/{itinerary_id}/apply", headers=bff_headers)
+
+    trip_after = client.get(f"/internal/trips/{trip_id}", headers=bff_headers).json()
+    assert trip_after["applied_itinerary_id"] == itinerary_id
+    assert trip_after["itinerary_applied_at"] is not None
+
+
+def test_apply_itinerary_fires_analytics_event(client, bff_headers):
+    trip_id, place_ids = _setup_trip_with_places(client, bff_headers, n=2)
+    itinerary_id = client.post(
+        f"/internal/trips/{trip_id}/optimize",
+        json={"selected_place_ids": place_ids}, headers=bff_headers,
+    ).json()["id"]
+
+    with mock.patch(
+        "app.application.services.analytics_service.AnalyticsService.track"
+    ) as mock_track:
+        client.post(f"/internal/itineraries/{itinerary_id}/apply", headers=bff_headers)
+
+    mock_track.assert_called_once()
+    _, kwargs = mock_track.call_args
+    assert kwargs["event"].value == "shared_trip_itinerary_applied"
+    assert kwargs["trip_id"] == trip_id
+    assert kwargs["kind"] == "trip"
+    assert kwargs["user_id"] == int(bff_headers["x-user-id"])
+    assert kwargs["metadata"]["itinerary_id"] == itinerary_id
+    assert kwargs["metadata"]["stops_count"] == 2
