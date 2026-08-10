@@ -172,6 +172,8 @@ struct TripOptimizerView: View {
     private func resultContent(_ itinerary: Itinerary) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                OptimizerRouteMapSection(itinerary: itinerary)
+
                 OptimizerScoreBadge(
                     score: itinerary.optimizationScore,
                     totalDistanceKm: itinerary.totalDistanceKm,

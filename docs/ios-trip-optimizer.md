@@ -5,7 +5,7 @@ The iOS UI for the [AI Trip Optimizer](trip-optimizer.md), consuming the
 generate a preview itinerary from an existing Trip Builder trip's stops,
 and revisit any previously generated one — never mutates the trip itself.
 
-Four milestones so far:
+Six milestones so far:
 - **v1 — Generate & preview**: "Optimize Trip" entry point on
   `TripDetailView`, a fresh itinerary generated and shown in
   `TripOptimizerView`.
@@ -18,12 +18,23 @@ Four milestones so far:
   itinerary's stops into the Trip's canonical `TripStop` list — the
   first (and still only) action in this feature that intentionally
   mutates the Trip. See "Apply to Trip" below.
-- **v4 — User Controls for Place Selection and Trip Duration** (this
-  update): a new `TripOptimizerConfigView` sits between `TripDetailView`
-  and `TripOptimizerView`'s `.generate` mode — the user picks which of
-  the trip's stops to optimize and (optionally) how many days the
-  itinerary should span, *before* the optimize request goes out. See
-  "Optimizer Configuration" below.
+- **v4 — User Controls for Place Selection and Trip Duration**: a new
+  `TripOptimizerConfigView` sits between `TripDetailView` and
+  `TripOptimizerView`'s `.generate` mode — the user picks which of the
+  trip's stops to optimize and (optionally) how many days the itinerary
+  should span, *before* the optimize request goes out. See "Optimizer
+  Configuration" below.
+- **v5 — Optimized Route Map Visualization**: both `.generate` and
+  `.viewSaved` results now render a map of the optimized stop order —
+  day-separated, gracefully handling missing coordinates, reusing
+  `TripOptimizerView`'s existing score/warnings/day-list/apply
+  presentation unchanged. See "Map Visualization" below.
+- **v6 — Real Road Route Visualization (MapKit Directions)** (this
+  update): the straight-line segments v5 drew between consecutive stops
+  are now replaced, where possible, with real driving-route geometry from
+  `MKDirections` — still day-separated, still falling back to a straight
+  line per-segment when a route can't be calculated, still no external
+  routing dependency. See "Real Road Route Visualization" below.
 
 ## Screen flow
 
@@ -231,6 +242,446 @@ config screen) — exposing it well would meaningfully expand this
 milestone's scope rather than "fit naturally" into it, which the spec's
 own requirement 3 explicitly permits leaving alone. Flagged as a
 candidate for a focused future milestone (see "Future UI improvements").
+
+## Map Visualization
+
+`TripOptimizerView`'s result state (both `.generate` and `.viewSaved`)
+gained a map section, `OptimizerRouteMapSection`, rendered as the first
+element of `resultContent` — same "map first" placement convention
+`TripDetailView`/`ResultsView` already use for `TripMapView`. It is
+**visualization only**: nothing about it calls `optimize`, mutates the
+Trip, or touches the optimization algorithm — `GreedyDistanceStrategy` and
+every backend route are byte-for-byte unchanged by this milestone.
+
+### Why a new component instead of reusing `TripMapView`
+
+The existing `TripMapView` (`Features/Results/Components/TripMapView.swift`,
+used by `TripDetailView` and `ResultsView`) draws every location it's given
+as **one continuous polyline**, in list order, with no concept of "day."
+That's exactly right for a flat `TripStop`/`LocationPin` list, but wrong
+here: an itinerary's stops are grouped into days, and connecting the last
+stop of Day 1 to the first stop of Day 2 with a route line would draw a
+real-looking line across a boundary the optimizer never actually
+scheduled travel across (explicitly forbidden by this milestone's own
+requirements). So this milestone adds three new, itinerary-specific types
+in `Features/Trips/Components/` rather than bending `TripMapView` to a
+shape it wasn't built for — but it deliberately **reuses `TripMapView`'s
+own patterns** wherever they still apply (see below), rather than
+inventing a new visual language:
+
+- **`OptimizerRouteMapData`** — a pure, MapKit-free struct that converts an
+  `Itinerary` into per-day, coordinate-only presentation data. No SwiftUI,
+  no MapKit, no networking — just `Itinerary` in, `[OptimizerMapDay]` +
+  a missing-coordinate count out. Exists specifically so the mapping logic
+  is unit-testable without rendering an actual map (`OptimizerRouteMapDataTests`,
+  13 tests, pure `XCTest`, no simulator needed for the assertions
+  themselves).
+- **`OptimizerRouteMap`** — the `UIViewRepresentable`/`MKMapView` wrapper.
+  Copies `TripMapView`'s exact coordinator shape (pin annotation subclass,
+  polyline overlay subclass, `MKMapViewDelegate` rendering, the
+  "callout → Apple Maps" tap-to-open pattern, the min-span bounding-region
+  fit formula) — the only real differences are day-colored, day-scoped
+  overlays instead of one global one, and a numbered marker glyph per stop.
+- **`OptimizerRouteMapSection`** — the SwiftUI-facing wrapper
+  `TripOptimizerView` actually uses: computes `OptimizerRouteMapData` once
+  (see "Performance" below), renders the day-selector chips, the map
+  itself, and the missing-coordinate notice. `TripOptimizerView`'s
+  `resultContent` calls this in one line
+  (`OptimizerRouteMapSection(itinerary: itinerary)`); none of the mapping,
+  filtering, or MapKit code lives in `TripOptimizerView` itself.
+
+### Coordinates: already present, no backend/BFF change needed
+
+Per this milestone's own instruction to only touch the backend "if the
+existing itinerary response genuinely lacks coordinates required for
+visualization" — it doesn't. `ItineraryStop.lat`/`lng` (nullable `Double`)
+already existed in `Core/Models/OptimizerModels.swift` field-for-field with
+core-api's `OptimizeTripResponse`, from the very first (`v1`) milestone —
+see `docs/trip-optimizer-bff.md`. The map is built entirely from data the
+client already receives; **no core-api, mobile-bff, or model change was
+needed or made** for this milestone.
+
+### Day separation (Req 2)
+
+`OptimizerRouteMapData.init(itinerary:)` builds one `OptimizerMapDay` per
+`ItineraryDay`, each carrying only its own stops. `OptimizerRouteMap` then
+draws **one `MKPolyline` overlay per visible day**, connecting only that
+day's own consecutive coordinates — there is no code path that ever
+concatenates coordinates across two different `dayIndex` values into a
+single overlay, so a Day 1 → Day 2 connecting line is structurally
+impossible, not just avoided by convention.
+
+Each day also gets its own marker color (a 5-color cyclical palette,
+`OptimizerRouteMap.dayColors`, starting with the same route-teal
+`TripMapView` already uses for day 1 / single-day itineraries, so a
+one-day itinerary looks visually identical to before this milestone).
+
+**Day selector**: for itineraries with more than one day,
+`OptimizerRouteMapSection` shows a horizontal row of capsule chips ("Tümü"
++ one per day). Selecting a specific day sets
+`OptimizerRouteMap.selectedDayIndex`, which does two things:
+`OptimizerRouteMapData.visibleDays(selectedDayIndex:)` filters to just that
+day's annotations/overlay, and the map re-fits its camera to that day's
+stops only. Selecting "Tümü" shows every day at once, each in its own
+color, still never connected to each other.
+
+### Missing coordinates (Req 7)
+
+`OptimizerRouteMapData.init` skips any `ItineraryStop` with a `nil` `lat`
+or `lng` (this happens for a stop whose source `Place` was deleted after
+the itinerary was generated — see `ItineraryStop`'s own doc comment on
+`ondelete=SET NULL`) — it is never included in any day's `stops`, so it
+can never reach `CLLocationCoordinate2D` construction or crash the map. No
+coordinate is ever invented or geocoded client-side.
+
+Two visible consequences, both required:
+- **The stop stays visible in the textual itinerary.** `ItineraryDaySection`
+  (the day/stop list below the map) is completely unmodified by this
+  milestone — it renders every stop regardless of coordinates, exactly as
+  before.
+- **A non-blocking notice appears** when `OptimizerRouteMapData.missingCoordinateCount > 0`
+  — small, secondary-colored text under the map ("N durağın konum bilgisi
+  yok, haritada gösterilemiyor."), never an alert or blocking state. If
+  *every* stop in the itinerary lacks coordinates, the map itself doesn't
+  render at all (`OptimizerRouteMapData.isEmpty`) and only the notice
+  shows — the rest of the result screen (score, warnings, day list, apply
+  button) is completely unaffected either way.
+
+Stop numbering is also missing-coordinate-aware: the marker glyph and
+callout title show `stop.orderIndex + 1` — the optimizer's real,
+server-assigned position — not a recount of only the plotted stops. If
+stop 2 of 3 lacks a coordinate, the map shows "1" and "3", not "1" and
+"2"; the gap is preserved rather than papered over, so the numbers on the
+map always mean the same thing as `orderIndex` does everywhere else in
+this feature.
+
+### Route rendering limitation: straight lines, not roads (Req 6) — superseded by v6
+
+> **Superseded by v6.** Everything in this subsection described v5's
+> behavior at the time it shipped. As of v6 ("Real Road Route
+> Visualization" below), segments are real `MKDirections` driving routes
+> wherever one can be calculated — the straight-line behavior described
+> here now applies only as v6's explicit per-segment *fallback*, not the
+> default. Left intact below for historical accuracy.
+
+**The polylines drawn between consecutive stops are straight geographic
+segments between two coordinates — not driving/walking routes.** This
+milestone calls no routing API (Apple's `MKDirections`, Google Directions,
+or otherwise) — explicitly out of scope per this milestone's own
+requirements. The line only visualizes *which order* the optimizer chose
+to visit stops in, not *how* to physically travel between them. A
+straight segment across, say, a body of water or a building is expected
+and correct — it is not a claim about a real path, only the doc value
+`travel_distance_to_next_km`/`travel_time_to_next_minutes` (shown
+elsewhere in the day list, computed by `GreedyDistanceStrategy`) already
+represent *estimated* straight-line-derived travel, not a routed one
+either — the map is now visually consistent with a limitation the backend
+already had.
+
+### Saved itinerary behavior (Req 3)
+
+The map makes **no distinction** between a freshly-generated result and
+one reopened from Itinerary History — both are the same `Itinerary` value
+flowing through the same `resultContent(_:)` → `OptimizerRouteMapSection(itinerary:)`
+call in `TripOptimizerView`. Since `OptimizerRouteMapData` is a pure
+function of an `Itinerary` value (see above), a `.viewSaved` itinerary
+loaded via `loadItinerary` (`GET /itineraries/{id}`, never `POST
+.../optimize`) produces an identical map to a `.generate` result with the
+same stops — proven by
+`OptimizerRouteMapDataTests.test_savedItineraryShape_mapsIdenticallyToFreshlyGeneratedItinerary`.
+Viewing the map:
+- **Never calls `optimize`** — `TripOptimizerViewModel.loadItinerary` is
+  completely unmodified by this milestone; there is still no code path
+  from `.viewSaved` to `POST /trips/{id}/optimize`.
+- **Never mutates the Trip** — the map only reads `vm.itinerary`, already
+  loaded; it has no write path of its own (the only Trip mutation
+  anywhere in this feature remains the explicit "Trip'e Uygula" button,
+  see "Apply to Trip" below, itself unmodified by this milestone).
+- **Only renders the stored itinerary** — no new field is requested, no
+  new endpoint is called; the map is built entirely from the `Itinerary`
+  the existing `.itineraryDetail`/`.optimizeTrip` responses already carry.
+
+### Interaction (Req 5)
+
+Deliberately minimal, matching the "don't build a full navigation
+experience" instruction:
+- **Zoom/pan** — free, native `MKMapView` gestures; nothing here disables
+  or intercepts them.
+- **Tap a stop to identify it** — native MapKit annotation-select-and-callout
+  behavior (`canShowCallout = true`), showing the stop's order + name and,
+  for multi-day itineraries, which day it belongs to. No custom
+  detail sheet or extra state was added for this — the callout alone
+  satisfies "identify," same precedent as `TripMapView`.
+- **Select a day to focus the map on that day's route** — the day-selector
+  chips described above.
+- **Apple Maps is only ever opened by an explicit tap** on a callout's
+  "open in Maps" button (identical to `TripMapView`'s own behavior) —
+  never automatically, never on annotation selection alone, matching
+  the explicit "do not launch Apple Maps automatically" instruction.
+
+No turn-by-turn navigation, no live location tracking, no route
+recalculation UI — none of that was built, per scope.
+
+### Performance (Req 9)
+
+- `OptimizerRouteMapSection.mapData` is computed **once**, in the view's
+  `init`, from the `itinerary` parameter — not recomputed on every SwiftUI
+  `body` evaluation. Since `TripOptimizerViewModel.itinerary` is only ever
+  assigned once per screen instance (the result of `optimize`/`loadItinerary`,
+  never reassigned by `applyToTrip` — see "Apply to Trip"'s "byte-for-byte
+  unchanged" guarantee), this mapping genuinely only needs to run once per
+  screen visit.
+- `OptimizerRouteMap.updateUIView` follows the same
+  remove-then-readd-annotations/overlays approach `TripMapView` already
+  uses in production — a deliberate consistency choice (same pattern,
+  same file family) rather than a new risk; it only actually re-executes
+  when SwiftUI detects a real prop change (`data` or `selectedDayIndex`),
+  i.e. on initial load or an explicit day-chip tap, never on unrelated
+  re-renders.
+- The map's camera is only re-fit (`MKMapView.setRegion`) on the very
+  first appearance and when `selectedDayIndex` actually changes
+  (`Coordinator.lastSelectedDayIndex` gates this) — panning/zooming by the
+  user is never overwritten by an unrelated state change, same
+  "don't fight the user's own gesture" precedent `TripMapView` already
+  established for its own `focusedPin` mechanism.
+
+### Camera fitting (Req 8)
+
+Reuses `TripMapView`'s exact bounding-region formula (min span 0.05°,
++40% padding around the coordinate spread) — already proven to handle a
+single coordinate sensibly (falls back to the min span, since max−min is
+0 for one point) and two coordinates correctly (spans exactly their
+spread, padded). No itinerary-specific edge case was needed beyond what
+`TripMapView` already handled, since day-scoped fitting just narrows the
+coordinate set passed into the same formula.
+
+## Real Road Route Visualization (MapKit Directions)
+
+v5 shipped the map with straight geographic segments between consecutive
+stops, explicitly documented as *not* real road geometry (see "Map
+Visualization → Route rendering limitation" above). This milestone
+replaces those segments with real `MKDirections` driving-route polylines
+wherever MapKit can compute one, while preserving every architectural
+boundary and behavioral guarantee v5 established — the straight-line path
+still exists, now purely as the fallback for a segment MapKit can't route.
+
+### Was `MKDirections` sufficient? Yes — with one necessary shape change
+
+`MKDirections` reliably provides point-to-point driving route geometry
+(`MKRoute.polyline`) and needs no new dependency, App capability, or
+entitlement beyond what already ships (MapKit is already linked via
+`TripMapView`/`OptimizerRouteMap`). **It does not, however, support
+multi-waypoint routing in a single request** — an `MKDirections.Request`
+takes exactly one `source` and one `destination`. A day's "Stop 1 → Stop
+2 → Stop 3 → …" chain is therefore computed as **N−1 independent
+pairwise requests** for N stops (Stop1→Stop2, Stop2→Stop3, …), each with
+its own success/failure outcome — not one request for the whole day. This
+is not a limitation that blocked the milestone; it's the correct native
+shape for how `MKDirections` works, and it has a direct benefit: each leg
+degrades independently (see "Fallback" below), so one un-routable segment
+never takes the rest of the day's route down with it. No external
+dependency was added or needed — this requirement was satisfiable
+entirely within `MKDirections`.
+
+### Architecture: where the new code lives
+
+One new file, `Features/Trips/Components/OptimizerRouteCalculator.swift`,
+holds everything MapKit-Directions-specific. The three v5 components keep
+their exact original responsibilities (Req 4):
+
+- **`OptimizerRouteMapData`** — completely unchanged. Still pure
+  Foundation, still just `Itinerary` → per-day coordinate-only stops. It
+  has no idea routes exist.
+- **`OptimizerRouteMap`** — still the rendering layer, gained one new
+  prop (`dayRoutes: [Int: OptimizerDayRoute]`, a plain value type — not
+  the calculator itself) and now draws each day's segments individually
+  instead of one whole-day polyline; it owns no async state, cache, or
+  cancellation logic of its own.
+- **`OptimizerRouteMapSection`** — still the SwiftUI orchestrator, and
+  now also **owns** the new `OptimizerRouteCalculator` as `@State`
+  (`@State private var calculator = OptimizerRouteCalculator()`),
+  triggers route loading on day-selection change via
+  `.task(id: selectedDayIndex)`, and cancels outstanding work via
+  `.onDisappear { calculator.cancelAll() }`.
+
+New types, all in `OptimizerRouteCalculator.swift`:
+
+- **`OptimizerRoutingProviding`** — a one-method protocol
+  (`route(from:to:) async throws -> [CLLocationCoordinate2D]`) that is
+  the *only* seam between the calculator and `MKDirections`. This exists
+  specifically because `MKRoute` has **no public initializer** — Apple's
+  own type can only ever be produced by a real `MKDirections` call, which
+  makes it impossible to construct a fake `MKRoute` for tests. Testing the
+  protocol instead of the concrete MapKit type is what makes the
+  orchestration logic testable at all (see "Testing" below).
+- **`MKDirectionsRoutingProvider`** — the one production conformer;
+  builds an `MKDirections.Request` (`.automobile` transport, per Req 1's
+  own "driving route geometry" wording), awaits
+  `MKDirections(request:).calculate()` (Swift's automatic async/await
+  bridging over the completion-handler API — no manual continuation
+  wrapping needed), and extracts the winning route's coordinates.
+- **`OptimizerRouteCalculator`** (`@Observable @MainActor`, same
+  ViewModel shape convention as `TripOptimizerViewModel`) — the
+  orchestrator: per-day caching, per-day in-flight-request tracking,
+  cancellation, and the synchronous straight-line-first/real-route-later
+  state transition described below.
+- **`OptimizerRouteSegment`** / **`OptimizerDayRoute`** — plain value
+  types carrying the calculator's output (`isRoaded: Bool` per segment,
+  `isLoading: Bool` per day) into `OptimizerRouteMap` without leaking any
+  MapKit-Directions-specific type across that boundary.
+
+### Route calculation behavior
+
+`OptimizerRouteMapSection.loadVisibleDayRoutes()` calls
+`calculator.load(day:)` for every currently-visible day whenever
+`selectedDayIndex` changes (and on first appearance, since `.task(id:)`
+fires once for the initial value too). For a given day, `load`:
+
+1. **Single-stop day** — no pairs exist, so no request is ever made;
+   `routes[dayIndex]` is set to an empty, non-loading state immediately.
+2. **Cached** — if this exact day+stop-sequence was already resolved
+   this screen visit, the cached segments are returned synchronously, no
+   network call.
+3. **Already in flight** — if the exact same day+key is already being
+   computed (e.g. a repeated SwiftUI re-render calling `load` again
+   before the first call finished), this is a no-op — the existing task
+   is left running, never cancelled-and-restarted (Req 5, Req 6, Req 9;
+   see `test_load_calledRepeatedlyWhileInFlight_doesNotRestartOrDuplicate`).
+4. **Fresh** — `routes[dayIndex]` is set **synchronously** to the
+   straight-line fallback for every leg, `isLoading: true`, so the map
+   never shows an empty day while waiting. A `Task` is then spawned that
+   requests each leg's route, in order, from the provider; each leg
+   independently becomes either a real routed segment or a straight-line
+   fallback (see "Fallback" below); once all legs resolve, the result is
+   cached and written to `routes[dayIndex]`, `isLoading: false`.
+
+### Day separation
+
+Unchanged in spirit from v5, now reinforced structurally two ways: (1)
+`OptimizerRouteMapData` still only ever gives the calculator one day's
+stops at a time — there is no code path where a cross-day pair could even
+be constructed; and (2) `routes` is keyed by `dayIndex`, so a day's
+in-flight `Task` can only ever write to *that* day's entry — a Day 1
+response completing after the user has already switched to Day 2 cannot
+overwrite Day 2's displayed route, because it isn't writing to the same
+dictionary key (Req 5 "a route response for Day 1 must never overwrite
+Day 2's currently displayed route" — proven directly by
+`test_daySwitching_bothDaysEndUpWithCorrectIndependentRoutes`). No
+directions request's `source`/`destination` pair is ever built from two
+different days' stops — proven by
+`test_load_twoDays_neverRequestsAcrossDayBoundary`.
+
+### Caching
+
+Keyed by `OptimizerRouteCalculator.cacheKey(for:)` — `"day=<index>|<stopID>@<lat>,<lng>|…"`
+for every stop in that day, in order (Req 6's own "day + ordered stop
+IDs/coordinates" wording, satisfied literally). Reordering, a different
+day index, or a different stop set all produce a different key, so the
+cache can never serve a stale sequence as if it were current.
+
+**Scope: per-screen-instance, not persisted across app sessions or
+re-opens.** `OptimizerRouteMapSection`'s `@State private var calculator`
+is recreated whenever the section's own view identity is recreated (a
+fresh `TripOptimizerView` navigation push). This is a deliberate,
+documented choice, not an oversight — see "Known limitations" below.
+Within a single screen visit, though, the cache is exactly what prevents
+request churn: switching from Day 1 → Day 2 → back to Day 1 only ever
+issues Day 1's requests once (see
+`test_load_calledTwiceForSameDay_secondCallUsesCache_noNewRequests`), and
+selecting "Tümü" after having already viewed individual days reuses every
+day's already-cached result rather than re-requesting anything.
+
+### Fallback behavior
+
+If a leg's `MKDirections` call throws (no route found, e.g. across water
+with no ferry/bridge connectivity that MapKit can route through; or a
+network failure) — that leg, and only that leg, falls back to the
+existing straight-line segment between its two coordinates. No crash, no
+dropped stop, no dropped day (Req 3): the do/catch lives *inside* the
+per-leg loop, so one failing leg doesn't abort the remaining legs of the
+same day (see `test_load_partialFailure_otherSegmentsStillSucceed`).
+
+The fallback state is made visible, but not disruptively: `OptimizerDayPolyline.isRoaded`
+drives the overlay's `MKPolylineRenderer.lineDashPattern` — a real routed
+leg draws **solid**, a straight-line fallback leg (whether because
+`MKDirections` failed for that leg, or because the day's route hasn't
+finished calculating yet) draws **dashed**, matching v5's original dashed
+style. This is a strict style difference on the existing colored line,
+not a new UI surface — no legend, no per-segment label, no blocking
+alert. A small `ProgressView` (subtle, `.ultraThinMaterial` circle,
+top-trailing corner of the map) appears only while a currently-visible
+day's route is still being calculated, disappearing the moment it
+resolves — the map is always interactive and never blocked while this
+shows.
+
+### Missing coordinates
+
+Unchanged from v5, and unaffected by this milestone: `OptimizerRouteMapData`
+still excludes any stop without `lat`/`lng` before the calculator ever
+sees it (see "Map Visualization → Missing coordinates" above), so a day
+handed to `OptimizerRouteCalculator.load` only ever contains stops that
+already have usable coordinates. A day with a coordinate gap (e.g. stop 2
+of 3 excluded) still produces exactly one request — the surviving stops'
+consecutive pair — never inventing a coordinate or skipping straight past
+a routable gap (see
+`test_load_nonContiguousOrderIndex_stillRequestsConsecutivePairsOverSurvivingStops`).
+The missing-coordinate notice text below the map is unmodified.
+
+### Interaction, camera fitting, and performance
+
+All of v5's guarantees hold unchanged: pan/zoom, stop-tap-to-identify via
+the native MapKit callout, the callout's explicit-tap-only "open in Apple
+Maps" button, and the min-span bounding-region camera fit (Req 8) are
+untouched — `OptimizerRouteMap`'s annotation and camera-fitting code
+wasn't touched by this milestone, only its overlay-drawing loop. The
+camera still only re-fits on first appearance or an actual day-selection
+change, same `Coordinator.lastSelectedDayIndex` gate as before — route
+segments finishing calculation asynchronously do **not** trigger a camera
+re-fit or fight a user's own pan/zoom (Req 8's "do not automatically
+fight user camera movement" — the segments update in place, the camera
+doesn't move).
+
+Request-count discipline (Req 6): a day's requests only fire once per
+screen visit (cache), a repeated `load` call for the same in-flight
+day+key is a no-op (doesn't restart or duplicate), and `.task(id:)`
+re-firing on day switches only ever calls `load` for the *currently
+visible* day(s) — switching rapidly between days N times issues at most N
+distinct requests-per-day-worth of legs, never more, regardless of how
+many times the underlying SwiftUI view re-renders in between.
+
+### Known limitations
+
+- **Cache is per-screen-instance, not persisted.** Reopening the same
+  itinerary later (a fresh `TripOptimizerView` push, even for the exact
+  same `Itinerary`) recomputes every route from scratch. This was a
+  deliberate scope decision — a cross-session cache would need a storage
+  layer (disk or a shared in-memory singleton with its own invalidation
+  rules) that this milestone's stated scope ("keep architecture,
+  preserve async behavior within a screen visit") didn't call for. See
+  "Future UI improvements" below.
+- **Transport type is fixed to `.automobile`.** No walking/transit toggle
+  exists — Req 1 explicitly asked for "driving route geometry," so this
+  matches the requirement as written, not an oversight.
+- **No manual retry for a failed leg.** A leg that fails once stays a
+  straight-line fallback for the rest of that screen visit (it's cached
+  as such) — there's no "tap to retry this segment" affordance. Given
+  `MKDirections` failures are usually either "no route exists" (retrying
+  won't help) or a transient network blip (retrying the whole day, e.g.
+  by leaving and reopening the itinerary, does help), a per-segment retry
+  UI wasn't judged worth the added surface for this milestone.
+- **No rate-limiting/backoff logic.** Apple doesn't publish a documented
+  per-app `MKDirections` quota; this implementation issues requests as
+  legs need them (capped naturally by cache + in-flight de-duplication)
+  and does not add its own throttling on top. If real-world usage ever
+  surfaces MapKit-side throttling, the fix would live entirely inside
+  `MKDirectionsRoutingProvider`/`OptimizerRouteCalculator` — the seam this
+  milestone built makes that a localized, backward-compatible change.
+- **Simulator/offline behavior**: `MKDirections` requires network
+  connectivity. In an offline Simulator or a genuinely offline device,
+  every leg fails and every day's route silently (well — visibly, via the
+  dashed styling) degrades to v5's straight-line rendering. This is
+  exactly the documented fallback behavior working as designed, not a
+  separate offline-handling code path.
 
 ## Apply to Trip
 
@@ -624,7 +1075,7 @@ No new design tokens were needed — `AppColors.warning` already existed
   matching `TripRowView`'s own `"\(trip.stopsCount) durak"` pattern),
   formatted creation date, and a warning-count `Label` (only shown when
   `warnings` is non-empty) in `AppColors.warning`.
-- **`TripStopSelectionRow`** (new, v4) — a `TripStop`-flavored sibling of
+- **`TripStopSelectionRow`** (v4) — a `TripStop`-flavored sibling of
   `LibraryRowView`'s own selection-mode row: identical
   `checkmark.circle.fill`/`circle` indicator pair, identical
   card/border/corner-radius recipe, so a user who's already used Trip
@@ -632,6 +1083,22 @@ No new design tokens were needed — `AppColors.warning` already existed
   same visual language here. Shows the stop's name, category chip, and
   city — reuses fields `TripStop` already carries, no new API field
   needed for "enough context to distinguish places."
+- **`OptimizerRouteMapData`** (new, v5) — pure `Itinerary` → per-day,
+  coordinate-only presentation struct. No MapKit/SwiftUI dependency; see
+  "Map Visualization" above.
+- **`OptimizerRouteMap`** (new, v5) — the `MKMapView`/`UIViewRepresentable`
+  itself, structurally a day-aware sibling of `TripMapView`.
+- **`OptimizerRouteMapSection`** (v5; gained `OptimizerRouteCalculator`
+  ownership + route-loading lifecycle in v6) — the SwiftUI wrapper
+  `TripOptimizerView` actually embeds: day-selector chips + the map + the
+  missing-coordinate notice + (v6) a subtle route-loading indicator, all
+  itinerary-visualization-specific UI in one place.
+- **`OptimizerRouteCalculator`** / **`OptimizerRoutingProviding`** /
+  **`MKDirectionsRoutingProvider`** (new, v6, all in
+  `OptimizerRouteCalculator.swift`) — the real-road-route orchestration
+  layer. Not a UI component itself, but lives alongside these three in
+  `Features/Trips/Components/` since it exists purely to serve them. See
+  "Real Road Route Visualization" above.
 
 ## Itinerary History
 
@@ -723,7 +1190,7 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
-64 tests, five files:
+91 tests, eight files:
 
 - **`Support/FakeAPIClient.swift`** — `APIClientProtocol` test double.
   Returns a canned `Result<Any, Error>`; two independent `AsyncGate`s (a
@@ -795,30 +1262,95 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   `selectedPlaceIDsInTripOrder` preserving the trip's own stop order
   regardless of selection/toggle order (not `Set` iteration order), both
   for a full selection and a partial one.
+- **`OptimizerRouteMapDataTests.swift`** (13 tests, new this milestone) —
+  pure `XCTest` against `OptimizerRouteMapData`, no MapKit/SwiftUI
+  rendering involved (see "Map Visualization → why a new component"):
+  one-stop itinerary; multiple stops within a single day (order + exact
+  coordinates preserved); multiple days (kept structurally separate,
+  `hasMultipleDays` true, a day's stops never leak into another day's
+  array); day indices are **not renumbered** even when an earlier day has
+  zero plottable stops (a would-be "Day 1" that's entirely coordinate-less
+  doesn't cause the remaining day to relabel itself "Day 1"); missing
+  coordinates are omitted from the map array but counted, with `orderIndex`
+  gaps preserved (not recompacted) so map numbering stays consistent with
+  the optimizer's real order; every stop missing coordinates producing
+  empty `days` with a full `missingCoordinateCount`; a deleted-source-place
+  stop (`placeId`/`lat`/`lng` all `nil`) omitted gracefully, no crash; a
+  saved-itinerary-shaped value mapping identically to a freshly-generated
+  one (direct evidence for "Saved itinerary behavior" above);
+  `visibleDays(selectedDayIndex:)` for nil (all days), a specific day, and
+  a day index matching nothing (empty, not a crash); and stop ordering
+  staying correct and independent per day across a two-day itinerary.
+- **`Support/FakeOptimizerRoutingProvider.swift`** (new this milestone) —
+  `OptimizerRoutingProviding` test double, same family as `FakeAPIClient`:
+  records every `(from, to)` call, an injectable `resultProvider` closure
+  for success/failure per call, and an optional `AsyncGate` for
+  deterministic in-flight-state tests. Exists specifically because
+  `MKRoute` has no public initializer (see "Real Road Route Visualization
+  → Was MKDirections sufficient" above) — this fakes the *protocol*, never
+  the concrete MapKit type.
+- **`OptimizerRouteCalculatorTests.swift`** (14 tests, new this
+  milestone) — `OptimizerRouteCalculator` against `FakeOptimizerRoutingProvider`,
+  no real `MKDirections` call in any test: cache-key stability (identical
+  for the same day+stops, differs for a different day index, differs for
+  a different stop order — direct evidence for Req 6's "stable cache
+  key"); a single-stop day never calls the provider; a multi-stop day
+  requests exactly N−1 legs in the correct from/to order (route request
+  construction + ordered stops); a two-day itinerary never issues a
+  request that crosses the day boundary (day separation); a successful
+  leg is marked `isRoaded: true` with the provider's own coordinates; a
+  failing leg falls back to a straight two-point line, `isRoaded: false`,
+  no crash; a day with one failing leg among several still resolves the
+  other legs (partial-failure graceful degradation); a second `load()`
+  call for an already-resolved day makes no new requests (caching); a
+  `load()` call repeated while the same day+key is still in flight
+  doesn't restart or duplicate the request (simulating repeated SwiftUI
+  `body` re-evaluation); day switching leaves both days' routes correct
+  and independent, proving Day 1's response can't overwrite Day 2's (Req
+  5); a day with a coordinate gap (missing-coordinate stop already
+  filtered upstream) still requests exactly the right consecutive pair
+  over the surviving stops; and `cancelAll()` doesn't crash and leaves the
+  calculator able to load fresh afterward. Verified stable across 3
+  repeated full-suite `xcodebuild test` runs (async/timing-sensitive
+  tests are exactly the kind that can flake under load, so this was
+  checked deliberately, not assumed).
 
 ### Test results
 
 ```
 Test Suite 'All tests' passed
-Executed 64 tests, with 0 failures (0 unexpected) in 0.073-0.105s
+Executed 91 tests, with 0 failures (0 unexpected) in 0.093-0.121s
 ```
 
-Verified stable across 5 repeated full-suite `xcodebuild test` runs (not
-just once) — same discipline established as necessary since the
-project's first flaky-test discovery. Full `xcodebuild build` also
-verified clean, no new warnings. This milestone made **no core-api,
-mobile-bff, or web-bff changes** (see "API integration → No backend or
-BFF change for this milestone"), so no backend/BFF suite reruns were
-required — the counts from the previous (Apply to Trip / OR-Tools)
-milestones stand unchanged.
+Full `xcodebuild build` also verified clean, no new warnings beyond
+pre-existing `MKPlacemark(coordinate:)`/`MKMapItem(placemark:)`
+deprecation notices already present in `TripMapView.swift` before this
+milestone (macOS-26-targeted deprecations that don't apply to this
+project's iOS-only deployment target; the project was regenerated via
+`xcodegen generate` first, since new source/test files were added). This
+milestone made **no core-api, mobile-bff, or web-bff changes** and no
+optimizer-algorithm changes — the counts from the previous milestones'
+backend/BFF suites stand unchanged.
+
+Verified stable across 3 repeated full-suite `xcodebuild test` runs (not
+just once) — deliberately, since this milestone's tests are
+async/timing-sensitive (gates, in-flight-task assertions) and exactly the
+kind that can flake under system load if written carelessly.
 
 A live Simulator launch-and-crash-free check was performed (install →
-launch → screenshot of the initial screen) to confirm the rebuilt app
-runs; a full interactive tap-through of the new configuration screen
-was **not** performed — this environment has no XCUITest/accessibility
-automation harness for the iOS Simulator (unlike, say, a browser
-automation tool for web UIs), so that level of verification relies on the
-64 passing automated tests plus the clean build instead.
+launch → screenshot of the initial screen, confirming the app — now
+additionally using `MKDirections`/`async`/`@Observable` routing code —
+still boots and renders normally). A full interactive tap-through
+(generating a real multi-day itinerary against a running backend,
+watching a route resolve from dashed-fallback to solid-routed live,
+switching days mid-calculation) was **not** performed in this
+environment — same limitation as every prior milestone's testing notes
+(no XCUITest/accessibility automation harness here, and `MKDirections`
+itself needs live network + Apple's routing service, which this sandboxed
+environment doesn't reliably have) — that level of verification relies on
+the 91 passing automated tests (14 of them directly exercising the
+routing-calculator's request/cache/cancellation/day-separation logic
+against a fake provider) plus the clean build instead.
 
 ## Assumptions / limitations (v2 — Itinerary History)
 
@@ -889,27 +1421,80 @@ automation tool for web UIs), so that level of verification relies on the
   across several cities, a per-city bulk toggle could be a reasonable
   future refinement once real usage shows it's needed.
 
+## Assumptions / limitations (v5 — Map Visualization)
+
+- **Straight-line route segments, not real road geometry** — deliberately,
+  per this milestone's own scope; see "Map Visualization → Route rendering
+  limitation" above. No routing API was called or is planned to be called
+  within this milestone.
+- **No live location / "you are here"** — `showsUserLocation` is `false`,
+  same as `TripMapView`. This is a preview of the optimizer's *plan*, not
+  a live navigation surface.
+- **No per-stop detail sheet beyond the native MapKit callout** — tapping
+  a pin shows order + name (+ day, for multi-day itineraries) in the
+  standard callout bubble; there's no custom bottom sheet with visit
+  duration, arrival time, etc. (that information already lives in the day
+  list directly below the map — the callout deliberately doesn't
+  duplicate it).
+- **Day-selector chips only filter/refit the map**, not the day list below
+  it — selecting "2. Gün" in the map's chip row does not scroll or filter
+  `ItineraryDaySection`'s stop list. The two are intentionally independent
+  (Req 4's "add the map without duplicating existing itinerary
+  presentation logic" — wiring them together would mean the map reaching
+  into the day list's own state, coupling two sections that today don't
+  know about each other).
+- **No route-distance/time overlay on the map itself** — total distance
+  and travel time already appear in `OptimizerScoreBadge` immediately
+  below the map; the map's polylines aren't separately labeled with
+  per-segment distances.
+
+## Assumptions / limitations (v6 — Real Road Route Visualization)
+
+See "Real Road Route Visualization → Known limitations" above for the
+full list (cache scoped per-screen-instance and not persisted;
+`.automobile`-only transport type; no per-segment retry UI; no explicit
+`MKDirections` rate-limiting/backoff; offline/Simulator behavior degrades
+to v5's straight-line rendering by design, not as a bug).
+
 ## Future UI improvements
 
 Ranked by what unlocks the most value next:
 
 1. **`preferred_start_time`/`preferred_end_time` controls** — expose the
-   remaining constraint core-api already accepts but this milestone
-   deliberately left alone (see "Optimizer Configuration" above for why).
-   The natural next increment now that place selection and duration exist.
-2. **Map view of the optimized route** — `TripMapView` already exists and
-   accepts a route polyline (used by `TripDetailView`); reusing it here to
-   visualize the optimized order geographically is a low-effort addition.
-3. **Delete a history entry** — needs a new core-api `DELETE
+   remaining constraint core-api already accepts but v4 deliberately left
+   alone (see "Optimizer Configuration" above for why). Still the natural
+   next increment now that place selection, duration, and the routed map
+   all exist.
+2. **Tap a day list row to focus the map on that stop** — the map and the
+   day list (`ItineraryDaySection`) are intentionally decoupled (see
+   "Assumptions / limitations (v5)" above); wiring a tap-to-focus
+   interaction between them, mirroring `TripDetailView`'s own
+   `focusedPin`/`scrollTo` pattern, is a natural, low-risk follow-up now
+   that both pieces exist independently.
+3. **Persist the route cache across screen visits** — today
+   `OptimizerRouteCalculator`'s cache lives only as long as
+   `OptimizerRouteMapSection`'s `@State` (see "Real Road Route
+   Visualization → Known limitations"). A small keyed disk/memory cache
+   (same `cacheKey(for:)` already used) would let reopening the same
+   saved itinerary from Itinerary History skip re-requesting routes
+   already resolved on a previous visit — a pure performance win, no
+   behavior change.
+4. **Walking/transit transport type toggle** — `MKDirectionsRoutingProvider`
+   is hardcoded to `.automobile` (deliberately, this milestone's own
+   scope; see "Known limitations"). Exposing `MKDirectionsTransportType`
+   as a user-facing toggle would be a contained change, localized to that
+   one type.
+5. **Delete a history entry** — needs a new core-api `DELETE
    /internal/itineraries/{id}` (+ BFF proxy) first; today history is
    append-only.
-4. **Apply history / undo** — `Trip.applied_itinerary_id` only tracks the
+6. **Apply history / undo** — `Trip.applied_itinerary_id` only tracks the
    most recently applied itinerary; there's no way to see or revert to an
    earlier apply. Would need a core-api apply-history table first (see
    `docs/trip-optimizer.md` "Future improvements").
-5. **Web UI** — web-bff already exposes the full owner/editor surface
+7. **Web UI** — web-bff already exposes the full owner/editor surface
    including `apply` (parity with mobile-bff), but no web page calls any
    of it yet; every iOS-only milestone so far, including this one, has
-   left it unaddressed.
-6. **Bulk selection by category/city** — see "Assumptions / limitations
+   left it unaddressed. A web map visualization would need its own
+   (non-MapKit) routing implementation entirely.
+8. **Bulk selection by category/city** — see "Assumptions / limitations
    (v4)" above.
