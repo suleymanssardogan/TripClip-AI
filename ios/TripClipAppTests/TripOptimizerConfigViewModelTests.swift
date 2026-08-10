@@ -153,4 +153,95 @@ final class TripOptimizerConfigViewModelTests: XCTestCase {
         vm.toggle(2)
         XCTAssertEqual(vm.selectedPlaceIDsInTripOrder, [1, 3])
     }
+
+    // MARK: - Preferred start/end time defaults (Req 3: match backend exactly)
+
+    func test_defaultPreferredStartTime_matchesBackendDefault() {
+        let vm = TripOptimizerConfigViewModel(stops: [stop(1)])
+        XCTAssertEqual(vm.preferredStartTime, ClockTime.defaultStart)
+        XCTAssertEqual(vm.preferredStartTime.apiValue, "09:00")
+    }
+
+    func test_defaultPreferredEndTime_matchesBackendDefault() {
+        let vm = TripOptimizerConfigViewModel(stops: [stop(1)])
+        XCTAssertEqual(vm.preferredEndTime, ClockTime.defaultEnd)
+        XCTAssertEqual(vm.preferredEndTime.apiValue, "18:00")
+    }
+
+    func test_defaultTimeRange_isValid() {
+        let vm = TripOptimizerConfigViewModel(stops: [stop(1)])
+        XCTAssertTrue(vm.isTimeRangeValid)
+    }
+
+    // MARK: - Independent start/end time updates (spesifikasyonun kendi test gereksinimi)
+
+    func test_setPreferredStartTime_updatesOnlyStartTime() {
+        let vm = TripOptimizerConfigViewModel(stops: [stop(1)])
+        vm.setPreferredStartTime(ClockTime(hour: 7, minute: 30))
+
+        XCTAssertEqual(vm.preferredStartTime, ClockTime(hour: 7, minute: 30))
+        XCTAssertEqual(vm.preferredEndTime, ClockTime.defaultEnd, "Yalnızca başlangıç değişmeli, bitiş etkilenmemeli")
+    }
+
+    func test_setPreferredEndTime_updatesOnlyEndTime() {
+        let vm = TripOptimizerConfigViewModel(stops: [stop(1)])
+        vm.setPreferredEndTime(ClockTime(hour: 21, minute: 15))
+
+        XCTAssertEqual(vm.preferredEndTime, ClockTime(hour: 21, minute: 15))
+        XCTAssertEqual(vm.preferredStartTime, ClockTime.defaultStart, "Yalnızca bitiş değişmeli, başlangıç etkilenmemeli")
+    }
+
+    func test_settingBothTimes_inSequence_eachSetterOnlyAffectsItsOwnField() {
+        let vm = TripOptimizerConfigViewModel(stops: [stop(1)])
+        vm.setPreferredStartTime(ClockTime(hour: 6, minute: 0))
+        XCTAssertEqual(vm.preferredEndTime, ClockTime.defaultEnd)
+
+        vm.setPreferredEndTime(ClockTime(hour: 23, minute: 0))
+        XCTAssertEqual(vm.preferredStartTime, ClockTime(hour: 6, minute: 0), "Önceki başlangıç ataması korunmalı")
+    }
+
+    // MARK: - Valid/invalid range (Req 4)
+
+    func test_isTimeRangeValid_true_whenStartBeforeEnd() {
+        let vm = TripOptimizerConfigViewModel(stops: [stop(1)])
+        vm.setPreferredStartTime(ClockTime(hour: 8, minute: 0))
+        vm.setPreferredEndTime(ClockTime(hour: 20, minute: 0))
+        XCTAssertTrue(vm.isTimeRangeValid)
+    }
+
+    func test_isTimeRangeValid_false_whenStartEqualsEnd() {
+        let vm = TripOptimizerConfigViewModel(stops: [stop(1)])
+        let same = ClockTime(hour: 12, minute: 0)
+        vm.setPreferredStartTime(same)
+        vm.setPreferredEndTime(same)
+        XCTAssertFalse(vm.isTimeRangeValid, "core-api aynı değerleri de reddeder (end > start, >= değil)")
+    }
+
+    func test_isTimeRangeValid_false_whenStartAfterEnd() {
+        let vm = TripOptimizerConfigViewModel(stops: [stop(1)])
+        vm.setPreferredStartTime(ClockTime(hour: 19, minute: 0))
+        vm.setPreferredEndTime(ClockTime(hour: 9, minute: 0))
+        XCTAssertFalse(vm.isTimeRangeValid)
+    }
+
+    /// Req 4 "Optimize must not execute while the configuration is
+    /// invalid": geçerli bir mekan seçimi olsa bile, geçersiz bir zaman
+    /// aralığı `canOptimize`'ı false yapmalı.
+    func test_canOptimize_isFalse_whenTimeRangeInvalid_evenWithPlacesSelected() {
+        let vm = TripOptimizerConfigViewModel(stops: [stop(1), stop(2)])
+        XCTAssertTrue(vm.canOptimize)   // başlangıç durumu geçerli
+
+        vm.setPreferredStartTime(ClockTime(hour: 20, minute: 0))
+        vm.setPreferredEndTime(ClockTime(hour: 8, minute: 0))
+
+        XCTAssertFalse(vm.canOptimize)
+        XCTAssertFalse(vm.selectedPlaceIDs.isEmpty, "Mekan seçimi hâlâ dolu — engelleyen yalnızca zaman aralığı")
+    }
+
+    func test_canOptimize_isTrue_whenPlacesSelectedAndTimeRangeValid() {
+        let vm = TripOptimizerConfigViewModel(stops: [stop(1)])
+        vm.setPreferredStartTime(ClockTime(hour: 10, minute: 0))
+        vm.setPreferredEndTime(ClockTime(hour: 16, minute: 0))
+        XCTAssertTrue(vm.canOptimize)
+    }
 }

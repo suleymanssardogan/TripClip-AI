@@ -26,11 +26,17 @@ final class OptimizerEndpointTests: XCTestCase {
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
 
         XCTAssertEqual(json["selected_place_ids"] as? [Int], [12, 7, 19])
-        // start_date/preferred_*_time/strategy kasıtlı olarak gönderilmiyor —
-        // core-api'nin kendi varsayılanları kullanılır. duration_days da
-        // (Otomatik/nil varsayılanla) burada eklenmiyor — bkz. aşağıdaki
-        // test_optimizeTrip_bodyOmitsDurationDays_whenNil.
-        XCTAssertEqual(json.count, 1)
+        // preferred_start_time/end_time artık HER ZAMAN gönderiliyor (bkz.
+        // "Preferred Start/End Time Controls" milestone) — çağıran taraf
+        // belirtmezse core-api'nin kendi varsayılanlarıyla BİREBİR aynı
+        // değerler gider (ClockTime.defaultStart/defaultEnd), field
+        // atlanmaz. start_date/strategy kasıtlı olarak hâlâ gönderilmiyor —
+        // core-api'nin kendi varsayılanları (greedy_distance) kullanılır.
+        // duration_days ise (Otomatik/nil varsayılanla) burada eklenmiyor —
+        // bkz. aşağıdaki test_optimizeTrip_bodyOmitsDurationDays_whenNil.
+        XCTAssertEqual(json["preferred_start_time"] as? String, "09:00")
+        XCTAssertEqual(json["preferred_end_time"] as? String, "18:00")
+        XCTAssertEqual(json.count, 3)
     }
 
     func test_optimizeTrip_bodyOmitsDurationDays_whenNil() throws {
@@ -53,7 +59,48 @@ final class OptimizerEndpointTests: XCTestCase {
 
         XCTAssertEqual(json["selected_place_ids"] as? [Int], [12, 7])
         XCTAssertEqual(json["duration_days"] as? Int, 3)
-        XCTAssertEqual(json.count, 2)
+        XCTAssertEqual(json.count, 4)
+    }
+
+    // MARK: - preferred_start_time / preferred_end_time
+
+    func test_optimizeTrip_bodyIncludesCustomPreferredStartAndEndTime() throws {
+        let request = try Endpoint.optimizeTrip(
+            tripID: 1, placeIDs: [1],
+            preferredStartTime: ClockTime(hour: 10, minute: 30),
+            preferredEndTime: ClockTime(hour: 20, minute: 15)
+        ).urlRequest(baseURL: baseURL, token: nil)
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+
+        XCTAssertEqual(json["preferred_start_time"] as? String, "10:30")
+        XCTAssertEqual(json["preferred_end_time"] as? String, "20:15")
+    }
+
+    /// Yalnızca başlangıç saati değiştirilmesi, gövdedeki bitiş saatini
+    /// ETKİLEMEMELİ (spesifikasyonun kendi test gereksinimi).
+    func test_optimizeTrip_changingOnlyStartTime_leavesEndTimeAtDefault() throws {
+        let request = try Endpoint.optimizeTrip(
+            tripID: 1, placeIDs: [1], preferredStartTime: ClockTime(hour: 7, minute: 0)
+        ).urlRequest(baseURL: baseURL, token: nil)
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+
+        XCTAssertEqual(json["preferred_start_time"] as? String, "07:00")
+        XCTAssertEqual(json["preferred_end_time"] as? String, "18:00")   // ClockTime.defaultEnd, değişmedi
+    }
+
+    /// Yalnızca bitiş saati değiştirilmesi, gövdedeki başlangıç saatini
+    /// ETKİLEMEMELİ.
+    func test_optimizeTrip_changingOnlyEndTime_leavesStartTimeAtDefault() throws {
+        let request = try Endpoint.optimizeTrip(
+            tripID: 1, placeIDs: [1], preferredEndTime: ClockTime(hour: 22, minute: 0)
+        ).urlRequest(baseURL: baseURL, token: nil)
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+
+        XCTAssertEqual(json["preferred_start_time"] as? String, "09:00")  // ClockTime.defaultStart, değişmedi
+        XCTAssertEqual(json["preferred_end_time"] as? String, "22:00")
     }
 
     func test_optimizeTrip_setsAuthorizationHeader_whenTokenProvided() throws {

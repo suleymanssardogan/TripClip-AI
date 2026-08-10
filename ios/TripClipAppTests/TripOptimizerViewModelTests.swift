@@ -46,13 +46,15 @@ final class TripOptimizerViewModelTests: XCTestCase {
 
         await vm.optimize(tripID: 42, placeIDs: [1, 2, 3], auth: auth)
 
-        guard case .optimizeTrip(let tripID, let placeIDs, let durationDays) = fake.lastEndpoint else {
+        guard case .optimizeTrip(let tripID, let placeIDs, let durationDays, let startTime, let endTime) = fake.lastEndpoint else {
             XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
             return
         }
         XCTAssertEqual(tripID, 42)
         XCTAssertEqual(placeIDs, [1, 2, 3])
         XCTAssertNil(durationDays)  // çağrıda belirtilmedi -> Otomatik
+        XCTAssertEqual(startTime, .defaultStart)  // çağrıda belirtilmedi -> core-api'nin kendi varsayılanı
+        XCTAssertEqual(endTime, .defaultEnd)
         XCTAssertEqual(fake.lastToken, "test-token")
     }
 
@@ -67,11 +69,70 @@ final class TripOptimizerViewModelTests: XCTestCase {
 
         await vm.optimize(tripID: 42, placeIDs: [1, 2, 3], durationDays: 4, auth: auth)
 
-        guard case .optimizeTrip(_, _, let durationDays) = fake.lastEndpoint else {
+        guard case .optimizeTrip(_, _, let durationDays, _, _) = fake.lastEndpoint else {
             XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
             return
         }
         XCTAssertEqual(durationDays, 4)
+    }
+
+    // MARK: - Preferred start/end time forwarding (Req 5: request correctness)
+
+    func test_optimize_forwardsPreferredStartAndEndTime_whenProvided() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.itinerary())
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        await vm.optimize(
+            tripID: 42, placeIDs: [1, 2, 3],
+            preferredStartTime: ClockTime(hour: 7, minute: 30), preferredEndTime: ClockTime(hour: 21, minute: 0),
+            auth: auth
+        )
+
+        guard case .optimizeTrip(_, _, _, let startTime, let endTime) = fake.lastEndpoint else {
+            XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
+            return
+        }
+        XCTAssertEqual(startTime, ClockTime(hour: 7, minute: 30))
+        XCTAssertEqual(endTime, ClockTime(hour: 21, minute: 0))
+    }
+
+    /// Yalnızca başlangıç saati verildiğinde, bitiş saati core-api'nin kendi
+    /// varsayılanına düşmeli — çağıran tarafın bitiş saatini ETKİLEMEMELİ.
+    func test_optimize_changingOnlyStartTime_doesNotModifyEndTime() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.itinerary())
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        await vm.optimize(tripID: 1, placeIDs: [1], preferredStartTime: ClockTime(hour: 6, minute: 0), auth: auth)
+
+        guard case .optimizeTrip(_, _, _, let startTime, let endTime) = fake.lastEndpoint else {
+            XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
+            return
+        }
+        XCTAssertEqual(startTime, ClockTime(hour: 6, minute: 0))
+        XCTAssertEqual(endTime, .defaultEnd)
+    }
+
+    /// Yalnızca bitiş saati verildiğinde, başlangıç saati core-api'nin kendi
+    /// varsayılanına düşmeli — çağıran tarafın başlangıç saatini
+    /// ETKİLEMEMELİ.
+    func test_optimize_changingOnlyEndTime_doesNotModifyStartTime() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.itinerary())
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        await vm.optimize(tripID: 1, placeIDs: [1], preferredEndTime: ClockTime(hour: 23, minute: 0), auth: auth)
+
+        guard case .optimizeTrip(_, _, _, let startTime, let endTime) = fake.lastEndpoint else {
+            XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
+            return
+        }
+        XCTAssertEqual(startTime, .defaultStart)
+        XCTAssertEqual(endTime, ClockTime(hour: 23, minute: 0))
     }
 
     // MARK: - Error

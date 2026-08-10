@@ -5,7 +5,7 @@ The iOS UI for the [AI Trip Optimizer](trip-optimizer.md), consuming the
 generate a preview itinerary from an existing Trip Builder trip's stops,
 and revisit any previously generated one — never mutates the trip itself.
 
-Seven milestones so far:
+Eight milestones so far:
 - **v1 — Generate & preview**: "Optimize Trip" entry point on
   `TripDetailView`, a fresh itinerary generated and shown in
   `TripOptimizerView`.
@@ -35,12 +35,19 @@ Seven milestones so far:
   `MKDirections` — still day-separated, still falling back to a straight
   line per-segment when a route can't be calculated, still no external
   routing dependency. See "Real Road Route Visualization" below.
-- **v7 — Bidirectional Itinerary ↔ Map Interaction** (this update): the
-  itinerary day/stop list and the route map, previously independent, now
-  share one selection state — tapping a stop in the list focuses/centers
-  it on the map, and tapping a marker on the map highlights and scrolls to
-  the matching row in the list. See "Bidirectional Itinerary ↔ Map
+- **v7 — Bidirectional Itinerary ↔ Map Interaction**: the itinerary
+  day/stop list and the route map, previously independent, now share one
+  selection state — tapping a stop in the list focuses/centers it on the
+  map, and tapping a marker on the map highlights and scrolls to the
+  matching row in the list. See "Bidirectional Itinerary ↔ Map
   Interaction" below.
+- **v8 — Preferred Start/End Time Controls** (this update): the
+  `TripOptimizerConfigView` gains two time pickers — the optimizer's
+  existing `preferred_start_time`/`preferred_end_time` fields, already
+  used server-side since the very first optimizer milestone but never
+  before sent by iOS, are now real, user-editable, client-validated
+  inputs that reach every generate request. See "Preferred Start/End Time
+  Controls" below.
 
 ## Screen flow
 
@@ -230,10 +237,18 @@ enumerating the `Set` directly) and `durationDays` is passed through as-is
 already worked for every caller before this milestone.
 
 No UI-only state (e.g. `isSelecting`-style mode flags, scroll position)
-is ever sent — the request body contains exactly `selected_place_ids` and,
-optionally, `duration_days`, nothing else new.
+is ever sent — the request body contains exactly `selected_place_ids`,
+`duration_days` (optionally), and — as of v8 — `preferred_start_time`/
+`preferred_end_time` (always; see "Preferred Start/End Time Controls"
+below).
 
-### Why `preferred_start_time`/`preferred_end_time` are still not exposed
+### Why `preferred_start_time`/`preferred_end_time` are still not exposed — superseded by v8
+
+> **Superseded by v8.** This subsection described the deliberate scope
+> decision v4 made at the time. As of "Preferred Start/End Time Controls"
+> below, both fields are now exposed, client-validated, real UI controls.
+> Left intact below for historical accuracy about why v4 didn't include
+> them.
 
 Both fields already exist in the backend contract
 (`OptimizeTripRequest.preferred_start_time`/`preferred_end_time`, default
@@ -248,6 +263,264 @@ config screen) — exposing it well would meaningfully expand this
 milestone's scope rather than "fit naturally" into it, which the spec's
 own requirement 3 explicitly permits leaving alone. Flagged as a
 candidate for a focused future milestone (see "Future UI improvements").
+
+## Preferred Start/End Time Controls
+
+`TripOptimizerConfigView` gains a third section, `preferredTimeSection`,
+alongside the existing place-selection and duration sections — two time
+pickers exposing core-api's `OptimizeTripRequest.preferred_start_time`/
+`preferred_end_time`. These fields have existed in the backend contract
+since the optimizer's very first milestone and are actively used by
+*both* `GreedyDistanceStrategy` and `ORToolsRouteOptimizationStrategy` to
+derive each day's scheduling window (see `docs/trip-optimizer.md`
+"Algorithm") — this milestone doesn't add new backend capability, it
+exposes capability that already existed and was already exercised
+server-side, just never reachable from iOS.
+
+### Was a backend/BFF change necessary? No
+
+Every piece of the contract this milestone needed already existed,
+field-for-field, before any code was written:
+
+- core-api `OptimizeTripRequest.preferred_start_time`/`preferred_end_time`
+  (`str`, default `"09:00"`/`"18:00"`, validated as `"HH:MM"` with
+  `end > start` required — see `OptimizationService._validate_hhmm`/the
+  `preferred_end_time <= preferred_start_time` rejection).
+- mobile-bff's own `OptimizeTripRequest` mirror (`trip_optimization.py`)
+  — identical field names/types/defaults, pure pass-through
+  (`body.model_dump()`), no transformation.
+- Backend test coverage for both parameters was already adequate before
+  this milestone: `test_trip_optimization.py` covers format/range
+  validation at the route level; `test_optimization_strategy.py` uses
+  non-default `preferred_start_time`/`preferred_end_time` values to prove
+  the *day-splitting behavior itself* responds to them (not just accepts
+  them). Per the spec's own "add the smallest necessary core-api test(s)
+  only if coverage is insufficient" — it wasn't, so **no core-api, BFF, or
+  test changes were made on the backend side at all.** This milestone is
+  100% additive iOS work reusing an already-complete, already-tested
+  contract.
+
+### Architecture/design decision: extend, don't duplicate
+
+Per the spec's own "if an existing configuration ViewModel already
+exists, extend it instead of creating another independent state
+container," the new state lives entirely inside the existing
+`TripOptimizerConfigViewModel` — no second config object, no parallel
+settings screen. The same pattern `durationDays`/`incrementDuration`/
+`decrementDuration` established in v4 is followed exactly: `private(set)`
+properties + explicit setter methods, never a raw public `var` the View
+could mutate arbitrarily.
+
+### `ClockTime`: a type-safe internal representation
+
+Per the spec's "do not pass arbitrary display strings through the
+application... convert to the API's expected representation only at the
+network boundary," a new small value type,
+`Core/Models/ClockTime.swift`, carries hour/minute through the entire
+app — `TripOptimizerConfigViewModel`, `TripOptimizerViewModel`, and
+`TripOptimizerView.Mode.generate` all pass `ClockTime` values, never raw
+`"HH:MM"` strings:
+
+```swift
+struct ClockTime: Equatable, Comparable {
+    var hour: Int
+    var minute: Int
+
+    static func < (lhs: ClockTime, rhs: ClockTime) -> Bool {
+        (lhs.hour, lhs.minute) < (rhs.hour, rhs.minute)
+    }
+
+    var apiValue: String { String(format: "%02d:%02d", hour, minute) }
+}
+```
+
+Deliberately **not** `Date` — a clock time has no date, no timezone, no
+DST; modeling it as a bare `(hour, minute)` pair avoids importing
+irrelevant complexity (which calendar day? which timezone?) that `Date`
+would otherwise carry for no benefit. `apiValue` is the *only* place the
+`"HH:MM"` string is produced, and it's called from exactly one place in
+the whole app: `Endpoint.body`'s `.optimizeTrip` case — the literal
+network boundary, right before `JSONSerialization.data(withJSONObject:)`.
+
+Two static defaults mirror core-api's own exactly, byte-for-byte (Req 3
+"the iOS UI should reflect those [backend] values," not an invented
+default):
+
+```swift
+extension ClockTime {
+    static let defaultStart = ClockTime(hour: 9, minute: 0)   // core-api: "09:00"
+    static let defaultEnd   = ClockTime(hour: 18, minute: 0)  // core-api: "18:00"
+}
+```
+
+A small bridge to `Date` exists *only* for `DatePicker` binding (SwiftUI
+has no native "time-only" picker type) — `asDate`/`init(date:)` — and is
+never used for anything else; comparison, validation, and encoding all
+happen on `ClockTime` directly, never on the bridged `Date`.
+
+### UI: two `DatePicker`s in the existing config screen
+
+```
+Planlama Saatleri
+┌─────────────────────────────┐
+│ Başlangıç Saati        09:00 │
+├─────────────────────────────┤
+│ Bitiş Saati             18:00 │
+└─────────────────────────────┘
+Optimizer günlük planı bu saat aralığına sığdırır.
+Mekanların kendi açılış saatleri ayrıca dikkate alınır.
+```
+
+No custom control was built — the project had no prior `DatePicker` usage
+anywhere to "reuse," so this milestone establishes the pattern using
+SwiftUI's own native `DatePicker(selection:displayedComponents: .hourAndMinute)`
+in its default (`.compact`) style, which already matches the spec's own
+mockup (`"Start time" / "09:00"`, a label plus a tappable HH:MM value).
+The section itself reuses the exact card recipe `durationSection`
+established (`AppColors.surface` background, `AppColors.border` 1pt
+stroke, 16pt corner radius, 16pt horizontal padding) — visually
+indistinguishable in style from the duration control next to it, per Req
+10's "keep the UI consistent with the rest of the app." The picker row is
+wrapped in `.environment(\.locale, Locale(identifier: "tr_TR"))` so it
+always renders 24-hour `"09:00"`-style time regardless of the device's
+own region setting — the same locale-forcing precedent `APIDate.displayString`
+already established for date formatting elsewhere in this app.
+
+### Defaults (Req 3)
+
+`TripOptimizerConfigViewModel.preferredStartTime`/`preferredEndTime`
+initialize to `.defaultStart`/`.defaultEnd` (`09:00`/`18:00`) — a user who
+opens the config screen and never touches the new pickers gets a request
+byte-identical, field values included, to what core-api would have
+defaulted to on its own. The only observable change for that user is that
+the fields are now *explicitly present* in the request body rather than
+omitted (see "Request wire format" below) — the resulting optimization
+behavior is unchanged either way, since core-api's own default is the
+value now being sent explicitly.
+
+### Validation (Req 4)
+
+```swift
+var isTimeRangeValid: Bool { preferredStartTime < preferredEndTime }
+var canOptimize: Bool { !selectedPlaceIDs.isEmpty && isTimeRangeValid }
+```
+
+Mirrors core-api's own rule exactly — `preferred_end_time` must be
+*strictly* after `preferred_start_time` (equal is rejected too, matching
+`OptimizationService`'s `<=` check, not `<`). `canOptimize` — the same
+property that already gated the "Optimize Et" button on a non-empty place
+selection since v4 — now gates on **both** conditions; no new
+disablement mechanism was introduced, the existing one was extended
+(reused per Req 10/11). The bottom bar's message distinguishes which
+condition is failing (`"En az bir mekan seçmelisin"` vs. `"Başlangıç
+saati bitiş saatinden önce olmalı"`) rather than a single generic
+"invalid" string, so the user always knows what to fix without guessing.
+
+**No auto-correction.** Changing the start time never touches the end
+time and vice versa (`setPreferredStartTime`/`setPreferredEndTime` each
+write exactly one property) — if that produces an invalid range, the UI
+surfaces it and blocks "Optimize Et" rather than silently nudging the
+other value. This was a deliberate choice, not an oversight: the same
+"structural, not corrective" philosophy the duration stepper already
+uses (it clamps at its own bounds rather than reaching into unrelated
+state), and it's exactly what the spec's own test list requires
+("changing only the start time doesn't modify the end time").
+
+**Overnight ranges are out of scope**, per the spec's explicit exclusion
+— `isTimeRangeValid` requires `start < end` within a single day, with no
+wraparound. This isn't an arbitrary iOS-side restriction: core-api's
+shared `_parse_opening_hours` (used by both strategies for place opening
+hours) doesn't support midnight-crossing ranges either (see
+`docs/trip-optimizer.md` "Future improvements" → `_parse_opening_hours`
+overnight support), so an overnight *preferred* window would be
+inconsistent with a constraint the backend can't yet honor either way.
+
+### Request wire format (Req 1, Req 2, Req 5)
+
+`Endpoint.optimizeTrip` gained two new associated values, both with
+defaults matching core-api's own:
+
+```swift
+case optimizeTrip(
+    tripID: Int, placeIDs: [Int], durationDays: Int? = nil,
+    preferredStartTime: ClockTime = .defaultStart, preferredEndTime: ClockTime = .defaultEnd
+)
+```
+
+**Unlike `duration_days`, these two fields are never omitted** —
+`Endpoint.body`'s `.optimizeTrip` case now always includes both:
+
+```swift
+var body: [String: Any] = [
+    "selected_place_ids":   placeIDs,
+    "preferred_start_time": preferredStartTime.apiValue,
+    "preferred_end_time":   preferredEndTime.apiValue,
+]
+if let durationDays { body["duration_days"] = durationDays }
+```
+
+This is a deliberate asymmetry, not an inconsistency: `duration_days` has
+a genuine three-state UI (`Otomatik`/nil vs. a specific day count) where
+field omission *is* the "Otomatik" signal to the backend. Preferred
+start/end time have no such tri-state — the picker always shows a
+concrete value, so there is nothing for field-omission to *mean*; always
+sending the field is the only representation that matches what the user
+actually sees on screen. This is also, mechanically, why v4's own
+`test_optimizeTrip_bodyContainsSelectedPlaceIDs` test (previously
+asserting the request body contained *only* `selected_place_ids`, i.e.
+`json.count == 1`) was updated this milestone to `json.count == 3` — the
+old assertion's own justifying comment ("preferred_*_time... kasıtlı
+olarak gönderilmiyor") is no longer true, by design.
+
+The full chain, each layer forwarding the same `ClockTime` values
+unchanged: `TripOptimizerConfigView`'s pickers write through
+`TripOptimizerConfigViewModel.setPreferredStartTime`/`setPreferredEndTime`
+→ "Optimize Et" constructs `TripOptimizerView.Mode.generate(...,
+preferredStartTime:, preferredEndTime:)` → `TripOptimizerView.load()`
+forwards them to `TripOptimizerViewModel.optimize(...)` → which passes
+them straight to `Endpoint.optimizeTrip(...)` → `.apiValue` converts to
+`"HH:MM"` at the JSON boundary → mobile-bff passes the body through
+unchanged → core-api's existing, already-tested validation and strategy
+logic take over. No layer in this chain re-validates, re-formats, or
+duplicates the time-range check beyond the one client-side
+`isTimeRangeValid` gate — core-api's own validation remains the
+authoritative check (Req 6 "the backend remains the source of truth").
+
+### Opening hours interaction (Req 7)
+
+Preferred start/end time and a place's own opening hours are — and
+remain — two independent constraints that core-api combines; nothing
+about this changes here, and iOS makes no attempt to reproduce the
+combination logic:
+
+```
+User preferred window:  09:00 ──────────────────────── 18:00
+Place opening hours:            10:00 ── 12:00
+```
+
+If the optimizer's schedule would arrive at that place before `10:00`,
+the strategy waits (silently — see `docs/trip-optimizer.md` "Algorithm"
+step 3); if it would arrive after `12:00`, a warning is added but the
+place stays scheduled. iOS has no visibility into any specific place's
+opening hours at configuration time (that data lives in `PlaceInput`,
+core-api-only) — the config screen's helper text says exactly this,
+plainly, rather than iOS attempting any prediction: *"Optimizer günlük
+planı bu saat aralığına sığdırır. Mekanların kendi açılış saatleri ayrıca
+dikkate alınır."* ("The optimizer fits the daily plan into this time
+range. Places' own opening hours are considered separately.")
+
+### Saved itinerary / Apply behavior (Req 8, Req 9)
+
+Untouched, by construction: `TripOptimizerConfigView` (and therefore
+these new controls) is never part of the `.viewSaved` path —
+`ItineraryHistoryView`'s `NavigationLink` still goes straight to
+`TripOptimizerView(mode: .viewSaved(itineraryID:))`, exactly as it has
+since v2, never through the config screen. `TripOptimizerViewModel.loadItinerary`
+and `.applyToTrip` were not modified in any way by this milestone — no
+new parameter, no new call site, no behavior change. Opening a saved
+itinerary still only ever calls `GET /itineraries/{id}`; applying one
+still only ever calls `POST /itineraries/{id}/apply`. The preferred-time
+controls exist exclusively on the `.generate` path's input side.
 
 ## Map Visualization
 
@@ -1274,16 +1547,16 @@ history-exists flag), `.itineraryDetail` from
 `default: return nil`, matching core-api's and both BFFs' own no-body
 apply routes.
 
-`durationDays` (new this milestone — see "Optimizer Configuration") is
-the only field `TripOptimizerConfigView` actually controls at the wire
-level: `Endpoint.body` adds `duration_days` to the JSON payload only when
-non-nil, so "Otomatik" still means *field omitted entirely*, not
-`"duration_days": null`. `start_date`/`preferred_start_time`/
-`preferred_end_time`/`strategy` are still intentionally omitted —
-core-api's own `OptimizeTripRequest` defaults apply (09:00–18:00,
-`greedy_distance`); see "Optimizer Configuration → Why
-preferred_start_time/preferred_end_time are still not exposed" for why
-duration got a control this milestone but time-of-day didn't.
+`durationDays` (v4 — see "Optimizer Configuration") is the one field
+`TripOptimizerConfigView` sends *conditionally*: `Endpoint.body` adds
+`duration_days` to the JSON payload only when non-nil, so "Otomatik"
+still means *field omitted entirely*, not `"duration_days": null`.
+`preferred_start_time`/`preferred_end_time` (v8 — see "Preferred
+Start/End Time Controls") are, by contrast, **always** included —
+they have no "Otomatik" tri-state, so there is no field-omission
+signal for them to carry. `start_date`/`strategy` remain intentionally
+omitted — core-api's own `OptimizeTripRequest` defaults still apply
+(`greedy_distance`, no fixed start date).
 
 New Codable models (`Core/Models/OptimizerModels.swift`) mirror core-api's
 `OptimizeTripResponse` field-for-field (`Itinerary`, `ItineraryDay`,
@@ -1396,6 +1669,11 @@ No new design tokens were needed — `AppColors.warning` already existed
   `onSelectStop` + made every row an interactive, highlightable `Button`
   in v7) — previously pure display, now also reports taps upward and
   reflects the shared selection.
+- **`ClockTime`** (new, v8, `Core/Models/ClockTime.swift`) — the
+  type-safe hour/minute value type described in "Preferred Start/End Time
+  Controls" above. Not a view; carries the preferred-time state through
+  `TripOptimizerConfigViewModel`/`TripOptimizerViewModel`/`Endpoint`,
+  converting to `"HH:MM"` only at the network boundary.
 
 ## Itinerary History
 
@@ -1487,7 +1765,7 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
-103 tests, ten files:
+131 tests, eleven files:
 
 - **`Support/FakeAPIClient.swift`** — `APIClientProtocol` test double.
   Returns a canned `Result<Any, Error>`; two independent `AsyncGate`s (a
@@ -1502,7 +1780,8 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   that passed the first several runs, then failed once under
   scheduler load (a genuinely flaky assertion, not a one-off fluke),
   which is why it was replaced with this explicit signal instead.
-- **`TripOptimizerViewModelTests.swift`** (26 tests) — the original 10
+- **`TripOptimizerViewModelTests.swift`** (29 tests: 26 through v7, plus 3
+  new this milestone) — the original 10
   `optimize()` tests (initial state, success, server/network errors, a
   401 logs the session out *without* setting `error`, no-token
   short-circuit, deterministic loading-state + re-entrancy via
@@ -1520,10 +1799,21 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   call while the first is in flight returns `false` immediately, API
   called only once), and repeated application succeeding twice in a row
   (mirrors core-api's own "can be applied repeatedly" guarantee) — plus
-  **1 new test this milestone**, `test_optimize_forwardsDurationDays_
-  whenProvided`, confirming `optimize(... durationDays: 4 ...)` reaches
-  `.optimizeTrip` with that exact value (the existing forwarding test was
-  also updated to assert `durationDays` is `nil` when the caller omits it).
+  `test_optimize_forwardsDurationDays_whenProvided` (v4), confirming
+  `optimize(... durationDays: 4 ...)` reaches `.optimizeTrip` with that
+  exact value — plus **3 new this milestone (v8)**:
+  `test_optimize_forwardsPreferredStartAndEndTime_whenProvided` (a custom
+  start/end pair reaches `.optimizeTrip` unchanged),
+  `test_optimize_changingOnlyStartTime_doesNotModifyEndTime`, and
+  `test_optimize_changingOnlyEndTime_doesNotModifyStartTime` (each
+  confirms the *other* time param falls back to `ClockTime.defaultStart`/
+  `defaultEnd` when the caller only specifies one — the forwarding-level
+  proof of the spec's own "changing only X doesn't modify Y" requirement).
+  The two pre-existing forwarding tests
+  (`test_optimize_forwardsTripIDAndPlaceIDs_andBearerToken`,
+  `test_optimize_forwardsDurationDays_whenProvided`) were updated to also
+  assert the default `ClockTime` values now present in every
+  `.optimizeTrip` payload.
 - **`ItineraryHistoryViewModelTests.swift`** (10 tests) — initial
   state; `load()` happy path with an assertion on the exact endpoint
   called (`.itineraries(tripID:)`); **newest-first ordering**, both as a
@@ -1537,28 +1827,70 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   unchanged by this milestone — direct evidence that the saved-itinerary
   path (`.viewSaved`, reached only through this screen's own rows) never
   touches the new configuration screen or its ViewModel.
-- **`OptimizerEndpointTests.swift`** (11 tests) — networking tests, pure
-  and synchronous: `Endpoint.urlRequest` path/method/body/`Authorization`
-  header, plus JSON-decoding tests against realistic server payloads.
-  **2 new this milestone**: `duration_days` is omitted from the body when
-  `nil` (the default — byte-identical to every pre-v4 request), and
-  included with the exact value when provided.
-- **`TripOptimizerConfigViewModelTests.swift`** (17 tests, new) — pure
-  local state, no `FakeAPIClient` involved at all (this ViewModel makes
-  no network calls — see "Optimizer Configuration"): default selection is
-  every stop; default duration is Otomatik (`nil`); an empty `stops` array
-  produces an empty, non-optimizable selection; toggling
-  deselects/reselects correctly; `selectAll`/`deselectAll`; selected count
-  reflects partial selections; `canOptimize` is `false` only at exactly
-  zero selected (confirmed `true` at exactly one); duration increment from
-  Otomatik lands on `1`, stops exactly at the `30`-day upper bound even
-  after many extra increments; duration decrement from `1` returns to
-  Otomatik, and decrementing while already at Otomatik is a no-op (never
-  produces `0` or negative); a 100-call increment/decrement stress test
-  confirming the value never leaves `[1, 30]` or `nil`; and
-  `selectedPlaceIDsInTripOrder` preserving the trip's own stop order
-  regardless of selection/toggle order (not `Set` iteration order), both
-  for a full selection and a partial one.
+- **`OptimizerEndpointTests.swift`** (14 tests: 11 through v4, plus 3 new
+  this milestone) — networking tests, pure and synchronous:
+  `Endpoint.urlRequest` path/method/body/`Authorization` header, plus
+  JSON-decoding tests against realistic server payloads. `duration_days`
+  is omitted from the body when `nil` (the default — byte-identical to
+  every pre-v4 request), and included with the exact value when provided
+  (v4). **3 new this milestone (v8)**:
+  `test_optimizeTrip_bodyIncludesCustomPreferredStartAndEndTime` (both
+  fields encode to the exact `"HH:MM"` string, zero-padded),
+  `test_optimizeTrip_changingOnlyStartTime_leavesEndTimeAtDefault`, and
+  `test_optimizeTrip_changingOnlyEndTime_leavesStartTimeAtDefault` — the
+  request-encoding-level proof that each `ClockTime` parameter is
+  independent. The two pre-existing body-shape tests
+  (`test_optimizeTrip_bodyContainsSelectedPlaceIDs`,
+  `test_optimizeTrip_bodyIncludesDurationDays_whenProvided`) had their
+  `json.count`/field assertions updated to reflect that
+  `preferred_start_time`/`preferred_end_time` are now always present
+  (`1`→`3`, `2`→`4`) — see "Preferred Start/End Time Controls → Request
+  wire format" above for why this is a deliberate, not accidental, change
+  to those tests.
+- **`TripOptimizerConfigViewModelTests.swift`** (28 tests: 17 from v4,
+  plus 11 new this milestone) — pure local state, no `FakeAPIClient`
+  involved at all (this ViewModel makes no network calls — see "Optimizer
+  Configuration"): default selection is every stop; default duration is
+  Otomatik (`nil`); an empty `stops` array produces an empty,
+  non-optimizable selection; toggling deselects/reselects correctly;
+  `selectAll`/`deselectAll`; selected count reflects partial selections;
+  `canOptimize` is `false` only at exactly zero selected (confirmed `true`
+  at exactly one); duration increment from Otomatik lands on `1`, stops
+  exactly at the `30`-day upper bound even after many extra increments;
+  duration decrement from `1` returns to Otomatik, and decrementing while
+  already at Otomatik is a no-op (never produces `0` or negative); a
+  100-call increment/decrement stress test confirming the value never
+  leaves `[1, 30]` or `nil`; and `selectedPlaceIDsInTripOrder` preserving
+  the trip's own stop order regardless of selection/toggle order (not
+  `Set` iteration order), both for a full selection and a partial one.
+  **11 new this milestone (v8)**: default `preferredStartTime`/
+  `preferredEndTime` match `ClockTime.defaultStart`/`defaultEnd` exactly
+  (`"09:00"`/`"18:00"`); the default range is valid; `setPreferredStartTime`
+  changes only the start time, `setPreferredEndTime` changes only the end
+  time (each asserted by checking the *other* property is untouched — the
+  spec's own "changing only X doesn't modify Y" requirement, tested at its
+  most direct level); a sequential-calls test confirming an earlier
+  assignment survives a later, different setter call; `isTimeRangeValid`
+  true when start < end, false when start == end (core-api rejects equal
+  values too, not just start > end), false when start > end; and —
+  directly proving Req 4's "Optimize must not execute while the
+  configuration is invalid" — `canOptimize` is `false` when the time range
+  is invalid *even with a non-empty place selection* (isolating that the
+  time check, not the place check, is what's blocking), and `true` when
+  both conditions hold.
+- **`ClockTimeTests.swift`** (11 tests, new this milestone) — pure
+  `XCTest` against `ClockTime`, no SwiftUI/networking involved:
+  `apiValue` zero-pads single-digit hour/minute (`9,0` → `"09:00"`) and
+  leaves double-digit values alone (`18,30` → `"18:30"`), including
+  midnight (`"00:00"`); `defaultStart`/`defaultEnd` encode to core-api's
+  exact `"09:00"`/`"18:00"`; `Comparable` orders by hour first, then
+  minute, treats equal times as neither-less-than-the-other (not
+  accidentally always-`true` or always-`false`), and confirms
+  `defaultStart < defaultEnd`; and the `Date` bridge round-trips
+  hour/minute exactly (`ClockTime(date: original.asDate) == original`),
+  including at midnight — the seam that makes `DatePicker` binding
+  possible without ever touching `ClockTime`'s own comparison/encoding
+  logic.
 - **`OptimizerRouteMapDataTests.swift`** (19 tests: the original 13 from
   v5, plus 6 new this milestone) — pure `XCTest` against
   `OptimizerRouteMapData`, no MapKit/SwiftUI rendering involved (see "Map
@@ -1646,44 +1978,44 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
 
 ```
 Test Suite 'All tests' passed
-Executed 103 tests, with 0 failures (0 unexpected) in 0.103-0.134s
+Executed 131 tests, with 0 failures (0 unexpected) in 0.130-0.158s
 ```
 
-Full `xcodebuild build`/`clean test` also verified clean, no new warnings
-beyond the same two pre-existing ones already present before this
-milestone (`MKPlacemark(coordinate:)`/`MKMapItem(placemark:)` deprecation
-notices in `TripMapView.swift`/`OptimizerRouteCalculator.swift`, and one
-unrelated `?? "Yüklenemedi."` nil-coalescing warning in
-`TripOptimizerView.swift`'s pre-existing error state — neither touched or
-introduced by this milestone; the project was regenerated via `xcodegen
-generate` first, since new source/test files were added). This milestone
-made **no core-api, mobile-bff, or web-bff changes** and no
-optimizer-algorithm changes — the counts from the previous milestones'
-backend/BFF suites stand unchanged.
+Full `xcodebuild clean test` (a genuinely clean rebuild, not incremental)
+also verified no new warnings — every warning present traces to
+pre-existing, untouched files (`TripMapView.swift`/`OptimizerRouteCalculator.swift`
+`MKPlacemark`/`MKMapItem` deprecations, a pre-existing nil-coalescing
+warning in `TripOptimizerView.swift`'s error state, and a handful of
+scattered warnings in Auth/Home/Library/Processing/AppDelegate files this
+milestone never touched). This milestone made **no core-api, mobile-bff,
+or web-bff changes** — see "Preferred Start/End Time Controls → Was a
+backend/BFF change necessary? No" above — so no backend/BFF suite reruns
+were required; the counts from the previous milestones' backend/BFF
+suites stand unchanged.
 
-Verified stable across repeated full-suite `xcodebuild test` runs. One
-run mid-development did show a single, isolated failure in a **v6** test
-(`OptimizerRouteCalculatorTests.test_load_twoDays_neverRequestsAcrossDayBoundary`,
-a file untouched by this milestone) under heavy concurrent build/test
-system load; re-running that suite alone immediately passed (0.002s), and
-two subsequent full 103-test runs both passed cleanly — confirming a
-transient scheduling flake under load, not a regression introduced here
-(consistent with this test family's own known sensitivity to system load,
-already documented in "Real Road Route Visualization → Testing").
+Verified stable across repeated full-suite `xcodebuild test` runs,
+including the clean rebuild — no flakes observed this milestone (the v6
+`OptimizerRouteCalculatorTests` flake noted in earlier milestones' test
+logs is a known, pre-existing, load-dependent sensitivity in that
+specific async test family, unrelated to and untouched by this
+milestone's changes).
 
 A live Simulator launch-and-crash-free check was performed (install →
-launch → screenshot of the initial screen, confirming the app — now also
-wiring a `ScrollViewReader`, a `Binding<OptimizerSelection>` between three
-components, and a new `MKMapViewDelegate.didSelect` — still boots and
-renders normally). A full interactive tap-through (generating a real
-multi-day itinerary against a running backend, tapping a stop in the list
-and watching the map focus it, tapping a marker and watching the list
-scroll to it, switching days via a stop tap) was **not** performed in
-this environment — same limitation as every prior milestone's testing
-notes (no XCUITest/accessibility automation harness here) — that level of
-verification relies on the 103 passing automated tests (12 of them new
-this milestone, directly exercising the selection/identity/day-switch
-logic against fakes and pure values) plus the clean build instead.
+launch → screenshot of the initial screen, confirming the app — now
+additionally containing two `DatePicker`s, the first in the project —
+still boots and renders normally). A full interactive tap-through
+(opening the config screen, adjusting both time pickers, confirming the
+"Optimize Et" button disables on an invalid range and re-enables on a
+valid one, generating a real itinerary against a running backend with
+non-default preferred times, and confirming the resulting schedule
+respects them) was **not** performed in this environment — same
+limitation as every prior milestone's testing notes (no
+XCUITest/accessibility automation harness here, and reaching this screen
+requires a live backend + authenticated session + a real trip with
+stops) — that level of verification relies on the 131 passing automated
+tests (28 of them new this milestone, directly exercising default values,
+independent start/end updates, range validation, request encoding, and
+request forwarding) plus the clean build instead.
 
 ## Assumptions / limitations (v2 — Itinerary History)
 
@@ -1826,16 +2158,39 @@ to v5's straight-line rendering by design, not as a bug).
   worth calling out as a deliberate non-symmetry: MapKit deselection is a
   map-only visual event, not a selection-clearing one.
 
+## Assumptions / limitations (v8 — Preferred Start/End Time Controls)
+
+- **No overnight ranges** — `isTimeRangeValid` requires `start < end`
+  within a single day; deliberately, per the spec's own exclusion (see
+  "Preferred Start/End Time Controls → Validation" above). Not addressable
+  without core-api's shared `_parse_opening_hours` first gaining
+  midnight-crossing support (already tracked in `docs/trip-optimizer.md`
+  "Future improvements" independently of this milestone).
+- **No date or timezone selection** — `ClockTime` is deliberately
+  date/timezone-less; `start_date` remains unexposed on iOS exactly as it
+  was before this milestone (out of scope per the spec's own exclusions).
+- **No per-place opening-hours preview in the config screen** — the
+  helper text explains that opening hours are a separate, place-level
+  constraint, but doesn't show any specific place's hours (that data,
+  `PlaceInput.opening_hours`, is core-api-only and not returned by any
+  endpoint iOS calls at configuration time). Purely informational text,
+  not a missing feature this milestone was asked to build.
+- **No persistence of the chosen times across screen visits** —
+  `TripOptimizerConfigViewModel` is created fresh (defaults restored)
+  every time the config screen opens, same "no persistence of UI-only
+  state" pattern already established for place selection and duration
+  (see "Assumptions / limitations (v4)").
+- **`DatePicker`'s `.compact` style is the only style used** — no
+  `.wheel`/`.graphical` alternative was evaluated or offered; `.compact`
+  was chosen as SwiftUI's default, standard, space-efficient style for a
+  single HH:MM value in a scrollable form, matching the spec's own
+  mockup shape.
+
 ## Future UI improvements
 
 Ranked by what unlocks the most value next:
 
-1. **`preferred_start_time`/`preferred_end_time` controls** — expose the
-   remaining constraint core-api already accepts but v4 deliberately left
-   alone (see "Optimizer Configuration" above for why). Still the natural
-   next increment now that place selection, duration, and the routed,
-   interactive map all exist.
-2. **Persist the route cache across screen visits** — today
+1. **Persist the route cache across screen visits** — today
    `OptimizerRouteCalculator`'s cache lives only as long as
    `OptimizerRouteMapSection`'s `@State` (see "Real Road Route
    Visualization → Known limitations"). A small keyed disk/memory cache
@@ -1843,16 +2198,20 @@ Ranked by what unlocks the most value next:
    saved itinerary from Itinerary History skip re-requesting routes
    already resolved on a previous visit — a pure performance win, no
    behavior change.
-3. **Walking/transit transport type toggle** — `MKDirectionsRoutingProvider`
+2. **Walking/transit transport type toggle** — `MKDirectionsRoutingProvider`
    is hardcoded to `.automobile` (deliberately, v6's own scope; see
    "Known limitations"). Exposing `MKDirectionsTransportType` as a
    user-facing toggle would be a contained change, localized to that one
    type.
-4. **Persist the selected day/stop across screen visits** — see
+3. **Persist the selected day/stop across screen visits** — see
    "Assumptions / limitations (v7)" above; would need `OptimizerSelection`
    to move from plain `@State` to something durable (e.g. `UserDefaults`
    keyed by itinerary ID), a small, self-contained addition on top of the
    architecture this milestone put in place.
+4. **Overnight preferred-time ranges** — blocked on core-api's shared
+   `_parse_opening_hours` gaining midnight-crossing support first (see
+   "Assumptions / limitations (v8)" above); a backend-first change, not an
+   iOS-only one.
 5. **Delete a history entry** — needs a new core-api `DELETE
    /internal/itineraries/{id}` (+ BFF proxy) first; today history is
    append-only.

@@ -18,10 +18,23 @@ final class TripOptimizerViewModel {
     private(set) var isLoading = false
     private(set) var error:    APIError?
 
-    func optimize(tripID: Int, placeIDs: [Int], durationDays: Int? = nil, auth: AuthEnvironment) async {
+    /// `preferredStartTime`/`preferredEndTime` varsayılanları core-api'nin
+    /// kendi `OptimizeTripRequest` varsayılanlarıyla BİREBİR aynı (bkz.
+    /// `ClockTime.defaultStart`/`defaultEnd`) — çağıran taraf bunları
+    /// belirtmezse davranış, bu milestone'dan önceki (backend'in kendi
+    /// varsayılanlarına bırakılan) davranışla özdeş kalır.
+    func optimize(
+        tripID: Int, placeIDs: [Int], durationDays: Int? = nil,
+        preferredStartTime: ClockTime = .defaultStart, preferredEndTime: ClockTime = .defaultEnd,
+        auth: AuthEnvironment
+    ) async {
         await run(auth: auth) { token in
             try await auth.apiClient.send(
-                .optimizeTrip(tripID: tripID, placeIDs: placeIDs, durationDays: durationDays), token: token
+                .optimizeTrip(
+                    tripID: tripID, placeIDs: placeIDs, durationDays: durationDays,
+                    preferredStartTime: preferredStartTime, preferredEndTime: preferredEndTime
+                ),
+                token: token
             )
         }
     }

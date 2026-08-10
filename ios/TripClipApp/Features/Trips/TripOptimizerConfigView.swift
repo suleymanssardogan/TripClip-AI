@@ -32,6 +32,7 @@ struct TripOptimizerConfigView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     placesSection
                     durationSection
+                    preferredTimeSection
                     Color.clear.frame(height: 72)  // alttaki sabit çubuğa yer aç
                 }
                 .padding(.top, 16)
@@ -140,11 +141,78 @@ struct TripOptimizerConfigView: View {
         .buttonStyle(PressableButtonStyle())
     }
 
+    // MARK: - Preferred start/end time
+
+    /// Optimizerin günlük planlama penceresi — mekanların kendi açılış
+    /// saatleri AYRI bir kısıttır, bu ekran onları göstermez/düzenlemez
+    /// (bkz. `TripOptimizerConfigViewModel.preferredStartTime`,
+    /// docs/trip-optimizer.md "Opening hours"). `.hourAndMinute` dışında
+    /// bir bileşen yok — tarih/saat dilimi bu milestone'un kapsamı dışında
+    /// (Req 16).
+    private var preferredTimeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Planlama Saatleri")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(AppColors.textSecondary)
+                .textCase(.uppercase)
+                .tracking(0.8)
+                .padding(.horizontal, 16)
+
+            VStack(spacing: 0) {
+                timeRow(
+                    title: "Başlangıç Saati",
+                    time: Binding(
+                        get: { vm.preferredStartTime.asDate },
+                        set: { vm.setPreferredStartTime(ClockTime(date: $0)) }
+                    )
+                )
+                Divider().background(AppColors.border).padding(.horizontal, 16)
+                timeRow(
+                    title: "Bitiş Saati",
+                    time: Binding(
+                        get: { vm.preferredEndTime.asDate },
+                        set: { vm.setPreferredEndTime(ClockTime(date: $0)) }
+                    )
+                )
+            }
+            .background(AppColors.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(AppColors.border, lineWidth: 1))
+            .padding(.horizontal, 16)
+            // Cihazın bölge ayarı ne olursa olsun 24 saatlik "09:00" biçimi —
+            // APIDate'in kendi tr_TR zorlama emsaliyle tutarlı.
+            .environment(\.locale, Locale(identifier: "tr_TR"))
+
+            if vm.isTimeRangeValid {
+                Text("Optimizer günlük planı bu saat aralığına sığdırır. Mekanların kendi açılış saatleri ayrıca dikkate alınır.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(AppColors.textSecondary)
+                    .padding(.horizontal, 16)
+            } else {
+                Text("Başlangıç saati, bitiş saatinden önce olmalı.")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppColors.destructive)
+                    .padding(.horizontal, 16)
+            }
+        }
+    }
+
+    private func timeRow(title: String, time: Binding<Date>) -> some View {
+        DatePicker(selection: time, displayedComponents: .hourAndMinute) {
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(AppColors.text)
+        }
+        .tint(AppColors.accent)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
     // MARK: - Optimize CTA
 
     private var optimizeBar: some View {
         HStack {
-            Text(vm.canOptimize ? "\(vm.selectedCount) mekan seçildi" : "En az bir mekan seçmelisin")
+            Text(optimizeBarMessage)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(vm.canOptimize ? AppColors.text : AppColors.destructive)
 
@@ -155,7 +223,9 @@ struct TripOptimizerConfigView: View {
                     mode: .generate(
                         tripID: tripID,
                         placeIDs: vm.selectedPlaceIDsInTripOrder,
-                        durationDays: vm.durationDays
+                        durationDays: vm.durationDays,
+                        preferredStartTime: vm.preferredStartTime,
+                        preferredEndTime: vm.preferredEndTime
                     ),
                     onApplied: onApplied
                 )
@@ -177,5 +247,15 @@ struct TripOptimizerConfigView: View {
         .overlay(RoundedRectangle(cornerRadius: 20).stroke(AppColors.border, lineWidth: 1))
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
+    }
+
+    /// İki bağımsız geçersizlik nedeni olabildiğinden (Req 4: sıfır mekan
+    /// YA DA geçersiz zaman aralığı), tek bir jenerik "geçersiz" metni
+    /// yerine hangisinin geçerli olduğunu doğrudan söylüyoruz — kullanıcı
+    /// neyi düzeltmesi gerektiğini tahmin etmek zorunda kalmaz.
+    private var optimizeBarMessage: String {
+        if vm.selectedCount == 0 { return "En az bir mekan seçmelisin" }
+        if !vm.isTimeRangeValid { return "Başlangıç saati bitiş saatinden önce olmalı" }
+        return "\(vm.selectedCount) mekan seçildi"
     }
 }

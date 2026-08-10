@@ -25,6 +25,16 @@ final class TripOptimizerConfigViewModel {
     /// süre için de).
     private(set) var durationDays: Int?
 
+    /// Optimizerin günlük planlama penceresi — core-api'nin kendi
+    /// `OptimizeTripRequest.preferred_start_time`/`preferred_end_time`
+    /// varsayılanlarıyla BİREBİR aynı başlar (bkz. `ClockTime.defaultStart`/
+    /// `defaultEnd`, Req 3 "the iOS UI should reflect those values").
+    /// Mekanların kendi açılış saatleri AYRI bir kısıttır, buradan
+    /// etkilenmez/etkilemez — backend her ikisini de kendi tarafında
+    /// birleştirir (bkz. docs/trip-optimizer.md "Opening hours").
+    private(set) var preferredStartTime: ClockTime = .defaultStart
+    private(set) var preferredEndTime:   ClockTime = .defaultEnd
+
     /// `stops` sırası Trip'in kendi kanonik durak sırasıdır — varsayılan
     /// seçim TÜMÜ (spesifikasyonun 1. gereksinimi: "Default behavior should
     /// preserve today's behavior: all current Trip stops selected").
@@ -35,9 +45,31 @@ final class TripOptimizerConfigViewModel {
 
     var selectedCount: Int { selectedPlaceIDs.count }
 
-    /// Sıfır seçili mekanla optimize edilemez (spesifikasyonun 5.
-    /// gereksinimi: "zero selected places" istemci tarafında engellenmeli).
-    var canOptimize: Bool { !selectedPlaceIDs.isEmpty }
+    /// Backend'in kendi kuralıyla BİREBİR aynı (bkz. `OptimizationService`
+    /// `preferred_end_time <= preferred_start_time` reddi) — istemci bunu
+    /// önceden engelleyerek kullanıcıya sunucuya gitmeden anında geri
+    /// bildirim verir; sunucu doğrulaması yine de otoriter kalır.
+    var isTimeRangeValid: Bool { preferredStartTime < preferredEndTime }
+
+    /// Sıfır seçili mekanla YA DA geçersiz bir zaman aralığıyla optimize
+    /// edilemez (spesifikasyonun 5. gereksinimi genişletildi: "zero
+    /// selected places" + "invalid time range" ikisi de istemci tarafında
+    /// engellenmeli).
+    var canOptimize: Bool { !selectedPlaceIDs.isEmpty && isTimeRangeValid }
+
+    /// Yalnızca başlangıç saatini değiştirir — bitiş saatine ASLA
+    /// dokunmaz (spesifikasyonun kendi test gereksinimi: "changing only
+    /// the start time doesn't modify the end time").
+    func setPreferredStartTime(_ time: ClockTime) {
+        preferredStartTime = time
+    }
+
+    /// Yalnızca bitiş saatini değiştirir — başlangıç saatine ASLA
+    /// dokunmaz ("changing only the end time doesn't modify the start
+    /// time").
+    func setPreferredEndTime(_ time: ClockTime) {
+        preferredEndTime = time
+    }
 
     func isSelected(_ placeID: Int) -> Bool {
         selectedPlaceIDs.contains(placeID)
