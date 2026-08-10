@@ -46,13 +46,32 @@ final class TripOptimizerViewModelTests: XCTestCase {
 
         await vm.optimize(tripID: 42, placeIDs: [1, 2, 3], auth: auth)
 
-        guard case .optimizeTrip(let tripID, let placeIDs) = fake.lastEndpoint else {
+        guard case .optimizeTrip(let tripID, let placeIDs, let durationDays) = fake.lastEndpoint else {
             XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
             return
         }
         XCTAssertEqual(tripID, 42)
         XCTAssertEqual(placeIDs, [1, 2, 3])
+        XCTAssertNil(durationDays)  // çağrıda belirtilmedi -> Otomatik
         XCTAssertEqual(fake.lastToken, "test-token")
+    }
+
+    /// Optimizer Yapılandırma ekranında kullanıcı belirli bir gün sayısı
+    /// seçtiyse, bu istekle birlikte forward edilmeli — bkz.
+    /// TripOptimizerConfigViewModel.durationDays.
+    func test_optimize_forwardsDurationDays_whenProvided() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.itinerary())
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        await vm.optimize(tripID: 42, placeIDs: [1, 2, 3], durationDays: 4, auth: auth)
+
+        guard case .optimizeTrip(_, _, let durationDays) = fake.lastEndpoint else {
+            XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
+            return
+        }
+        XCTAssertEqual(durationDays, 4)
     }
 
     // MARK: - Error

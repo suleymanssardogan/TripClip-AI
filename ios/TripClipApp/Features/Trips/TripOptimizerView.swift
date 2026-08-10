@@ -17,7 +17,10 @@ import SwiftUI
 struct TripOptimizerView: View {
 
     enum Mode {
-        case generate(tripID: Int, placeIDs: [Int])
+        /// `durationDays` nil ise (Optimizer Yapılandırma ekranında
+        /// "Otomatik" seçiliyken) backend kendi gerekli gün sayısını türetir
+        /// — bkz. TripOptimizerConfigViewModel.
+        case generate(tripID: Int, placeIDs: [Int], durationDays: Int? = nil)
         case viewSaved(itineraryID: Int)
     }
 
@@ -111,8 +114,8 @@ struct TripOptimizerView: View {
 
     private func load() async {
         switch mode {
-        case .generate(let tripID, let placeIDs):
-            await vm.optimize(tripID: tripID, placeIDs: placeIDs, auth: auth)
+        case .generate(let tripID, let placeIDs, let durationDays):
+            await vm.optimize(tripID: tripID, placeIDs: placeIDs, durationDays: durationDays, auth: auth)
         case .viewSaved(let itineraryID):
             await vm.loadItinerary(itineraryID: itineraryID, auth: auth)
         }

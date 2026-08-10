@@ -32,8 +32,9 @@ struct TripDetailView: View {
             if let trip = vm.trip, !trip.allStops.isEmpty {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     NavigationLink(
-                        destination: TripOptimizerView(
-                            mode: .generate(tripID: trip.id, placeIDs: trip.allStops.map(\.placeId)),
+                        destination: TripOptimizerConfigView(
+                            tripID: trip.id,
+                            stops: trip.allStops,
                             onApplied: { Task { await vm.load(tripID: tripID, auth: auth) } }
                         )
                     ) {

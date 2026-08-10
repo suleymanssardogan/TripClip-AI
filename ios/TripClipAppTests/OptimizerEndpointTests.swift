@@ -26,9 +26,34 @@ final class OptimizerEndpointTests: XCTestCase {
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
 
         XCTAssertEqual(json["selected_place_ids"] as? [Int], [12, 7, 19])
-        // start_date/duration_days/preferred_*_time/strategy kasıtlı olarak
-        // gönderilmiyor — core-api'nin kendi varsayılanları kullanılır.
+        // start_date/preferred_*_time/strategy kasıtlı olarak gönderilmiyor —
+        // core-api'nin kendi varsayılanları kullanılır. duration_days da
+        // (Otomatik/nil varsayılanla) burada eklenmiyor — bkz. aşağıdaki
+        // test_optimizeTrip_bodyOmitsDurationDays_whenNil.
         XCTAssertEqual(json.count, 1)
+    }
+
+    func test_optimizeTrip_bodyOmitsDurationDays_whenNil() throws {
+        // Optimizer Yapılandırma ekranında "Otomatik" seçiliyken (varsayılan,
+        // bkz. TripOptimizerConfigViewModel) durationDays nil'dir — istek
+        // gövdesine hiç eklenmemeli, backend kendi gün sayısını türetsin.
+        let request = try Endpoint.optimizeTrip(tripID: 1, placeIDs: [1], durationDays: nil)
+            .urlRequest(baseURL: baseURL, token: nil)
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+
+        XCTAssertNil(json["duration_days"])
+    }
+
+    func test_optimizeTrip_bodyIncludesDurationDays_whenProvided() throws {
+        let request = try Endpoint.optimizeTrip(tripID: 1, placeIDs: [12, 7], durationDays: 3)
+            .urlRequest(baseURL: baseURL, token: nil)
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+
+        XCTAssertEqual(json["selected_place_ids"] as? [Int], [12, 7])
+        XCTAssertEqual(json["duration_days"] as? Int, 3)
+        XCTAssertEqual(json.count, 2)
     }
 
     func test_optimizeTrip_setsAuthorizationHeader_whenTokenProvided() throws {

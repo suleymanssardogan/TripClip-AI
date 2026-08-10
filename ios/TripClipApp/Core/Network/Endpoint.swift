@@ -51,7 +51,7 @@ enum Endpoint {
     // pencereli bir itinerary üretir (bkz. docs/trip-optimizer-bff.md). Trip
     // Builder'ın kendi TSP rotasını (createTrip) DEĞİŞTİRMEZ — ayrı, kalıcı
     // bir önizleme.
-    case optimizeTrip(tripID: Int, placeIDs: [Int])
+    case optimizeTrip(tripID: Int, placeIDs: [Int], durationDays: Int? = nil)
     case itineraries(tripID: Int)
     case itineraryDetail(itineraryID: Int)
     /// Kayıtlı bir itinerary'i Trip'in kanonik TripStop listesine uygular
@@ -89,7 +89,7 @@ extension Endpoint {
         case .tripDetail(let id):           return "/api/mobile/trips/\(id)"
         case .updateTripStopOrder(let id, _): return "/api/mobile/trips/\(id)/order"
         case .deleteTrip(let id):           return "/api/mobile/trips/\(id)"
-        case .optimizeTrip(let id, _):      return "/api/mobile/trips/\(id)/optimize"
+        case .optimizeTrip(let id, _, _):   return "/api/mobile/trips/\(id)/optimize"
         case .itineraries(let id):          return "/api/mobile/trips/\(id)/itineraries"
         case .itineraryDetail(let id):      return "/api/mobile/itineraries/\(id)"
         case .applyItinerary(let id):       return "/api/mobile/itineraries/\(id)/apply"
@@ -140,12 +140,16 @@ extension Endpoint {
         case .updateTripStopOrder(_, let order):
             return ["order": order]
 
-        case .optimizeTrip(_, let placeIDs):
-            // start_date/duration_days/preferred_*_time/strategy kasıtlı olarak
-            // gönderilmiyor — core-api'nin kendi varsayılanları (09:00-18:00,
-            // greedy_distance) kullanılır (bkz. OptimizeTripRequest). iOS v1'de
-            // bunlar için henüz bir seçim ekranı yok.
-            return ["selected_place_ids": placeIDs]
+        case .optimizeTrip(_, let placeIDs, let durationDays):
+            // start_date/preferred_*_time/strategy kasıtlı olarak gönderilmiyor —
+            // core-api'nin kendi varsayılanları (09:00-18:00, greedy_distance)
+            // kullanılır (bkz. OptimizeTripRequest, docs/ios-trip-optimizer.md
+            // "Neden preferred_start_time/end_time hâlâ maruz bırakılmadı").
+            // duration_days ise artık Optimizer Yapılandırma ekranından geliyor —
+            // nil ise (Otomatik) alan hiç eklenmez, backend kendi türetir.
+            var body: [String: Any] = ["selected_place_ids": placeIDs]
+            if let durationDays { body["duration_days"] = durationDays }
+            return body
 
         case .trackAnalyticsEvent(let event, let tripID, let source):
             return ["event": event, "trip_id": tripID, "source": source]

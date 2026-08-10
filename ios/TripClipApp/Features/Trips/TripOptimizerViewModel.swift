@@ -18,10 +18,10 @@ final class TripOptimizerViewModel {
     private(set) var isLoading = false
     private(set) var error:    APIError?
 
-    func optimize(tripID: Int, placeIDs: [Int], auth: AuthEnvironment) async {
+    func optimize(tripID: Int, placeIDs: [Int], durationDays: Int? = nil, auth: AuthEnvironment) async {
         await run(auth: auth) { token in
             try await auth.apiClient.send(
-                .optimizeTrip(tripID: tripID, placeIDs: placeIDs), token: token
+                .optimizeTrip(tripID: tripID, placeIDs: placeIDs, durationDays: durationDays), token: token
             )
         }
     }
