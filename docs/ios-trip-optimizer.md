@@ -5,7 +5,7 @@ The iOS UI for the [AI Trip Optimizer](trip-optimizer.md), consuming the
 generate a preview itinerary from an existing Trip Builder trip's stops,
 and revisit any previously generated one — never mutates the trip itself.
 
-Three milestones so far:
+Four milestones so far:
 - **v1 — Generate & preview**: "Optimize Trip" entry point on
   `TripDetailView`, a fresh itinerary generated and shown in
   `TripOptimizerView`.
@@ -13,11 +13,17 @@ Three milestones so far:
   History", lists every itinerary ever generated for a trip; selecting
   one reopens the same `TripOptimizerView` presentation loaded from the
   saved record — the optimizer is never re-run.
-- **v3 — Apply to Trip** (this update): an explicit "Trip'e Uygula"
-  action, available in both `.generate` and `.viewSaved` modes, that
-  copies the displayed itinerary's stops into the Trip's canonical
-  `TripStop` list — the first (and still only) action in this feature
-  that intentionally mutates the Trip. See "Apply to Trip" below.
+- **v3 — Apply to Trip**: an explicit "Trip'e Uygula" action, available
+  in both `.generate` and `.viewSaved` modes, that copies the displayed
+  itinerary's stops into the Trip's canonical `TripStop` list — the
+  first (and still only) action in this feature that intentionally
+  mutates the Trip. See "Apply to Trip" below.
+- **v4 — User Controls for Place Selection and Trip Duration** (this
+  update): a new `TripOptimizerConfigView` sits between `TripDetailView`
+  and `TripOptimizerView`'s `.generate` mode — the user picks which of
+  the trip's stops to optimize and (optionally) how many days the
+  itinerary should span, *before* the optimize request goes out. See
+  "Optimizer Configuration" below.
 
 ## Screen flow
 
@@ -25,31 +31,33 @@ Three milestones so far:
 TripDetailView (existing)
   │
   │  toolbar "sparkles" — only shown when trip.allStops is non-empty
-  │  NavigationLink(destination: TripOptimizerView(mode: .generate(tripID:, placeIDs:)))
+  │  NavigationLink(destination: TripOptimizerConfigView(tripID:, stops:))
   │
   │  toolbar "clock.arrow.circlepath" — only shown when vm.hasItineraryHistory
   │  NavigationLink(destination: ItineraryHistoryView(tripID:))
   ▼                                          ▼
-TripOptimizerView                    ItineraryHistoryView
-(.generate mode)                     │  loading/error/empty/list — TripsListView's
-  │  .task { auto-optimizes }        │  exact 4-branch pattern
-  │                                  │
-  ├─ loading → "Gezi optimize        │  each row: NavigationLink(destination:
-  │            ediliyor…"            │    TripOptimizerView(mode: .viewSaved(itineraryID:),
-  ├─ error   → retry                 │                       onApplied: onApplied))
-  ├─ empty                           ▼
-  └─ success → "Trip'e Uygula" +   TripOptimizerView
-     footer "Daha Sonra İçin      (.viewSaved mode)
-     Kaydet"                        │  .task { loads saved detail — never re-optimizes }
-                                     │
-                                     ├─ loading → "İtinerary yükleniyor…"
-                                     ├─ error   → retry (e.g. deleted itinerary → 404)
-                                     ├─ empty
-                                     └─ success → same OptimizerScoreBadge/
-                                                  ItineraryWarningsSection/
-                                                  ItineraryDaySection as .generate,
-                                                  "Trip'e Uygula" (NO "Daha Sonra
-                                                  İçin Kaydet" — nothing new to save)
+TripOptimizerConfigView              ItineraryHistoryView
+  │  places list (default: all       │  loading/error/empty/list — TripsListView's
+  │  selected), selected count,      │  exact 4-branch pattern
+  │  duration stepper (default:      │
+  │  Otomatik/nil)                   │  each row: NavigationLink(destination:
+  │                                  │    TripOptimizerView(mode: .viewSaved(itineraryID:),
+  │  "Optimize Et" — disabled        │                       onApplied: onApplied))
+  │  when selection is empty         ▼
+  ▼                                TripOptimizerView
+TripOptimizerView                  (.viewSaved mode)
+(.generate mode)                     │  .task { loads saved detail — never re-optimizes }
+  │  .task { auto-optimizes with     │
+  │  the config screen's selected    ├─ loading → "İtinerary yükleniyor…"
+  │  placeIDs + durationDays }       ├─ error   → retry (e.g. deleted itinerary → 404)
+  │                                  ├─ empty
+  ├─ loading → "Gezi optimize        └─ success → same OptimizerScoreBadge/
+  │            ediliyor…"                         ItineraryWarningsSection/
+  ├─ error   → retry                              ItineraryDaySection as .generate,
+  ├─ empty                                         "Trip'e Uygula" (NO "Daha Sonra
+  └─ success → "Trip'e Uygula" +                   İçin Kaydet" — nothing new to save)
+     footer "Daha Sonra İçin
+     Kaydet"
 
   Both modes, whenever a non-empty result is shown:
     "Trip'e Uygula" → .confirmationDialog ("mevcut durak listesi değiştirilecek")
@@ -58,6 +66,13 @@ TripOptimizerView                    ItineraryHistoryView
 
   toolbar leading "Kapat" — always available, in every state, dismisses immediately
 ```
+
+Critically, **`ItineraryHistoryView` never routes through
+`TripOptimizerConfigView`** — its `NavigationLink` still goes straight to
+`TripOptimizerView(mode: .viewSaved(itineraryID:))`, byte-for-byte
+unchanged by this milestone (the file wasn't touched at all). Opening a
+saved itinerary always loads it directly; the configuration screen only
+ever appears on the `.generate` (fresh-optimization) path.
 
 `onApplied` is threaded from `TripDetailView` through both paths to
 `TripOptimizerView` — directly for `.generate`, through
@@ -103,6 +118,119 @@ definitionally, history — it was saved the moment it was generated. Only
 "nothing here mutates the Trip" — see the next section. Unlike Close/Save,
 which are both no-ops server-side, Apply is a real, explicit, confirmed
 mutation.
+
+## Optimizer Configuration
+
+Before this milestone, tapping "sparkles" immediately ran the optimizer
+against *all* of the trip's stops, with `duration_days` never sent (the
+backend always self-derived the day count). `TripOptimizerConfigView` +
+`TripOptimizerConfigViewModel` insert an explicit configuration step
+between that tap and the actual optimize request — the user decides which
+places to include and how many days to target, then taps "Optimize Et" to
+actually run it.
+
+### Design: reuse loaded data, no new network call
+
+`TripOptimizerConfigView` takes `stops: [TripStop]` directly from
+`TripDetailView`'s already-loaded `TripDetail` (`trip.allStops`) — it does
+**not** issue its own fetch. Selection is pure, local, synchronous UI
+state; nothing about it touches the network until "Optimize Et" is
+tapped. This is deliberate: place selection is optimizer *input*, never a
+`TripStop` mutation (selecting/deselecting a place in this screen never
+calls `updateTripStopOrder` or any other Trip Builder endpoint — the
+canonical stop list is completely unaffected regardless of what the user
+selects or how the optimize request turns out).
+
+### Default behavior preserves the pre-v4 behavior exactly
+
+- **Selection**: `TripOptimizerConfigViewModel.init` seeds
+  `selectedPlaceIDs` with *every* stop's `placeId` — if the user never
+  touches the places list, the resulting `selected_place_ids` is
+  identical to what `.generate` always sent before this milestone.
+- **Duration**: `durationDays` starts at `nil` ("Otomatik") — if the user
+  never touches the stepper, `duration_days` is omitted from the request
+  entirely, exactly as before (the backend self-derives the day count,
+  unchanged).
+
+Both defaults mean a user who taps "sparkles" → "Optimize Et" without
+touching anything gets **byte-identical behavior** to the pre-v4 flow —
+this milestone is additive, not a behavior change for anyone who doesn't
+use the new controls.
+
+### Place selection UI
+
+Mirrors `LibraryView`'s existing Trip-Builder multi-select pattern exactly
+(same `Set<Int>` model, same `checkmark.circle.fill`/`circle` row
+indicator pair, same card/border styling) — `TripStopSelectionRow` is a
+`TripStop`-flavored sibling of `LibraryRowView`, not a new visual
+language. Each row shows the place's name plus its category chip and city
+(the same "enough context to distinguish places" fields `TripStop` already
+carries — no new API field was needed). A header button toggles "Tümünü
+Seç" / "Seçimi Kaldır" for convenience; a bottom-pinned bar (styled like
+`LibraryView`'s own `selectionBar`) shows the live selected count and the
+"Optimize Et" CTA.
+
+### Duration control
+
+A custom `-`/`+` stepper (not the native SwiftUI `Stepper`, to match this
+app's own pill/circle button styling used everywhere else) cycles through
+`Otomatik → 1 → 2 → … → 30 → (capped)`. `30` is a **UI-only** sensible
+cap — `OptimizationService` only enforces `duration_days >= 1` server-side
+(see `docs/trip-optimizer.md`), no upper bound exists there, so `30` is
+this screen's own judgment call about a reasonable maximum, not a
+mirrored backend constraint. Decrementing below `1` returns to `Otomatik`
+(`nil`) rather than `0` or a negative number — the stepper structurally
+cannot produce an invalid value.
+
+### Validation
+
+| Case | Handling |
+|---|---|
+| Zero places selected | `canOptimize` is `false`; "Optimize Et" is `.disabled(true)` and visibly dims; the count label switches to a destructive-colored "En az bir mekan seçmelisin" |
+| Exactly one place selected | Allowed — `canOptimize` only requires non-empty, not `count >= 2` |
+| Duration below/above the UI bounds | Structurally prevented — the stepper clamps at the source, see above |
+| Backend validation errors (e.g. an unowned place ID, invalid `duration_days`) | Never reachable from this screen in practice (selection is always a subset of the trip's own already-owned stops, duration is always `nil` or a clamped valid int) — if the backend ever *did* reject the request, `TripOptimizerView`'s existing error state (unchanged) surfaces it with retry, same as any other optimize failure |
+| Deleted/missing places | Impossible to select a place that isn't in `stops` — the list is exactly `trip.allStops` at screen-open time; a place deleted *after* the config screen opens but *before* "Optimize Et" is tapped would surface as a normal backend `INVALID_OPTIMIZATION_REQUEST` on submit, handled by `TripOptimizerView`'s existing error state |
+| Permission errors, general optimization failure | Unchanged — still `TripOptimizerViewModel.optimize`'s existing error handling (401 → logout, other errors → `vm.error` with retry) |
+
+Client-side validation only ever prevents the *obviously* invalid
+zero-selection case, per the spec's own "prefer client-side validation
+for obvious UI errors, but keep backend validation authoritative" —
+everything else still round-trips to the same backend checks that already
+existed.
+
+### Request construction
+
+"Optimize Et" is a plain `NavigationLink` into the existing
+`TripOptimizerView(mode: .generate(tripID:placeIDs:durationDays:))` —
+`placeIDs` comes from `selectedPlaceIDsInTripOrder` (the selected subset,
+in the trip's own stop order — `Set` iteration order isn't deterministic,
+so the view model filters the original ordered `stops` array instead of
+enumerating the `Set` directly) and `durationDays` is passed through as-is
+(`nil` when still "Otomatik"). `Endpoint.optimizeTrip` only adds
+`duration_days` to the request body when non-nil — the wire format for
+"Otomatize" is field omission, not `null`, matching how `duration_days`
+already worked for every caller before this milestone.
+
+No UI-only state (e.g. `isSelecting`-style mode flags, scroll position)
+is ever sent — the request body contains exactly `selected_place_ids` and,
+optionally, `duration_days`, nothing else new.
+
+### Why `preferred_start_time`/`preferred_end_time` are still not exposed
+
+Both fields already exist in the backend contract
+(`OptimizeTripRequest.preferred_start_time`/`preferred_end_time`, default
+`"09:00"`/`"18:00"`) and were inspected as part of this milestone's own
+"before implementing" requirement. They are **deliberately left
+unexposed** in iOS: this milestone's stated goal is place selection and
+day count specifically ("Give the user explicit control over which
+places are optimized and how many days"), and a full time-of-day control
+pair is a third, materially different kind of input (two `HH:MM` pickers,
+`end > start` client validation, a UI slot in an already-two-section
+config screen) — exposing it well would meaningfully expand this
+milestone's scope rather than "fit naturally" into it, which the spec's
+own requirement 3 explicitly permits leaving alone. Flagged as a
+candidate for a focused future milestone (see "Future UI improvements").
 
 ## Apply to Trip
 
@@ -178,9 +306,11 @@ final class TripOptimizerViewModel {
     private(set) var isLoading = false
     private(set) var error: APIError?
 
-    func optimize(tripID: Int, placeIDs: [Int], auth: AuthEnvironment) async {
+    func optimize(tripID: Int, placeIDs: [Int], durationDays: Int? = nil, auth: AuthEnvironment) async {
         await run(auth: auth) { token in
-            try await auth.apiClient.send(.optimizeTrip(tripID: tripID, placeIDs: placeIDs), token: token)
+            try await auth.apiClient.send(
+                .optimizeTrip(tripID: tripID, placeIDs: placeIDs, durationDays: durationDays), token: token
+            )
         }
     }
 
@@ -257,6 +387,55 @@ itself from `itinerary.days.flatMap(\.stops).isEmpty` — the ViewModel just
 carries whatever the server returned, same division of responsibility as
 every other screen (e.g. `LibraryView` deriving its own empty/no-results
 states from `vm.places`, not a VM-owned enum).
+
+### `TripOptimizerConfigViewModel`
+
+Deliberately has **no** `AuthEnvironment`/network dependency at all — see
+"Optimizer Configuration" above for why (selection is pure local state,
+never a network call):
+
+```swift
+@Observable
+@MainActor
+final class TripOptimizerConfigViewModel {
+    static let durationRange = 1...30   // UI-only cap, no backend upper bound exists
+
+    let stops: [TripStop]
+    private(set) var selectedPlaceIDs: Set<Int>
+    private(set) var durationDays: Int?   // nil = Otomatik
+
+    init(stops: [TripStop]) {
+        self.stops = stops
+        self.selectedPlaceIDs = Set(stops.map(\.placeId))   // default: ALL selected
+    }
+
+    var selectedCount: Int { selectedPlaceIDs.count }
+    var canOptimize: Bool { !selectedPlaceIDs.isEmpty }     // zero-selection guard
+
+    func toggle(_ placeID: Int) { /* insert/remove from the Set */ }
+    func selectAll() { selectedPlaceIDs = Set(stops.map(\.placeId)) }
+    func deselectAll() { selectedPlaceIDs.removeAll() }
+
+    func incrementDuration() {
+        durationDays = min((durationDays ?? 0) + 1, Self.durationRange.upperBound)
+    }
+    func decrementDuration() {
+        guard let current = durationDays else { return }   // already Otomatik
+        durationDays = current > Self.durationRange.lowerBound ? current - 1 : nil
+    }
+
+    var selectedPlaceIDsInTripOrder: [Int] {
+        stops.map(\.placeId).filter(selectedPlaceIDs.contains)
+    }
+}
+```
+
+`selectedPlaceIDsInTripOrder` — not a raw `Array(selectedPlaceIDs)` —
+exists because `Set` iteration order is not guaranteed stable/matching
+insertion order; filtering the original, already-ordered `stops` array by
+Set membership gives a deterministic request payload that mirrors the
+trip's own canonical stop order, which is easier to reason about in both
+manual testing and the test suite's own assertions.
 
 ### `ItineraryHistoryViewModel`
 
@@ -345,7 +524,7 @@ convention every other endpoint uses (central enum, not per-feature files):
 
 | Case | Path | Method |
 |---|---|---|
-| `.optimizeTrip(tripID:placeIDs:)` | `/api/mobile/trips/{id}/optimize` | POST |
+| `.optimizeTrip(tripID:placeIDs:durationDays:)` | `/api/mobile/trips/{id}/optimize` | POST |
 | `.itineraries(tripID:)` | `/api/mobile/trips/{id}/itineraries` | GET |
 | `.itineraryDetail(itineraryID:)` | `/api/mobile/itineraries/{id}` | GET |
 | `.applyItinerary(itineraryID:)` | `/api/mobile/itineraries/{id}/apply` | POST |
@@ -360,10 +539,16 @@ history-exists flag), `.itineraryDetail` from
 `default: return nil`, matching core-api's and both BFFs' own no-body
 apply routes.
 
-The `optimize` POST body intentionally omits `start_date`/`duration_days`/
-`preferred_start_time`/`preferred_end_time`/`strategy` — core-api's own
-`OptimizeTripRequest` defaults apply (09:00–18:00, `greedy_distance`).
-There's no date/duration picker in this v1; see "Future UI improvements."
+`durationDays` (new this milestone — see "Optimizer Configuration") is
+the only field `TripOptimizerConfigView` actually controls at the wire
+level: `Endpoint.body` adds `duration_days` to the JSON payload only when
+non-nil, so "Otomatik" still means *field omitted entirely*, not
+`"duration_days": null`. `start_date`/`preferred_start_time`/
+`preferred_end_time`/`strategy` are still intentionally omitted —
+core-api's own `OptimizeTripRequest` defaults apply (09:00–18:00,
+`greedy_distance`); see "Optimizer Configuration → Why
+preferred_start_time/preferred_end_time are still not exposed" for why
+duration got a control this milestone but time-of-day didn't.
 
 New Codable models (`Core/Models/OptimizerModels.swift`) mirror core-api's
 `OptimizeTripResponse` field-for-field (`Itinerary`, `ItineraryDay`,
@@ -380,7 +565,18 @@ routes, which do rename `lat`/`lng` → `latitude`/`longitude` via
 `trip_transformer.py`). See `docs/trip-optimizer-bff.md` "Request/response
 contracts → apply" for the exact wire shape this mirrors.
 
-### Backend change required for this milestone
+### No backend or BFF change for this milestone (v4)
+
+`selected_place_ids` and `duration_days` already existed, field-for-field
+identical, in core-api's `OptimizeTripRequest`, the mobile-bff's own
+`OptimizeTripRequest` mirror, and the web-bff's — all the way back to the
+optimizer's very first backend milestone. `TripOptimizerConfigView` only
+had to start *sending* a value iOS was already capable of sending; per
+the spec's own "only modify core-api if the existing endpoint cannot
+correctly support the new UI behavior" / "only modify the BFF if the API
+contract changes," neither applied here, and neither was touched.
+
+### Backend change from the Itinerary History milestone (v2)
 
 `ItinerarySummary` (the list-endpoint DTO) originally had no way to know
 how many days or stops an itinerary contained — those only existed in the
@@ -428,6 +624,14 @@ No new design tokens were needed — `AppColors.warning` already existed
   matching `TripRowView`'s own `"\(trip.stopsCount) durak"` pattern),
   formatted creation date, and a warning-count `Label` (only shown when
   `warnings` is non-empty) in `AppColors.warning`.
+- **`TripStopSelectionRow`** (new, v4) — a `TripStop`-flavored sibling of
+  `LibraryRowView`'s own selection-mode row: identical
+  `checkmark.circle.fill`/`circle` indicator pair, identical
+  card/border/corner-radius recipe, so a user who's already used Trip
+  Builder's own multi-select (Library → "Gezi Oluştur") sees the exact
+  same visual language here. Shows the stop's name, category chip, and
+  city — reuses fields `TripStop` already carries, no new API field
+  needed for "enough context to distinguish places."
 
 ## Itinerary History
 
@@ -519,7 +723,7 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
-44 tests, four files:
+64 tests, five files:
 
 - **`Support/FakeAPIClient.swift`** — `APIClientProtocol` test double.
   Returns a canned `Result<Any, Error>`; two independent `AsyncGate`s (a
@@ -534,7 +738,7 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   that passed the first several runs, then failed once under
   scheduler load (a genuinely flaky assertion, not a one-off fluke),
   which is why it was replaced with this explicit signal instead.
-- **`TripOptimizerViewModelTests.swift`** (25 tests) — the original 10
+- **`TripOptimizerViewModelTests.swift`** (26 tests) — the original 10
   `optimize()` tests (initial state, success, server/network errors, a
   401 logs the session out *without* setting `error`, no-token
   short-circuit, deterministic loading-state + re-entrancy via
@@ -542,7 +746,7 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   the saved itinerary, **calls only `.itineraryDetail`, never
   `.optimizeTrip`** (the test that directly proves "selecting history
   never triggers a new optimization request"), server error, 401, and
-  no-token — plus 10 new `applyToTrip()` tests: initial state, success
+  no-token — plus 10 `applyToTrip()` tests: initial state, success
   (forwards `.applyItinerary(itineraryID:)` + the bearer token, clears
   `isApplying`), **the displayed `vm.itinerary` stays byte-for-byte
   unchanged after a successful apply** (the test that directly proves
@@ -551,8 +755,12 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   deterministic `isApplying` via `AsyncGate`, a re-entrancy guard (second
   call while the first is in flight returns `false` immediately, API
   called only once), and repeated application succeeding twice in a row
-  (mirrors core-api's own "can be applied repeatedly" guarantee).
-- **`ItineraryHistoryViewModelTests.swift`** (10 tests, new) — initial
+  (mirrors core-api's own "can be applied repeatedly" guarantee) — plus
+  **1 new test this milestone**, `test_optimize_forwardsDurationDays_
+  whenProvided`, confirming `optimize(... durationDays: 4 ...)` reaches
+  `.optimizeTrip` with that exact value (the existing forwarding test was
+  also updated to assert `durationDays` is `nil` when the caller omits it).
+- **`ItineraryHistoryViewModelTests.swift`** (10 tests) — initial
   state; `load()` happy path with an assertion on the exact endpoint
   called (`.itineraries(tripID:)`); **newest-first ordering**, both as a
   pure unit test directly against `sortedNewestFirst` (no networking at
@@ -561,39 +769,63 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   it; **empty history** (empty array in, empty array out, no error);
   **API failure** (network error and a `TRIP_NOT_FOUND` server error,
   both asserted against `vm.error`); 401 handling; no-token guard;
-  re-entrancy guard (same `AsyncGate` pattern as the optimizer VM).
-- **`OptimizerEndpointTests.swift`** (9 tests, unchanged from the prior
-  milestone except one decoding test now also asserts `days_count`/
-  `stops_count` decode correctly) — **networking tests**, pure and
-  synchronous: `Endpoint.urlRequest` path/method/body/`Authorization`
-  header for all three cases, plus JSON-decoding tests against realistic
-  server payloads.
+  re-entrancy guard (same `AsyncGate` pattern as the optimizer VM). Fully
+  unchanged by this milestone — direct evidence that the saved-itinerary
+  path (`.viewSaved`, reached only through this screen's own rows) never
+  touches the new configuration screen or its ViewModel.
+- **`OptimizerEndpointTests.swift`** (11 tests) — networking tests, pure
+  and synchronous: `Endpoint.urlRequest` path/method/body/`Authorization`
+  header, plus JSON-decoding tests against realistic server payloads.
+  **2 new this milestone**: `duration_days` is omitted from the body when
+  `nil` (the default — byte-identical to every pre-v4 request), and
+  included with the exact value when provided.
+- **`TripOptimizerConfigViewModelTests.swift`** (17 tests, new) — pure
+  local state, no `FakeAPIClient` involved at all (this ViewModel makes
+  no network calls — see "Optimizer Configuration"): default selection is
+  every stop; default duration is Otomatik (`nil`); an empty `stops` array
+  produces an empty, non-optimizable selection; toggling
+  deselects/reselects correctly; `selectAll`/`deselectAll`; selected count
+  reflects partial selections; `canOptimize` is `false` only at exactly
+  zero selected (confirmed `true` at exactly one); duration increment from
+  Otomatik lands on `1`, stops exactly at the `30`-day upper bound even
+  after many extra increments; duration decrement from `1` returns to
+  Otomatik, and decrementing while already at Otomatik is a no-op (never
+  produces `0` or negative); a 100-call increment/decrement stress test
+  confirming the value never leaves `[1, 30]` or `nil`; and
+  `selectedPlaceIDsInTripOrder` preserving the trip's own stop order
+  regardless of selection/toggle order (not `Set` iteration order), both
+  for a full selection and a partial one.
 
 ### Test results
 
 ```
 Test Suite 'All tests' passed
-Executed 44 tests, with 0 failures (0 unexpected) in 0.053-0.075s
+Executed 64 tests, with 0 failures (0 unexpected) in 0.073-0.105s
 ```
 
 Verified stable across 5 repeated full-suite `xcodebuild test` runs (not
-just once) — same discipline the prior milestone's flaky-test discovery
-established as necessary. Full `xcodebuild build` also verified clean, no
-new warnings.
+just once) — same discipline established as necessary since the
+project's first flaky-test discovery. Full `xcodebuild build` also
+verified clean, no new warnings. This milestone made **no core-api,
+mobile-bff, or web-bff changes** (see "API integration → No backend or
+BFF change for this milestone"), so no backend/BFF suite reruns were
+required — the counts from the previous (Apply to Trip / OR-Tools)
+milestones stand unchanged.
 
-core-api's own suite grew by 14 tests for `apply_itinerary` (happy path,
-owner, editor, viewer rejection, cross-user rejection, nonexistent
-itinerary, deleted place, empty itinerary, duplicate places, atomic
-rollback, repeated application, saved-itinerary-unchanged, provenance
-fields, analytics event) — full core-api suite: 358 passed (was 344).
-mobile-bff and web-bff each grew by 6 tests for the `apply` proxy route
-(auth, forwarding, and 404/403/400/503 propagation) — 102 passed (was 96)
-and 59 passed (was 53) respectively.
+A live Simulator launch-and-crash-free check was performed (install →
+launch → screenshot of the initial screen) to confirm the rebuilt app
+runs; a full interactive tap-through of the new configuration screen
+was **not** performed — this environment has no XCUITest/accessibility
+automation harness for the iOS Simulator (unlike, say, a browser
+automation tool for web UIs), so that level of verification relies on the
+64 passing automated tests plus the clean build instead.
 
 ## Assumptions / limitations (v2 — Itinerary History)
 
 - No date/duration/time-window picker — always uses core-api's defaults.
-  A natural v3 addition once there's demand for it.
+  (Historical note: duration got its own control in v4, "User Controls
+  for Place Selection and Trip Duration," below; date/time-window are
+  still unaddressed — see "Assumptions / limitations (v4)".)
 - No strategy picker — `greedy_distance` is the only strategy that exists
   server-side today anyway (see `docs/trip-optimizer.md`).
 - No pagination on the history list — `GET /trips/{id}/itineraries`
@@ -635,28 +867,49 @@ and 59 passed (was 53) respectively.
   a since-deleted place is rejected at apply time (`400`), not proactively
   flagged in the history list beforehand.
 
+## Assumptions / limitations (v4 — User Controls)
+
+- **`preferred_start_time`/`preferred_end_time` still aren't exposed** —
+  deliberately, this milestone's own scope decision; see "Optimizer
+  Configuration → Why preferred_start_time/preferred_end_time are still
+  not exposed" above.
+- **`30` days is a UI-only cap**, not a mirrored backend constraint —
+  `OptimizationService` only enforces `duration_days >= 1`, no upper
+  bound. If a real trip ever needed more than 30 days, the backend would
+  happily accept it; only this screen's stepper would need its constant
+  raised.
+- **No persistence of the user's selection/duration choice** —
+  `TripOptimizerConfigViewModel` is created fresh (all stops selected,
+  Otomatik duration) every time the config screen is opened; there's no
+  "remember my last configuration" behavior. Consistent with every other
+  screen in this feature (nothing here has ever persisted UI-only state
+  across sessions).
+- **No "select by category/city" bulk filter** — only individual toggle
+  and "Tümünü Seç"/"Seçimi Kaldır" exist; for a trip with many stops
+  across several cities, a per-city bulk toggle could be a reasonable
+  future refinement once real usage shows it's needed.
+
 ## Future UI improvements
 
 Ranked by what unlocks the most value next:
 
-1. **Date/duration/time-window controls** — expose the constraints
-   core-api already accepts (`start_date`, `duration_days`,
-   `preferred_start_time`/`preferred_end_time`) instead of always using
-   its defaults.
-2. **Place selection** — right now "Optimize Trip" always uses *all* of
-   the trip's current stops; letting the user deselect a subset before
-   generating (mirroring Library's own multi-select UI) is a reasonable
-   next increment once the all-stops case has real usage.
-3. **Map view of the optimized route** — `TripMapView` already exists and
+1. **`preferred_start_time`/`preferred_end_time` controls** — expose the
+   remaining constraint core-api already accepts but this milestone
+   deliberately left alone (see "Optimizer Configuration" above for why).
+   The natural next increment now that place selection and duration exist.
+2. **Map view of the optimized route** — `TripMapView` already exists and
    accepts a route polyline (used by `TripDetailView`); reusing it here to
    visualize the optimized order geographically is a low-effort addition.
-4. **Delete a history entry** — needs a new core-api `DELETE
+3. **Delete a history entry** — needs a new core-api `DELETE
    /internal/itineraries/{id}` (+ BFF proxy) first; today history is
    append-only.
-5. **Apply history / undo** — `Trip.applied_itinerary_id` only tracks the
+4. **Apply history / undo** — `Trip.applied_itinerary_id` only tracks the
    most recently applied itinerary; there's no way to see or revert to an
    earlier apply. Would need a core-api apply-history table first (see
    `docs/trip-optimizer.md` "Future improvements").
-6. **Web UI** — web-bff already exposes the full owner/editor surface
+5. **Web UI** — web-bff already exposes the full owner/editor surface
    including `apply` (parity with mobile-bff), but no web page calls any
-   of it yet; this milestone, like the two before it, is iOS-only.
+   of it yet; every iOS-only milestone so far, including this one, has
+   left it unaddressed.
+6. **Bulk selection by category/city** — see "Assumptions / limitations
+   (v4)" above.
