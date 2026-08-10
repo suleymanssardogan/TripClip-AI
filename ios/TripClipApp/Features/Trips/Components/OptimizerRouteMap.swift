@@ -54,6 +54,22 @@ struct OptimizerRouteMap: UIViewRepresentable {
     /// polyline'ına düşer — Req 3'ün "fall back to the existing
     /// straight-line visualization" gereksinimi tam da bu varsayılan yol.
     var dayRoutes: [Int: OptimizerDayRoute] = [:]
+    /// Şu an odaklanılan/vurgulanan durak — `TripMapView.focusedPin` ile
+    /// AYNI desen (bkz. `Coordinator.lastFocusedStopID` karşılaştırması):
+    /// yalnızca DEĞİŞTİĞİNDE haritayı o durağa yakınlaştırır ve seçer,
+    /// aksi halde kullanıcının kendi kaydırma/yakınlaştırmasını asla ezmez
+    /// (Req 7). `data.stop(withID:)` bu kimlikle eşleşen bir durak
+    /// bulamazsa (koordinatsız durak — Req 9) hiçbir kamera işlemi
+    /// yapılmaz; harita olduğu gibi kalır.
+    var selectedStopID: String? = nil
+    /// Kullanıcı haritada bir pine DOĞRUDAN dokunduğunda çağrılır (Req 2
+    /// "Map → Itinerary"). Yalnızca gerçek kullanıcı dokunuşları için
+    /// tetiklenir — `selectedStopID` değiştiği için bu view'ın kendi
+    /// programatik `map.selectAnnotation` çağrısı BUNU TETİKLEMEZ (bkz.
+    /// `Coordinator.isProgrammaticSelection`), aksi halde SwiftUI state'i
+    /// ile MKMapView kamerası arasında sonsuz bir geri-besleme döngüsü
+    /// oluşurdu (Req 7 "avoid camera-update loops").
+    var onSelectStop: ((OptimizerMapStop) -> Void)? = nil
 
     /// Gün başına döngüsel renk paleti — teal (mevcut TripMapView rota
     /// rengiyle aynı, 1. gün ya da tek günlü itinerary'ler için tutarlı
@@ -85,6 +101,8 @@ struct OptimizerRouteMap: UIViewRepresentable {
         let visibleDays = data.visibleDays(selectedDayIndex: selectedDayIndex)
         guard !visibleDays.isEmpty else { return }
 
+        var allAnnotations: [OptimizerStopAnnotation] = []
+
         for day in visibleDays {
             let color = Self.color(forDay: day.dayIndex)
 
@@ -101,6 +119,7 @@ struct OptimizerRouteMap: UIViewRepresentable {
                 return a
             }
             map.addAnnotations(annotations)
+            allAnnotations += annotations
 
             // Aynı güne ait ardışık koordinatlar arasında rota — günler
             // arasında ASLA (Req 2). Gerçek MKDirections sonucu varsa
@@ -126,12 +145,38 @@ struct OptimizerRouteMap: UIViewRepresentable {
             }
         }
 
-        // Bölgeyi HER güncellemede değiştirmiyoruz; yalnızca ilk görünüşte ve
-        // gün seçimi gerçekten değiştiğinde (Req 8 — "automatically fit the
-        // visible stops", Req 9 — gereksiz state/transform üretme).
-        let coordinator = context.coordinator
-        if !coordinator.didFitOnce || coordinator.lastSelectedDayIndex != selectedDayIndex {
-            coordinator.lastSelectedDayIndex = selectedDayIndex
+        // Kamerayı HER güncellemede değiştirmiyoruz; yalnızca gerçek bir
+        // durum değişikliği olduğunda — aksi halde kullanıcının kendi
+        // pan/zoom'unu ezeriz (Req 7). Coordinator'ın son gördüğü
+        // değerlerle KARŞILAŞTIRIP HEMEN GÜNCELLİYORUZ (her render'da doğru
+        // kalsınlar diye), sonra hangi kamera işleminin (varsa) yapılacağına
+        // karar veriyoruz.
+        let coordinator  = context.coordinator
+        let dayChanged   = coordinator.lastSelectedDayIndex != selectedDayIndex
+        let stopChanged  = selectedStopID != coordinator.lastFocusedStopID
+        coordinator.lastSelectedDayIndex = selectedDayIndex
+        coordinator.lastFocusedStopID    = selectedStopID
+        coordinator.onSelectStop         = onSelectStop
+
+        if stopChanged, let selectedStopID, let match = allAnnotations.first(where: { $0.stopID == selectedStopID }) {
+            // Belirli bir durağa odaklan (Req 1/4 "center the map on that
+            // stop" / "focus the selected stop") — bu, gün AYNI ZAMANDA
+            // değişmiş olsa bile (Req 4 senaryosu) TÜM güne değil yalnızca
+            // bu durağa yakınlaşır; "fit the whole day" ile karışmaz.
+            coordinator.isProgrammaticSelection = true
+            map.setRegion(
+                MKCoordinateRegion(
+                    center: match.coordinate,
+                    span:   MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+                ),
+                animated: true
+            )
+            map.selectAnnotation(match, animated: true)
+        } else if !coordinator.didFitOnce || dayChanged {
+            // İlk görünüş, ya da bir durak odağı OLMADAN gün değişti (ör.
+            // gün çipine doğrudan dokunuldu, ya da seçilen durağın
+            // koordinatı yoktu — Req 9: geçersiz bir noktaya asla
+            // merkezlenmeyen, güvenli bir geri düşüş).
             let coords = visibleDays.flatMap { day in
                 day.stops.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
             }
@@ -175,6 +220,24 @@ struct OptimizerRouteMap: UIViewRepresentable {
         /// için, ama seçim gerçekten değiştiğinde yeniden sığdırmak için.
         var lastSelectedDayIndex: Int??
         var didFitOnce = false
+        /// Son odaklanılan durak kimliği — `TripMapView.Coordinator.lastFocusedIndex`
+        /// ile aynı desen.
+        var lastFocusedStopID: String?
+        /// `updateUIView`'dan HER render'da yenilenir (struct'lar her
+        /// render'da yeniden yaratıldığı için closure'ın kendisi de
+        /// değişir) — `didSelect` bunu çağırır.
+        var onSelectStop: ((OptimizerMapStop) -> Void)?
+        /// `updateUIView`'ın kendi `map.selectAnnotation(...)` çağrısının
+        /// tetikleyeceği `didSelect`'i, GERÇEK bir kullanıcı dokunuşundan
+        /// ayırt etmek için — aksi halde Itinerary → Map odaklanması
+        /// `didSelect`'i tetikler, o da `onSelectStop`'u çağırır, o da
+        /// seçimi (aynı değere) tekrar yazar: SwiftUI state'i ile
+        /// MKMapView kamerası arasında gereksiz bir geri-besleme turu
+        /// (Req 7 "avoid camera-update loops"). Bu bayrak, programatik
+        /// seçimden hemen önce `true` yapılır, `didSelect` içinde
+        /// TÜKETİLİR (bir sonraki `didSelect` çağrısı tekrar gerçek
+        /// sayılır).
+        var isProgrammaticSelection = false
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
             if let polyline = overlay as? OptimizerDayPolyline {
@@ -207,6 +270,22 @@ struct OptimizerRouteMap: UIViewRepresentable {
             button.accessibilityLabel = "Apple Haritalar'da aç"
             view.rightCalloutAccessoryView = button
             return view
+        }
+
+        /// Bir pine dokunuldu (Req 2 "Map → Itinerary"). `isProgrammaticSelection`
+        /// açıksa (Itinerary → Map yönünde BU view'ın kendi `updateUIView`'ı
+        /// tetikledi) sessizce tüketilir — yalnızca GERÇEK kullanıcı
+        /// dokunuşları `onSelectStop`'a ulaşır.
+        func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+            guard let stop = view.annotation as? OptimizerStopAnnotation else { return }
+            if isProgrammaticSelection {
+                isProgrammaticSelection = false
+                return
+            }
+            onSelectStop?(OptimizerMapStop(
+                id: stop.stopID, dayIndex: stop.dayIndex, orderIndex: stop.orderIndex,
+                name: stop.placeName, latitude: stop.coordinate.latitude, longitude: stop.coordinate.longitude
+            ))
         }
 
         /// Baloncuktaki butona basıldı → mekanı Apple Haritalar'da aç. Bu,

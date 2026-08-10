@@ -10,18 +10,33 @@ import SwiftUI
 /// yeniden atanmaz) her `body` değerlendirmesinde yeniden hesaplamak
 /// (Req 9 "avoid unnecessary ... repeated annotation creation") gereksiz
 /// olurdu.
+///
+/// Gün + durak seçimi artık BURADA SAHİPLENİLMİYOR — `TripOptimizerView`'ın
+/// itinerary listesiyle PAYLAŞTIĞI tek `OptimizerSelection` üzerinden bir
+/// `Binding` olarak alınıyor (Req 13 "the map should receive the selection
+/// rather than inventing its own authoritative state").
 struct OptimizerRouteMapSection: View {
 
     private let mapData: OptimizerRouteMapData
-    @State private var selectedDayIndex: Int? = nil
+    @Binding private var selection: OptimizerSelection
+    /// Kullanıcı haritada bir pine dokunduğunda üst katmana (yalnızca
+    /// kaydırma/görünürlük yan etkisi için — state güncellemesi zaten
+    /// `selection` binding'i üzerinden burada yapılıyor) bildirir. Bkz.
+    /// `TripOptimizerView`: itinerary listesindeki ilgili satıra kaydırır.
+    var onStopSelectedFromMap: ((OptimizerMapStop) -> Void)? = nil
     /// Gerçek yol rotalarını hesaplayan/önbelleğe alan/iptal eden
     /// asenkron katman — bkz. `OptimizerRouteCalculator`. Bu bölüm onu
     /// SAHİPLENİYOR (SwiftUI `@State`); `OptimizerRouteMap` yalnızca
     /// çıktısını (`calculator.routes`) düz bir prop olarak alır.
     @State private var calculator = OptimizerRouteCalculator()
 
-    init(itinerary: Itinerary) {
+    init(
+        itinerary: Itinerary, selection: Binding<OptimizerSelection>,
+        onStopSelectedFromMap: ((OptimizerMapStop) -> Void)? = nil
+    ) {
         self.mapData = OptimizerRouteMapData(itinerary: itinerary)
+        self._selection = selection
+        self.onStopSelectedFromMap = onStopSelectedFromMap
     }
 
     var body: some View {
@@ -33,8 +48,16 @@ struct OptimizerRouteMapSection: View {
 
                 ZStack(alignment: .topTrailing) {
                     OptimizerRouteMap(
-                        data: mapData, selectedDayIndex: selectedDayIndex,
-                        dayRoutes: calculator.routes
+                        data: mapData, selectedDayIndex: selection.dayIndex,
+                        dayRoutes: calculator.routes,
+                        selectedStopID: selection.stopID,
+                        onSelectStop: { stop in
+                            // Req 2 "Map → Itinerary": tek gerçek kaynak olan
+                            // paylaşılan seçimi güncelle — Req 1/4 kuralı
+                            // burada da geçerli (aynı kural, `focusing`).
+                            selection = .focusing(dayIndex: stop.dayIndex, stopID: stop.id)
+                            onStopSelectedFromMap?(stop)
+                        }
                     )
                     .frame(height: 260)
                     .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -48,10 +71,14 @@ struct OptimizerRouteMapSection: View {
                     missingCoordinateNotice
                 }
             }
-            // Gün seçimi değiştiğinde (ve ilk görünüşte) o an görünür
-            // günlerin rotasını hesapla — `calculator.load` zaten önbellek/
-            // in-flight kontrolüyle gereksiz isteği önlüyor (Req 6, Req 9).
-            .task(id: selectedDayIndex) { loadVisibleDayRoutes() }
+            // Gün seçimi GERÇEKTEN değiştiğinde (ve ilk görünüşte) o an
+            // görünür günlerin rotasını hesapla — yalnızca `dayIndex`'i
+            // izler, `selection`'ın tamamını DEĞİL: bir durak seçimi aynı
+            // günde kalıyorsa bu `.task` YENİDEN TETİKLENMEZ (Req 1 "do not
+            // recalculate the route merely because a stop was selected").
+            // `calculator.load` zaten önbellek/in-flight kontrolüyle
+            // gereksiz isteği önlüyor (Req 6, Req 9).
+            .task(id: selection.dayIndex) { loadVisibleDayRoutes() }
             // Ekrandan kaybolurken bekleyen hesaplamaları iptal et (Req 5
             // "view disappearance").
             .onDisappear { calculator.cancelAll() }
@@ -65,13 +92,13 @@ struct OptimizerRouteMapSection: View {
     }
 
     private func loadVisibleDayRoutes() {
-        for day in mapData.visibleDays(selectedDayIndex: selectedDayIndex) {
+        for day in mapData.visibleDays(selectedDayIndex: selection.dayIndex) {
             calculator.load(day: day)
         }
     }
 
     private var isCalculatingVisibleRoute: Bool {
-        mapData.visibleDays(selectedDayIndex: selectedDayIndex)
+        mapData.visibleDays(selectedDayIndex: selection.dayIndex)
             .contains { calculator.routes[$0.dayIndex]?.isLoading == true }
     }
 
@@ -89,12 +116,15 @@ struct OptimizerRouteMapSection: View {
     private var daySelector: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                dayChip(title: "Tümü", isSelected: selectedDayIndex == nil) {
-                    selectedDayIndex = nil
+                dayChip(title: "Tümü", isSelected: selection.dayIndex == nil) {
+                    // Bir gün çipine doğrudan dokunmak, önceki bir durak
+                    // odağını bilerek TEMİZLER — bu artık "belirli bir
+                    // durağa odaklanma" değil, genel gün gezinme eylemi.
+                    selection = OptimizerSelection(dayIndex: nil, stopID: nil)
                 }
                 ForEach(mapData.days) { day in
-                    dayChip(title: "\(day.dayIndex + 1). Gün", isSelected: selectedDayIndex == day.dayIndex) {
-                        selectedDayIndex = day.dayIndex
+                    dayChip(title: "\(day.dayIndex + 1). Gün", isSelected: selection.dayIndex == day.dayIndex) {
+                        selection = OptimizerSelection(dayIndex: day.dayIndex, stopID: nil)
                     }
                 }
             }

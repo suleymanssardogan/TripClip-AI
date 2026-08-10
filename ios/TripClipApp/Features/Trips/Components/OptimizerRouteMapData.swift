@@ -71,4 +71,15 @@ struct OptimizerRouteMapData: Hashable {
         guard let selectedDayIndex else { return days }
         return days.filter { $0.dayIndex == selectedDayIndex }
     }
+
+    /// `stopID` (bkz. `OptimizerSelection.stopID`) ile eşleşen haritalanmış
+    /// durağı bulur. Koordinatı olmayan bir durak `init`'te zaten elendiği
+    /// için burada da bulunamaz — bu, "haritada odaklanacak bir şey yok"
+    /// durumunu MapKit'e hiç dokunmadan, saf/test edilebilir biçimde temsil
+    /// eder (Req 9: geçersiz bir koordinata asla merkezlenmez, çünkü arayan
+    /// taraf bu `nil`'i görüp hiçbir kamera işlemi yapmaz — bkz.
+    /// `OptimizerRouteMap.updateUIView`).
+    func stop(withID stopID: String) -> OptimizerMapStop? {
+        allStops.first { $0.id == stopID }
+    }
 }

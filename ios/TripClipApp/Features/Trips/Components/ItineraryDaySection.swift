@@ -4,8 +4,19 @@ import SwiftUI
 ///   1. Gün
 ///   09:00  Colosseum          60 dk ziyaret
 ///   11:00  Roman Forum        45 dk ziyaret
+///
+/// Harita ile PAYLAŞILAN tek seçimin (bkz. `OptimizerSelection`) salt-okunur
+/// izdüşümünü alır — kendi otoriter seçim state'ini icat etmez (Req 13).
+/// Bir durağa dokunmak `onSelectStop` üzerinden üst katmana (`TripOptimizerView`)
+/// bildirilir; hem state güncellemesi hem haritayı görünür kılacak kaydırma
+/// TEK bir yerde (aynı `ScrollViewReader` proxy'sini paylaşan üst katmanda)
+/// yaşar, burada tekrarlanmaz.
 struct ItineraryDaySection: View {
     let day: ItineraryDay
+    /// Şu an haritada/itinerary'de odaklanılan durağın kimliği — `ItineraryStop.id`
+    /// ile karşılaştırılır (Req 3: array index'e ASLA dayanmaz).
+    var selectedStopID: String? = nil
+    var onSelectStop: ((ItineraryStop) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -17,15 +28,28 @@ struct ItineraryDaySection: View {
 
             VStack(spacing: 8) {
                 ForEach(day.stops) { stop in
-                    ItineraryStopRow(stop: stop)
+                    Button {
+                        onSelectStop?(stop)
+                    } label: {
+                        ItineraryStopRow(stop: stop, isSelected: stop.id == selectedStopID)
+                    }
+                    .buttonStyle(PressableButtonStyle())
+                    .id(Self.rowID(for: stop.id))
                 }
             }
         }
     }
+
+    /// `stop.id` tabanlı, kararlı bir `ScrollViewReader` hedefi — harita bir
+    /// durağı bildirdiğinde `TripOptimizerView` bu id'ye kaydırır. Koordinatı
+    /// olmayan bir durak dahil, HER durak için tanımlıdır (Req 9: harita
+    /// verisinde yoksa bile itinerary listesinde seçilebilir kalır).
+    static func rowID(for stopID: String) -> String { "optimizer-itinerary-stop-\(stopID)" }
 }
 
 private struct ItineraryStopRow: View {
     let stop: ItineraryStop
+    var isSelected: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -57,8 +81,11 @@ private struct ItineraryStopRow: View {
             }
         }
         .padding(12)
-        .background(AppColors.surface)
+        .background(isSelected ? AppColors.accent.opacity(0.12) : AppColors.surface)
         .clipShape(RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.border, lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(isSelected ? AppColors.accent : AppColors.border, lineWidth: isSelected ? 2 : 1)
+        )
     }
 }

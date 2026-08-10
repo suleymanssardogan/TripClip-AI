@@ -5,7 +5,7 @@ The iOS UI for the [AI Trip Optimizer](trip-optimizer.md), consuming the
 generate a preview itinerary from an existing Trip Builder trip's stops,
 and revisit any previously generated one — never mutates the trip itself.
 
-Six milestones so far:
+Seven milestones so far:
 - **v1 — Generate & preview**: "Optimize Trip" entry point on
   `TripDetailView`, a fresh itinerary generated and shown in
   `TripOptimizerView`.
@@ -29,12 +29,18 @@ Six milestones so far:
   day-separated, gracefully handling missing coordinates, reusing
   `TripOptimizerView`'s existing score/warnings/day-list/apply
   presentation unchanged. See "Map Visualization" below.
-- **v6 — Real Road Route Visualization (MapKit Directions)** (this
-  update): the straight-line segments v5 drew between consecutive stops
-  are now replaced, where possible, with real driving-route geometry from
+- **v6 — Real Road Route Visualization (MapKit Directions)**: the
+  straight-line segments v5 drew between consecutive stops are now
+  replaced, where possible, with real driving-route geometry from
   `MKDirections` — still day-separated, still falling back to a straight
   line per-segment when a route can't be calculated, still no external
   routing dependency. See "Real Road Route Visualization" below.
+- **v7 — Bidirectional Itinerary ↔ Map Interaction** (this update): the
+  itinerary day/stop list and the route map, previously independent, now
+  share one selection state — tapping a stop in the list focuses/centers
+  it on the map, and tapping a marker on the map highlights and scrolls to
+  the matching row in the list. See "Bidirectional Itinerary ↔ Map
+  Interaction" below.
 
 ## Screen flow
 
@@ -683,6 +689,284 @@ many times the underlying SwiftUI view re-renders in between.
   exactly the documented fallback behavior working as designed, not a
   separate offline-handling code path.
 
+## Bidirectional Itinerary ↔ Map Interaction
+
+Through v6, the route map (`OptimizerRouteMapSection`) and the itinerary
+day/stop list (`ItineraryDaySection`, rendered directly by
+`TripOptimizerView`) worked **independently** — the map had its own local
+`selectedDayIndex` `@State`, and the itinerary list had no selection
+concept at all. This milestone connects them: tapping a stop in either
+place selects it in both, with the map centering/highlighting the marker
+and the itinerary list scrolling to and highlighting the row. It is a
+pure interaction/UX change — no optimizer, backend, or BFF code was
+touched, and nothing here can trigger a new optimization, a route
+recalculation beyond what a genuine day switch requires, or an Apply.
+
+### Architecture/design decision: one shared selection, not two
+
+A new value type, `OptimizerSelection` (`Features/Trips/Components/OptimizerSelection.swift`),
+is the **single source of truth** for both "which day is active" and
+"which stop is focused":
+
+```swift
+struct OptimizerSelection: Equatable {
+    var dayIndex: Int?     // nil = "Tümü" (all days) — unchanged v5/v6 semantics
+    var stopID:   String?  // the focused/highlighted stop, if any
+}
+```
+
+`TripOptimizerView` owns it as `@State private var selection = OptimizerSelection()`
+and passes it down two ways — never up, never independently re-derived:
+
+- **`OptimizerRouteMapSection(itinerary:selection:onStopSelectedFromMap:)`**
+  takes `@Binding var selection: OptimizerSelection`. It **used to** own
+  `selectedDayIndex` as its own local `@State`; that's gone. The day-chip
+  row now writes through the binding instead of a local property — a
+  small, behavior-preserving change (day switching still works exactly as
+  in v5/v6), not a rewrite.
+- **`ItineraryDaySection(day:selectedStopID:onSelectStop:)`** takes a
+  plain (non-binding) `selectedStopID: String?` for reading — it never
+  needed to *write* the day, only report taps — plus a
+  `onSelectStop: (ItineraryStop) -> Void` closure. This is deliberately
+  **not** a `Binding<OptimizerSelection>`: `ItineraryDaySection` has no
+  reason to construct a full `OptimizerSelection` value itself (it would
+  need `stop.dayIndex` anyway, which `TripOptimizerView` already has
+  through the tapped `ItineraryStop`), so keeping it to a read-only value
+  + a report-upward closure is the smaller, clearer surface (Req 10's own
+  "do not make the production architecture unnecessarily complex just for
+  tests" cuts the same way — the simpler shape here also happens to be
+  the more testable one, see "Tests" below).
+
+Neither component ever invents its own competing notion of "what's
+selected" (Req 13) — `OptimizerRouteMap` (the actual `MKMapView` wrapper)
+doesn't even get an `OptimizerSelection` value; it receives the two
+already-unpacked primitives it needs (`selectedDayIndex: Int?`,
+`selectedStopID: String?`) plus an `onSelectStop` closure, keeping it, as
+before, a pure rendering layer with no state of its own beyond its
+`Coordinator`'s last-seen bookkeeping.
+
+### The one rule that satisfies both Req 1 and Req 4
+
+`OptimizerSelection.focusing(dayIndex:stopID:)` is the single function
+both directions call:
+
+```swift
+static func focusing(dayIndex: Int, stopID: String) -> OptimizerSelection {
+    OptimizerSelection(dayIndex: dayIndex, stopID: stopID)
+}
+```
+
+The new selection's `dayIndex` is **always** the tapped stop's own day —
+not "whatever was selected before," not "nil/Tümü." This single rule
+reads as two different requirements depending on whether the day changes:
+
+- **Req 1 "preserve the current selected day"**: if the tapped stop
+  already belongs to the currently-active day, `dayIndex` comes out
+  identical to what it was — nothing about the day selection visibly
+  changes.
+- **Req 4 "switch to that day" when the stop belongs to another day**: if
+  the tapped stop belongs to a *different* day (including from "Tümü"),
+  `dayIndex` changes to that stop's day — the map narrows to a single-day
+  view showing only that day's stops/route, satisfying Req 4's "do not
+  draw or display another day's route as the active route" directly (the
+  filtering mechanism is the same `OptimizerRouteMapData.visibleDays(selectedDayIndex:)`
+  v5/v6 already used).
+
+This is directly why **selecting a stop does not trigger an unnecessary
+route recalculation** (Req 1/5/6): `OptimizerRouteMapSection`'s route
+loading is gated by `.task(id: selection.dayIndex)` — **not**
+`.task(id: selection)`. Swift's `.task(id:)` only re-executes when the id
+*value* changes; selecting another stop in the same day leaves `dayIndex`
+byte-identical, so the task never re-fires and `OptimizerRouteCalculator.load`
+is never even called for that interaction. Only a genuine day change (Req
+4's own case) re-triggers it — and even then, `OptimizerRouteCalculator`'s
+existing v6 caching means a day already visited (e.g. because "Tümü" had
+already loaded every day up front) resolves instantly from cache, not a
+fresh network round-trip.
+
+Manually tapping a day chip (not a stop) explicitly **clears** `stopID`
+(`OptimizerRouteMapSection`'s day chip action sets
+`OptimizerSelection(dayIndex: newValue, stopID: nil)`) — a deliberate
+choice: picking a day directly is a "browse this day generally" action,
+not a "keep focusing this one stop" action, so the two shouldn't be
+conflated.
+
+### Map → Itinerary and Itinerary → Map: symmetric, explicit, one-shot
+
+Each direction is a single explicit action in the tap handler — not an
+`onChange`-based reaction inferred from a state diff — because inferring
+"who caused this change" from a diff alone is exactly what risks the
+camera-update loop Req 7 warns about (see below):
+
+- **Itinerary → Map** (Req 1): `ItineraryDaySection`'s row `Button` calls
+  `onSelectStop(stop)`. `TripOptimizerView`'s closure does two things in
+  one place: `selection = .focusing(dayIndex: stop.dayIndex, stopID: stop.id)`,
+  then `withAnimation { proxy.scrollTo(Self.mapAnchor, anchor: .top) }` —
+  the exact same `ScrollViewReader`/`mapAnchor`/`proxy.scrollTo` recipe
+  `TripDetailView` already uses for its own `LocationCard` tap (Req 2
+  "use the existing SwiftUI scrolling/focus patterns where appropriate" —
+  reused verbatim, not reinvented). `OptimizerRouteMap` then sees
+  `selectedStopID` change and centers/selects that marker (see "Camera
+  behavior" below).
+- **Map → Itinerary** (Req 2): `OptimizerRouteMap.Coordinator.mapView(_:didSelect:)`
+  (a new delegate method this milestone) resolves the tapped
+  `MKAnnotation` back to an `OptimizerMapStop` and calls `onSelectStop`.
+  `OptimizerRouteMapSection` updates the shared `selection` through its
+  binding, then calls `onStopSelectedFromMap`, which `TripOptimizerView`
+  wires to `withAnimation { proxy.scrollTo(ItineraryDaySection.rowID(for: stop.id), anchor: .center) }`
+  — the itinerary list scrolls to and centers the corresponding row.
+  `ItineraryDaySection` renders every stop row with `.id(Self.rowID(for: stop.id))`
+  specifically so this target always exists, for every stop, coordinates
+  or not (see "Missing-coordinate behavior" below).
+
+### Avoiding a camera-update loop (Req 7)
+
+Calling `MKMapView.selectAnnotation(_:animated:)` **programmatically**
+(the Itinerary → Map direction, inside `OptimizerRouteMap.updateUIView`)
+itself fires `MKMapViewDelegate.mapView(_:didSelect:)` — the same
+delegate method that reports a *genuine* user tap. Without a guard, that
+would create exactly the loop Req 7 warns about: Itinerary tap → `selection`
+updates → map focuses + calls `selectAnnotation` → `didSelect` fires →
+`onSelectStop` fires → `selection` gets rewritten (to an equal value, but
+still a real state write and a real round-trip).
+
+`OptimizerRouteMap.Coordinator.isProgrammaticSelection` breaks this: set
+to `true` immediately before the view's own `selectAnnotation` call, and
+consumed (reset to `false`) the moment `didSelect` next fires — so exactly
+one, and only one, "our own" selection is swallowed, and every other
+`didSelect` (i.e. every real user tap) reaches `onSelectStop` normally.
+This is the standard, well-known pattern for this exact class of MapKit
+problem, not a bespoke invention.
+
+### Camera behavior (Req 7, Req 8)
+
+`OptimizerRouteMap.updateUIView` now distinguishes two independent
+questions on every render — "did the focused *stop* change?" and "did the
+selected *day* change?" — computed once by comparing against the
+`Coordinator`'s last-seen values (which are updated unconditionally right
+away, so they never drift stale):
+
+```swift
+let dayChanged  = coordinator.lastSelectedDayIndex != selectedDayIndex
+let stopChanged = selectedStopID != coordinator.lastFocusedStopID
+coordinator.lastSelectedDayIndex = selectedDayIndex
+coordinator.lastFocusedStopID    = selectedStopID
+```
+
+- If **the stop changed** and it resolves to a real annotation
+  (`data.stop(withID:)`-equivalent lookup against the day's annotations):
+  center on **just that stop**, small span (`0.01°`, same tight zoom
+  `TripMapView.focusedPin` already uses) — **not** the whole day's
+  bounding region, even if the day also changed as part of this same
+  selection (Req 4's "focus the selected stop," not "fit the whole day").
+- **Otherwise** (no stop focus, or focusing a stop with no coordinate —
+  see below): fall back to the existing v5/v6 whole-visible-days bounding
+  fit, but **only** on first appearance or when the day genuinely changed
+  — never on an unrelated re-render, and never overriding a user's own
+  pan/zoom mid-browse.
+
+Both branches only run `map.setRegion` when one of these two things
+actually changed — an unrelated SwiftUI re-render (e.g. the route-loading
+indicator toggling) touches neither `dayChanged` nor `stopChanged` and
+therefore never moves the camera, satisfying Req 7's "do not
+unnecessarily zoom to the entire route" / "preserve normal map
+interaction afterward."
+
+### Marker behavior (Req 8)
+
+No new annotation abstraction — `map.selectAnnotation(match, animated:
+true)` (native MapKit) is reused exactly as `TripMapView` already uses it
+for its own `focusedPin`. Selecting an annotation natively shows its
+callout and applies MapKit's own selected-marker visual state; this
+milestone doesn't add a custom highlight ring or alternate marker glyph
+on top, matching Req 8's "reuse the existing annotation architecture...
+do not introduce a completely new map abstraction unless the current one
+cannot support selection cleanly" — the current one supports it cleanly,
+so nothing new was introduced.
+
+The itinerary side gets its own, purpose-built highlight (native
+selection doesn't extend to SwiftUI list rows): `ItineraryStopRow` gained
+an `isSelected: Bool` that swaps its background to
+`AppColors.accent.opacity(0.12)` and its border to a 2pt `AppColors.accent`
+stroke (vs. the default `AppColors.surface`/1pt `AppColors.border`) —
+same accent color already used for the day chips' own selected state, no
+new design token introduced.
+
+### Stable identity (Req 3)
+
+`OptimizerSelection.stopID` and `ItineraryDaySection`'s row-highlight
+comparison both key off `ItineraryStop.id` — the same stable string
+(`"<dayIndex>-<orderIndex>-<placeId-or-\"deleted\">"`) already established
+in `OptimizerModels.swift` since the very first optimizer milestone, and
+already reused as `OptimizerMapStop.id` by `OptimizerRouteMapData` since
+v5. **Nothing here identifies a stop by its position in an array** —
+`ForEach(day.stops)` iterates in whatever order the server returned, and
+selection survives regardless of that order, regardless of which day is
+currently filtered into view (`OptimizerRouteMapData.stop(withID:)`, new
+this milestone, searches *all* days, not just the visible ones — see
+below), and regardless of whether the itinerary came from a fresh
+`.generate` or a `.viewSaved` load (both produce the same `Itinerary`
+shape, and `OptimizerSelection`/`stop(withID:)` don't know or care which
+path produced it).
+
+### Day-switching behavior (Req 4)
+
+Selecting a stop in a day other than the currently-active one is not a
+separate code path — it's the same `.focusing(dayIndex:stopID:)` call
+described above, just with a `dayIndex` that happens to differ from the
+current selection. The effects cascade naturally through existing
+machinery: `selection.dayIndex` changes → `OptimizerRouteMapSection`'s
+`.task(id: selection.dayIndex)` re-fires → `loadVisibleDayRoutes()` now
+sees only that one day (via `mapData.visibleDays(selectedDayIndex:)`,
+unchanged since v5) → `OptimizerRouteMap` draws only that day's
+stops/route (never a route connecting across the boundary, same v5/v6
+guarantee) → the camera-behavior branch above focuses the specific
+selected stop, not the day's whole bounding region.
+
+### Missing-coordinate behavior (Req 9)
+
+A stop without a usable `lat`/`lng` was already excluded from
+`OptimizerRouteMapData` entirely since v5 — this milestone changes
+nothing about that exclusion, but does change what happens when such a
+stop is *selected*:
+
+- **It remains selectable in the itinerary.** `ItineraryStopRow` is now a
+  full-row `Button` for *every* stop, unconditionally — v5/v6 never made
+  itinerary rows tappable at all, so this is new, and it applies
+  identically whether or not the stop has coordinates (`ItineraryStop.id`,
+  the identity `isSelected` compares against, never depends on
+  `lat`/`lng` — see `test_itineraryStopID_isStableAndComparable_evenWithoutCoordinates`).
+- **Selecting it never crashes.** `OptimizerRouteMapData.stop(withID:)`
+  (new this milestone) simply can't find the stop — it was never added to
+  `allStops` in the first place — and returns `nil`. `OptimizerRouteMap`'s
+  focus branch requires `let match = ...` to succeed; when it doesn't, the
+  `if` fails and control falls through to the safe day-fit `else` branch
+  (or, if the day also didn't change, does nothing at all) — no force
+  unwrap, no invalid-coordinate `CLLocationCoordinate2D`, ever constructed
+  from a missing-coordinate stop.
+- **The map never centers on an invalid coordinate** — by construction,
+  not by a defensive check: there is no coordinate to center on in the
+  first place, because the stop was never turned into an
+  `OptimizerMapStop`/annotation to begin with.
+- **The selected itinerary row is still highlighted.** Row selection
+  (`stop.id == selectedStopID`) is evaluated entirely independently of
+  `OptimizerRouteMapData`/the map — a coordinate-less stop's row turns
+  accent-tinted exactly the same way a coordinate-having one's does.
+
+### Generate mode / saved itinerary mode (Req 5, Req 6)
+
+Both modes funnel through the same `TripOptimizerView.resultContent(itinerary:)`
+— unchanged by this milestone except for the `ScrollViewReader` wrapper
+and the new `selection` wiring, which apply identically regardless of
+`mode`. Neither `optimize`/`loadItinerary`/`applyToTrip` on
+`TripOptimizerViewModel` was touched, and — more importantly — **none of
+them has any relationship to `OptimizerSelection` at all**: there is no
+call site anywhere that reads `selection` and decides to call one of
+those methods. Selecting/focusing a stop is structurally incapable of
+triggering a new optimization request, mutating the saved itinerary or
+`TripStop`, or triggering Apply — not because of a guard that prevents it,
+but because no code path connects them.
+
 ## Apply to Trip
 
 The only action anywhere in this feature that intentionally changes the
@@ -1083,22 +1367,35 @@ No new design tokens were needed — `AppColors.warning` already existed
   same visual language here. Shows the stop's name, category chip, and
   city — reuses fields `TripStop` already carries, no new API field
   needed for "enough context to distinguish places."
-- **`OptimizerRouteMapData`** (new, v5) — pure `Itinerary` → per-day,
-  coordinate-only presentation struct. No MapKit/SwiftUI dependency; see
-  "Map Visualization" above.
-- **`OptimizerRouteMap`** (new, v5) — the `MKMapView`/`UIViewRepresentable`
+- **`OptimizerRouteMapData`** (v5; gained `stop(withID:)` in v7) — pure
+  `Itinerary` → per-day, coordinate-only presentation struct. No
+  MapKit/SwiftUI dependency; see "Map Visualization" above.
+  `stop(withID:)` is the stable-identity lookup (Req 3) the map's
+  focus/select logic and the tests both use.
+- **`OptimizerRouteMap`** (v5; gained `selectedStopID`/`onSelectStop` +
+  a `didSelect` delegate method in v7) — the `MKMapView`/`UIViewRepresentable`
   itself, structurally a day-aware sibling of `TripMapView`.
 - **`OptimizerRouteMapSection`** (v5; gained `OptimizerRouteCalculator`
-  ownership + route-loading lifecycle in v6) — the SwiftUI wrapper
-  `TripOptimizerView` actually embeds: day-selector chips + the map + the
-  missing-coordinate notice + (v6) a subtle route-loading indicator, all
-  itinerary-visualization-specific UI in one place.
+  ownership + route-loading lifecycle in v6; gained `OptimizerSelection`
+  binding ownership in v7, replacing its own local `selectedDayIndex`
+  state) — the SwiftUI wrapper `TripOptimizerView` actually embeds:
+  day-selector chips + the map + the missing-coordinate notice + (v6) a
+  subtle route-loading indicator, all itinerary-visualization-specific UI
+  in one place.
 - **`OptimizerRouteCalculator`** / **`OptimizerRoutingProviding`** /
-  **`MKDirectionsRoutingProvider`** (new, v6, all in
+  **`MKDirectionsRoutingProvider`** (v6, all in
   `OptimizerRouteCalculator.swift`) — the real-road-route orchestration
   layer. Not a UI component itself, but lives alongside these three in
   `Features/Trips/Components/` since it exists purely to serve them. See
   "Real Road Route Visualization" above.
+- **`OptimizerSelection`** (new, v7, `OptimizerSelection.swift`) — the
+  single shared day+stop selection state described in "Bidirectional
+  Itinerary ↔ Map Interaction" above. Not a view itself; a pure value type
+  plus one pure static helper (`focusing(dayIndex:stopID:)`).
+- **`ItineraryDaySection`** (existed since v1; gained `selectedStopID`/
+  `onSelectStop` + made every row an interactive, highlightable `Button`
+  in v7) — previously pure display, now also reports taps upward and
+  reflects the shared selection.
 
 ## Itinerary History
 
@@ -1190,7 +1487,7 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
 ```
 
-91 tests, eight files:
+103 tests, ten files:
 
 - **`Support/FakeAPIClient.swift`** — `APIClientProtocol` test double.
   Returns a canned `Result<Any, Error>`; two independent `AsyncGate`s (a
@@ -1262,25 +1559,38 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   `selectedPlaceIDsInTripOrder` preserving the trip's own stop order
   regardless of selection/toggle order (not `Set` iteration order), both
   for a full selection and a partial one.
-- **`OptimizerRouteMapDataTests.swift`** (13 tests, new this milestone) —
-  pure `XCTest` against `OptimizerRouteMapData`, no MapKit/SwiftUI
-  rendering involved (see "Map Visualization → why a new component"):
-  one-stop itinerary; multiple stops within a single day (order + exact
-  coordinates preserved); multiple days (kept structurally separate,
-  `hasMultipleDays` true, a day's stops never leak into another day's
-  array); day indices are **not renumbered** even when an earlier day has
-  zero plottable stops (a would-be "Day 1" that's entirely coordinate-less
-  doesn't cause the remaining day to relabel itself "Day 1"); missing
-  coordinates are omitted from the map array but counted, with `orderIndex`
-  gaps preserved (not recompacted) so map numbering stays consistent with
-  the optimizer's real order; every stop missing coordinates producing
-  empty `days` with a full `missingCoordinateCount`; a deleted-source-place
-  stop (`placeId`/`lat`/`lng` all `nil`) omitted gracefully, no crash; a
+- **`OptimizerRouteMapDataTests.swift`** (19 tests: the original 13 from
+  v5, plus 6 new this milestone) — pure `XCTest` against
+  `OptimizerRouteMapData`, no MapKit/SwiftUI rendering involved (see "Map
+  Visualization → why a new component"): one-stop itinerary; multiple
+  stops within a single day (order + exact coordinates preserved);
+  multiple days (kept structurally separate, `hasMultipleDays` true, a
+  day's stops never leak into another day's array); day indices are
+  **not renumbered** even when an earlier day has zero plottable stops (a
+  would-be "Day 1" that's entirely coordinate-less doesn't cause the
+  remaining day to relabel itself "Day 1"); missing coordinates are
+  omitted from the map array but counted, with `orderIndex` gaps
+  preserved (not recompacted) so map numbering stays consistent with the
+  optimizer's real order; every stop missing coordinates producing empty
+  `days` with a full `missingCoordinateCount`; a deleted-source-place stop
+  (`placeId`/`lat`/`lng` all `nil`) omitted gracefully, no crash; a
   saved-itinerary-shaped value mapping identically to a freshly-generated
   one (direct evidence for "Saved itinerary behavior" above);
   `visibleDays(selectedDayIndex:)` for nil (all days), a specific day, and
   a day index matching nothing (empty, not a crash); and stop ordering
   staying correct and independent per day across a two-day itinerary.
+  **New this milestone (`stop(withID:)`, Req 3/9/10)**: a stop's
+  `stop(withID:)` result carries the exact same `id` as its source
+  `ItineraryStop` (stable identity); it's found regardless of which day is
+  currently the `visibleDays` filter target (`stop(withID:)` searches all
+  `days`, not just the filtered subset — proving the map can resolve a
+  Map→Itinerary or Itinerary→Map focus even for a stop outside the
+  currently-selected day, which is exactly the Req 4 day-switch scenario);
+  a missing-coordinate stop's ID returns `nil` (never found, never
+  crashes); an unknown ID returns `nil`; the same lookup works identically
+  against a saved-itinerary-shaped value; and a direct assertion that
+  `ItineraryStop.id` (what row-highlight equality compares) is stable and
+  non-empty even when `lat`/`lng` are both `nil`.
 - **`Support/FakeOptimizerRoutingProvider.swift`** (new this milestone) —
   `OptimizerRoutingProviding` test double, same family as `FakeAPIClient`:
   records every `(from, to)` call, an injectable `resultProvider` closure
@@ -1314,43 +1624,66 @@ xcodebuild -project TripClipApp.xcodeproj -scheme TripClipApp \
   repeated full-suite `xcodebuild test` runs (async/timing-sensitive
   tests are exactly the kind that can flake under load, so this was
   checked deliberately, not assumed).
+- **`OptimizerSelectionTests.swift`** (6 tests, new this milestone) — pure
+  `XCTest` against `OptimizerSelection.focusing(dayIndex:stopID:)`, no
+  SwiftUI/MapKit involved: focusing a stop already in the current day
+  leaves `dayIndex` unchanged (direct evidence for Req 1 "preserve the
+  current selected day," and — since `OptimizerRouteMapSection`'s route
+  loading is gated on `.task(id: selection.dayIndex)` — indirect but real
+  evidence that this same interaction can't trigger a route
+  recalculation, Req 1/5/6); focusing a stop in a different day switches
+  `dayIndex` to it (Req 4); focusing from "Tümü" (nil) narrows to the
+  tapped stop's specific day; a simulated multi-tap "day-switching
+  chain" (day 0 → day 1 → another stop still in day 1 → back to day 0)
+  ends at the correct day at each step; plus two `Equatable` sanity
+  checks. This is the pure core of the bidirectional interaction — the
+  actual SwiftUI/MapKit wiring around it (button taps, `ScrollViewReader`,
+  `MKMapView` delegate callbacks) is UI glue verified by the build +
+  manual/simulator smoke check, not unit tests, per Req 10's own "do not
+  make the production architecture unnecessarily complex just for tests."
 
 ### Test results
 
 ```
 Test Suite 'All tests' passed
-Executed 91 tests, with 0 failures (0 unexpected) in 0.093-0.121s
+Executed 103 tests, with 0 failures (0 unexpected) in 0.103-0.134s
 ```
 
-Full `xcodebuild build` also verified clean, no new warnings beyond
-pre-existing `MKPlacemark(coordinate:)`/`MKMapItem(placemark:)`
-deprecation notices already present in `TripMapView.swift` before this
-milestone (macOS-26-targeted deprecations that don't apply to this
-project's iOS-only deployment target; the project was regenerated via
-`xcodegen generate` first, since new source/test files were added). This
-milestone made **no core-api, mobile-bff, or web-bff changes** and no
+Full `xcodebuild build`/`clean test` also verified clean, no new warnings
+beyond the same two pre-existing ones already present before this
+milestone (`MKPlacemark(coordinate:)`/`MKMapItem(placemark:)` deprecation
+notices in `TripMapView.swift`/`OptimizerRouteCalculator.swift`, and one
+unrelated `?? "Yüklenemedi."` nil-coalescing warning in
+`TripOptimizerView.swift`'s pre-existing error state — neither touched or
+introduced by this milestone; the project was regenerated via `xcodegen
+generate` first, since new source/test files were added). This milestone
+made **no core-api, mobile-bff, or web-bff changes** and no
 optimizer-algorithm changes — the counts from the previous milestones'
 backend/BFF suites stand unchanged.
 
-Verified stable across 3 repeated full-suite `xcodebuild test` runs (not
-just once) — deliberately, since this milestone's tests are
-async/timing-sensitive (gates, in-flight-task assertions) and exactly the
-kind that can flake under system load if written carelessly.
+Verified stable across repeated full-suite `xcodebuild test` runs. One
+run mid-development did show a single, isolated failure in a **v6** test
+(`OptimizerRouteCalculatorTests.test_load_twoDays_neverRequestsAcrossDayBoundary`,
+a file untouched by this milestone) under heavy concurrent build/test
+system load; re-running that suite alone immediately passed (0.002s), and
+two subsequent full 103-test runs both passed cleanly — confirming a
+transient scheduling flake under load, not a regression introduced here
+(consistent with this test family's own known sensitivity to system load,
+already documented in "Real Road Route Visualization → Testing").
 
 A live Simulator launch-and-crash-free check was performed (install →
-launch → screenshot of the initial screen, confirming the app — now
-additionally using `MKDirections`/`async`/`@Observable` routing code —
-still boots and renders normally). A full interactive tap-through
-(generating a real multi-day itinerary against a running backend,
-watching a route resolve from dashed-fallback to solid-routed live,
-switching days mid-calculation) was **not** performed in this
-environment — same limitation as every prior milestone's testing notes
-(no XCUITest/accessibility automation harness here, and `MKDirections`
-itself needs live network + Apple's routing service, which this sandboxed
-environment doesn't reliably have) — that level of verification relies on
-the 91 passing automated tests (14 of them directly exercising the
-routing-calculator's request/cache/cancellation/day-separation logic
-against a fake provider) plus the clean build instead.
+launch → screenshot of the initial screen, confirming the app — now also
+wiring a `ScrollViewReader`, a `Binding<OptimizerSelection>` between three
+components, and a new `MKMapViewDelegate.didSelect` — still boots and
+renders normally). A full interactive tap-through (generating a real
+multi-day itinerary against a running backend, tapping a stop in the list
+and watching the map focus it, tapping a marker and watching the list
+scroll to it, switching days via a stop tap) was **not** performed in
+this environment — same limitation as every prior milestone's testing
+notes (no XCUITest/accessibility automation harness here) — that level of
+verification relies on the 103 passing automated tests (12 of them new
+this milestone, directly exercising the selection/identity/day-switch
+logic against fakes and pure values) plus the clean build instead.
 
 ## Assumptions / limitations (v2 — Itinerary History)
 
@@ -1436,13 +1769,14 @@ against a fake provider) plus the clean build instead.
   duration, arrival time, etc. (that information already lives in the day
   list directly below the map — the callout deliberately doesn't
   duplicate it).
-- **Day-selector chips only filter/refit the map**, not the day list below
-  it — selecting "2. Gün" in the map's chip row does not scroll or filter
-  `ItineraryDaySection`'s stop list. The two are intentionally independent
-  (Req 4's "add the map without duplicating existing itinerary
-  presentation logic" — wiring them together would mean the map reaching
-  into the day list's own state, coupling two sections that today don't
-  know about each other).
+- ~~**Day-selector chips only filter/refit the map**, not the day list
+  below it — the two are intentionally independent.~~ **Superseded by
+  v7.** As of "Bidirectional Itinerary ↔ Map Interaction" below, the map
+  and the itinerary day/stop list share one `OptimizerSelection` and do
+  react to each other — tapping a day chip still only affects the map
+  directly (it doesn't scroll the list), but tapping a *stop*, in either
+  place, now does keep both in sync. Left struck through rather than
+  deleted for historical accuracy about what v5 shipped.
 - **No route-distance/time overlay on the map itself** — total distance
   and travel time already appear in `OptimizerScoreBadge` immediately
   below the map; the map's polylines aren't separately labeled with
@@ -1456,6 +1790,42 @@ full list (cache scoped per-screen-instance and not persisted;
 `MKDirections` rate-limiting/backoff; offline/Simulator behavior degrades
 to v5's straight-line rendering by design, not as a bug).
 
+## Assumptions / limitations (v7 — Bidirectional Itinerary ↔ Map Interaction)
+
+- **No persistence of the selection across screen visits.** `OptimizerSelection`
+  is plain `TripOptimizerView` `@State` — reopening the same itinerary
+  (even the exact same one, from Itinerary History) starts with no stop
+  focused and no single day pinned ("Tümü"), same as every other
+  `@State` in this feature area. Not addressed here, consistent with
+  every prior milestone's own "no persistence of UI-only state" pattern
+  (see e.g. "Assumptions / limitations (v4)").
+- **Selecting a stop does not deep-link into `TravelTipsSection` or any
+  other non-map, non-list content.** The shared selection only connects
+  the map and the itinerary day/stop list — it has no relationship to,
+  and does not affect, `OptimizerScoreBadge`, `ItineraryWarningsSection`,
+  or the apply flow.
+- **No multi-stop selection / comparison.** `OptimizerSelection.stopID`
+  holds at most one stop at a time — tapping a second stop replaces the
+  first, it never accumulates a set. A "compare two stops" or
+  "select a range" interaction, if ever needed, would be a materially
+  different feature, not a small extension of this one.
+- **The callout button ("Apple Haritalar'da aç") and the new marker-tap
+  focus behavior share the same tap target region on a small marker** —
+  tapping the marker glyph itself selects/focuses (this milestone);
+  tapping the callout's trailing accessory button (which only appears
+  *after* the marker is already selected) opens Apple Maps (unchanged
+  since v5). This two-step affordance (tap once to focus, tap the
+  button that then appears to leave the app) is standard MapKit callout
+  behavior, not a new interaction pattern introduced here.
+- **Deselecting a stop by tapping empty map space is native MapKit
+  behavior** (via `MKMapView`'s own deselect-on-background-tap) and does
+  **not** clear `OptimizerSelection.stopID` — the itinerary row stays
+  highlighted until a different stop or day chip is tapped. This
+  mirrors `TripMapView`'s own precedent (its `focusedPin` mechanism has
+  the identical asymmetry) rather than introducing new behavior, but is
+  worth calling out as a deliberate non-symmetry: MapKit deselection is a
+  map-only visual event, not a selection-clearing one.
+
 ## Future UI improvements
 
 Ranked by what unlocks the most value next:
@@ -1463,15 +1833,9 @@ Ranked by what unlocks the most value next:
 1. **`preferred_start_time`/`preferred_end_time` controls** — expose the
    remaining constraint core-api already accepts but v4 deliberately left
    alone (see "Optimizer Configuration" above for why). Still the natural
-   next increment now that place selection, duration, and the routed map
-   all exist.
-2. **Tap a day list row to focus the map on that stop** — the map and the
-   day list (`ItineraryDaySection`) are intentionally decoupled (see
-   "Assumptions / limitations (v5)" above); wiring a tap-to-focus
-   interaction between them, mirroring `TripDetailView`'s own
-   `focusedPin`/`scrollTo` pattern, is a natural, low-risk follow-up now
-   that both pieces exist independently.
-3. **Persist the route cache across screen visits** — today
+   next increment now that place selection, duration, and the routed,
+   interactive map all exist.
+2. **Persist the route cache across screen visits** — today
    `OptimizerRouteCalculator`'s cache lives only as long as
    `OptimizerRouteMapSection`'s `@State` (see "Real Road Route
    Visualization → Known limitations"). A small keyed disk/memory cache
@@ -1479,11 +1843,16 @@ Ranked by what unlocks the most value next:
    saved itinerary from Itinerary History skip re-requesting routes
    already resolved on a previous visit — a pure performance win, no
    behavior change.
-4. **Walking/transit transport type toggle** — `MKDirectionsRoutingProvider`
-   is hardcoded to `.automobile` (deliberately, this milestone's own
-   scope; see "Known limitations"). Exposing `MKDirectionsTransportType`
-   as a user-facing toggle would be a contained change, localized to that
-   one type.
+3. **Walking/transit transport type toggle** — `MKDirectionsRoutingProvider`
+   is hardcoded to `.automobile` (deliberately, v6's own scope; see
+   "Known limitations"). Exposing `MKDirectionsTransportType` as a
+   user-facing toggle would be a contained change, localized to that one
+   type.
+4. **Persist the selected day/stop across screen visits** — see
+   "Assumptions / limitations (v7)" above; would need `OptimizerSelection`
+   to move from plain `@State` to something durable (e.g. `UserDefaults`
+   keyed by itinerary ID), a small, self-contained addition on top of the
+   architecture this milestone put in place.
 5. **Delete a history entry** — needs a new core-api `DELETE
    /internal/itineraries/{id}` (+ BFF proxy) first; today history is
    append-only.

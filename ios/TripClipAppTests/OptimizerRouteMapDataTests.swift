@@ -221,4 +221,95 @@ final class OptimizerRouteMapDataTests: XCTestCase {
         XCTAssertEqual(data.missingCoordinateCount, 0)
         XCTAssertFalse(data.hasMultipleDays)
     }
+
+    // MARK: - stop(withID:) — Bidirectional Itinerary ↔ Map Interaction milestone
+
+    /// Req 3 "stable identity": haritalanmış durağın kimliği, kaynak
+    /// `ItineraryStop.id` ile BİREBİR aynı — array index'e değil, sunucunun
+    /// `day_index-order_index-place_id` üçlüsünden türetilen kararlı
+    /// kimliğe dayanır. Bu, `OptimizerSelection.stopID`'nin harita ve
+    /// itinerary listesi arasında güvenilir biçimde köprü kurabilmesinin
+    /// temelidir.
+    func test_stopWithID_stableIdentity_matchesSourceItineraryStopID() {
+        let source = stop(placeId: 12, name: "Ayasofya", dayIndex: 0, orderIndex: 1)
+        let itinerary = OptimizerFixtures.itinerary(days: [
+            ItineraryDay(dayIndex: 0, stops: [
+                stop(placeId: 99, dayIndex: 0, orderIndex: 0), source,
+            ])
+        ])
+
+        let data = OptimizerRouteMapData(itinerary: itinerary)
+        let mapStop = data.stop(withID: source.id)
+
+        XCTAssertEqual(mapStop?.id, source.id)
+        XCTAssertEqual(mapStop?.name, "Ayasofya")
+    }
+
+    /// Req 3: aynı durak, gün seçimi/filtrelemesi değişse bile AYNI id ile
+    /// bulunabilir — `stop(withID:)` `visibleDays` filtrelemesinden
+    /// bağımsız, `days` bütününde arar.
+    func test_stopWithID_findsStop_regardlessOfWhichDayIsCurrentlySelected() {
+        let target = stop(placeId: 7, name: "Gün2Durağı", dayIndex: 1, orderIndex: 0)
+        let itinerary = OptimizerFixtures.itinerary(days: [
+            ItineraryDay(dayIndex: 0, stops: [stop(placeId: 1, dayIndex: 0, orderIndex: 0)]),
+            ItineraryDay(dayIndex: 1, stops: [target]),
+        ])
+        let data = OptimizerRouteMapData(itinerary: itinerary)
+
+        // Gün 0 seçiliyken bile (visibleDays yalnızca gün 0'ı döner),
+        // stop(withID:) TÜM günler içinde arar — harita, kullanıcı henüz
+        // o güne geçmemiş olsa bile hangi durağa odaklanacağını bulabilir.
+        XCTAssertTrue(data.visibleDays(selectedDayIndex: 0).allSatisfy { $0.dayIndex == 0 })
+        XCTAssertEqual(data.stop(withID: target.id)?.dayIndex, 1)
+        XCTAssertEqual(data.stop(withID: target.id)?.name, "Gün2Durağı")
+    }
+
+    /// Req 9 "the map should not attempt to center on an invalid
+    /// coordinate": koordinatı olmayan bir durak `stop(withID:)` ile hiç
+    /// BULUNAMAZ (zaten `init`'te elendi) — `OptimizerRouteMap` bu nil'i
+    /// görüp hiçbir kamera işlemi yapmaz, crash olmaz.
+    func test_stopWithID_missingCoordinateStop_returnsNil_doesNotCrash() {
+        let missingCoordStop = stop(placeId: 5, name: "Koordinatsız", lat: nil, lng: nil, dayIndex: 0, orderIndex: 0)
+        let itinerary = OptimizerFixtures.itinerary(days: [
+            ItineraryDay(dayIndex: 0, stops: [missingCoordStop])
+        ])
+        let data = OptimizerRouteMapData(itinerary: itinerary)
+
+        XCTAssertNil(data.stop(withID: missingCoordStop.id))
+    }
+
+    func test_stopWithID_unknownID_returnsNil() {
+        let itinerary = OptimizerFixtures.itinerary(days: [OptimizerFixtures.oneDayWithTwoStops])
+        let data = OptimizerRouteMapData(itinerary: itinerary)
+
+        XCTAssertNil(data.stop(withID: "nonexistent-id"))
+    }
+
+    /// Saved itinerary etkileşimi: `stop(withID:)` yalnızca bir `Itinerary`
+    /// değerine bakar, `.generate` ile mi `.viewSaved` ile mi geldiğinin
+    /// farkında değil — aynı mekanizma her iki modda da aynı şekilde çalışır.
+    func test_stopWithID_worksIdenticallyForSavedItineraryShape() {
+        let saved = OptimizerFixtures.itinerary(id: 9, days: [OptimizerFixtures.oneDayWithTwoStops])
+        let data = OptimizerRouteMapData(itinerary: saved)
+
+        let firstStopID = OptimizerFixtures.oneDayWithTwoStops.stops[0].id
+        XCTAssertEqual(data.stop(withID: firstStopID)?.name, "Ayasofya")
+    }
+
+    /// Req 9 "the selected itinerary row can still be highlighted" (even
+    /// with no usable coordinate): `ItineraryDaySection`/`ItineraryStopRow`
+    /// vurgulamayı `stop.id == selectedStopID` karşılaştırmasıyla yapar —
+    /// `ItineraryStop.id` sunucudan gelen `dayIndex`/`orderIndex`/`placeId`
+    /// üçlüsünden türetilir, lat/lng'e HİÇ bakmaz. Koordinatı olmayan bir
+    /// durağın kimliği de aynı şekilde kararlı/karşılaştırılabilir kalır —
+    /// itinerary listesindeki vurgulama, haritanın o durağı hiç
+    /// gösteremiyor olmasından tamamen bağımsızdır.
+    func test_itineraryStopID_isStableAndComparable_evenWithoutCoordinates() {
+        let missingCoordStop = stop(placeId: 5, name: "Koordinatsız", lat: nil, lng: nil, dayIndex: 0, orderIndex: 2)
+        let sameStopAgain    = stop(placeId: 5, name: "Koordinatsız", lat: nil, lng: nil, dayIndex: 0, orderIndex: 2)
+
+        XCTAssertFalse(missingCoordStop.id.isEmpty)
+        XCTAssertEqual(missingCoordStop.id, sameStopAgain.id)
+        XCTAssertEqual(missingCoordStop.id, "0-2-5")   // dayIndex-orderIndex-placeId
+    }
 }

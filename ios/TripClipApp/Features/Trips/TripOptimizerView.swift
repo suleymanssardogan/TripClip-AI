@@ -35,6 +35,17 @@ struct TripOptimizerView: View {
     @State private var showSavedConfirmation = false
     @State private var showApplyConfirm = false
     @State private var showApplySuccess = false
+    /// Harita (`OptimizerRouteMapSection`) ve itinerary listesi
+    /// (`ItineraryDaySection`) arasında PAYLAŞILAN tek seçim durumu — Req
+    /// 13: ikisi de kendi otoriter kopyasını icat etmez, burada, tek bir
+    /// yerde sahiplenilir. Değişmesi (ne map'ten ne itinerary'den) ASLA
+    /// `vm.optimize`/`vm.loadItinerary`/`vm.applyToTrip`'i tetiklemez — bu
+    /// state, o metotların hiçbirinden çağrılmaz (Req 5/6: seçim, ne yeni
+    /// bir optimizasyon isteği ne apply ne de gereksiz bir rota
+    /// hesaplaması başlatır).
+    @State private var selection = OptimizerSelection()
+
+    private static let mapAnchor = "optimizer-route-map"
 
     private var navigationTitle: String {
         switch mode {
@@ -170,9 +181,23 @@ struct TripOptimizerView: View {
 
     @ViewBuilder
     private func resultContent(_ itinerary: Itinerary) -> some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                OptimizerRouteMapSection(itinerary: itinerary)
+                OptimizerRouteMapSection(
+                    itinerary: itinerary,
+                    selection: $selection,
+                    onStopSelectedFromMap: { stop in
+                        // Req 2 "Map → Itinerary": itinerary listesini,
+                        // haritada dokunulan durağın satırına kaydır —
+                        // TripDetailView'in kendi mapAnchor/scrollTo
+                        // desenindeki AYNI mekanizma, ters yönde.
+                        withAnimation {
+                            proxy.scrollTo(ItineraryDaySection.rowID(for: stop.id), anchor: .center)
+                        }
+                    }
+                )
+                .id(Self.mapAnchor)
 
                 OptimizerScoreBadge(
                     score: itinerary.optimizationScore,
@@ -185,7 +210,19 @@ struct TripOptimizerView: View {
                 }
 
                 ForEach(itinerary.days) { day in
-                    ItineraryDaySection(day: day)
+                    ItineraryDaySection(
+                        day: day,
+                        selectedStopID: selection.stopID,
+                        onSelectStop: { stop in
+                            // Req 1 "Itinerary → Map": paylaşılan seçimi
+                            // güncelle (aynı `focusing` kuralı — Req 1/4)
+                            // ve haritayı görünür kılmak için yukarı
+                            // kaydır (TripDetailView'in LocationCard tıklama
+                            // deseniyle AYNI: focus + scroll tek eylemde).
+                            selection = .focusing(dayIndex: stop.dayIndex, stopID: stop.id)
+                            withAnimation { proxy.scrollTo(Self.mapAnchor, anchor: .top) }
+                        }
+                    )
                 }
 
                 applyButton
@@ -199,6 +236,7 @@ struct TripOptimizerView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 16)
+        }
         }
     }
 
