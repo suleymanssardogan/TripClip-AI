@@ -160,12 +160,36 @@ uyarısıyla. `duration_days` verilmediyse gün sayısı kendiliğinden türer �
 tüm mekanlar planlanana kadar (veya `len(places)` güvenlik sınırına
 ulaşılana kadar — pratikte hiç tetiklenmez) döngü devam eder.
 
-### Overnight/edge-time limitation
+### Overnight time ranges — hard-constrained, not skipped
 
-`_parse_opening_hours` (greedy'den import, DEĞİŞTİRİLMEDİ) gece-yarısını
-aşan pencereleri ("22:00-02:00" gibi) doğru ayrıştırmıyor. `_valid_hard_window`
-bu durumu tespit edip o mekan için sert kısıtı ATLAR — bu, her gün için
-ayrı ayrı geçerli, davranış önceki milestone'la aynı.
+Hem `preferred_start_time`/`preferred_end_time` (planlama penceresi) hem
+bir mekanın `opening_hours`'ı gece yarısını AŞABİLİR ("18:00-01:00",
+"22:00-02:00" gibi) — `greedy_distance_strategy.py`'den import edilen
+`PlanningTimeWindow`/`_day_relative_window`/`_window_overlaps_day`/
+`_resolve_arrival`/`MINUTES_PER_DAY` bunu SÜREKLİ (monotonik, gece
+yarısından sonra da büyümeye devam eden) bir zaman ekseninde temsil eder
+— bkz. o modülün kendi "Overnight Time Ranges" bölümü, TEK kaynağın
+gerekçesi için.
+
+`_solve_day`'in `SetRange` çağrısı artık `_day_relative_window`'un
+ürettiği (rel_open, rel_close) çiftini `[0, day_budget]`'e KIRPILMIŞ
+hâliyle kullanıyor — `rel_close >= rel_open` bu fonksiyonun kendi
+garantisi (bkz. o docstring), bu yüzden `SetRange(lower, upper)` ASLA
+`lower > upper` (bkz. "Bu neden önemli" — aşağıdaki tarihsel not) alacak
+şekilde çağrılmaz. Bir mekanın penceresi bu günü hiç örtmüyorsa (bkz.
+`_window_overlaps_day`, `unconstrained_ids`'in kaynağı) sert kısıt hiç
+uygulanmaz — tıpkı açılış saati bilinmeyen bir mekan gibi.
+
+**Bu neden önemli (tarihsel not):** `open_minutes > close_minutes` HAM
+bir çifti doğrudan `SetRange`'e vermek (`lower > upper`) OR-Tools'un C++
+çözücüsünü ÇÖKERTİR (`"CP Solver fail"`, önceki milestone'da ampirik
+olarak doğrulanmıştı — bkz. docs/trip-optimizer.md). Bu yüzden bir önceki
+milestone `_valid_hard_window` ile bu tür pencereleri baştan REDDEDİP
+sert kısıtsız bırakıyordu (`open > close` ise `None`). Bu milestone o
+korumayı KALDIRMADI — `_day_relative_window`'un `+MINUTES_PER_DAY`
+uzatması, `SetRange`'e giden çiftin ASLA ters olmamasını YAPISAL olarak
+garanti ederek AYNI güvenliği, artık overnight pencereleri REDDETMEDEN
+sağlıyor.
 
 ### Performance protection
 
@@ -194,6 +218,11 @@ from app.infrastructure.optimization.greedy_distance_strategy import (
     _format_minutes,
     _parse_opening_hours,
     _date_for,
+    _day_relative_window,
+    _window_overlaps_day,
+    _resolve_arrival,
+    PlanningTimeWindow,
+    MINUTES_PER_DAY,
     DEFAULT_VISIT_MINUTES,
     CATEGORY_VISIT_MINUTES,
     AVG_SPEED_KMH,
@@ -211,29 +240,6 @@ DISTANCE_SCALE = 1000  # km -> metre (OR-Tools tamsayı kenar maliyeti ister)
 # scheduling") — DISTANCE_SCALE birimlerinde (metre), gerçekçi HERHANGİ bir
 # günlük rota mesafesinden (binlerce km bile olsa) kat kat büyük.
 DISJUNCTION_PENALTY = 100_000_000
-
-
-def _valid_hard_window(place: PlaceInput) -> Optional[Tuple[int, int]]:
-    """Bu strateji tarafından SERT kısıt olarak uygulanabilir bir
-    (open_minutes, close_minutes) döner — ayrıştırılamıyorsa VEYA gece-yarısını
-    aşan (ters, open > close) bir pencereyse None (bkz. modül docstring
-    "Overnight/edge-time limitation")."""
-    parsed = _parse_opening_hours(place.opening_hours)
-    if parsed is None:
-        return None
-    open_m, close_m = parsed
-    if open_m > close_m:
-        return None
-    return open_m, close_m
-
-
-def _window_overlaps_day(window: Tuple[int, int], day_start: int, day_end: int) -> bool:
-    """Bir pencere `[day_start, day_end]` ile HİÇ örtüşmüyorsa (ör. mekan
-    günün tamamı kapandıktan sonra açılıyor) — bu HANGİ güne konursa konsun
-    asla karşılanamaz, çünkü her gün AYNI day_start/day_end'i paylaşır (bkz.
-    modül docstring "Impossible routes")."""
-    open_m, close_m = window
-    return not (close_m < day_start or open_m > day_end)
 
 
 def _solve_distance_only(places: List[PlaceInput]) -> List[PlaceInput]:
@@ -370,11 +376,20 @@ def _solve_day(
 
     for idx, place in enumerate(remaining):
         node_index = manager.NodeToIndex(idx + 1)
-        window = None if place.place_id in unconstrained_ids else _valid_hard_window(place)
+        window = None if place.place_id in unconstrained_ids else _parse_opening_hours(place.opening_hours)
         if window is not None:
             open_m, close_m = window
-            rel_open = max(0, open_m - day_start)
-            rel_close = min(day_budget, close_m - day_start)
+            # `_day_relative_window` gece yarısını aşan pencereler için
+            # SÜREKLİ (rel_close >= rel_open GARANTİLİ) bir çift üretir —
+            # bkz. modül docstring "Overnight time ranges — hard-constrained,
+            # not skipped". `[0, day_budget]`'e kırpma yalnızca bu günün
+            # kendi bütçesinin ötesine taşan uçları (ör. planlama penceresinin
+            # kendi kesim saatini aşan bir kapanış) sınırlamak için — bu
+            # KIRPMA sonrasında bile `rel_open <= rel_close` korunur (bkz. o
+            # fonksiyonun kendi kanıtı).
+            rel_open, rel_close = _day_relative_window(open_m, close_m, day_start)
+            rel_open = max(0, min(rel_open, day_budget))
+            rel_close = max(0, min(rel_close, day_budget))
             time_dimension.CumulVar(node_index).SetRange(rel_open, rel_close)
         else:
             time_dimension.CumulVar(node_index).SetRange(0, day_budget)
@@ -434,8 +449,8 @@ def _solve_day_aware_schedule(
     # karşılanamaz) baştan tespit edilip gevşetilir.
     unconstrained_ids: Set[int] = set()
     for place in places:
-        window = _valid_hard_window(place)
-        if window is not None and not _window_overlaps_day(window, day_start, day_end):
+        window = _parse_opening_hours(place.opening_hours)
+        if window is not None and not _window_overlaps_day(window[0], window[1], day_start, day_end):
             unconstrained_ids.add(place.place_id)
 
     relaxed = bool(unconstrained_ids)
@@ -530,9 +545,8 @@ def _walk_day_groups(
                 missing_hours_names.append(place.name)
         else:
             open_m, close_m = open_close
-            if arrival < open_m:
-                arrival = open_m  # açılışı bekle — sessizce
-            if arrival >= close_m:
+            arrival, conflict = _resolve_arrival(arrival, day_start, day_end, open_m, close_m)
+            if conflict:
                 warnings.append(
                     f"{place.name}: planlanan varış saati belirtilen çalışma saatleriyle çakışıyor"
                 )
@@ -607,16 +621,18 @@ class ORToolsRouteOptimizationStrategy(RouteOptimizationStrategy):
             )
 
         try:
-            day_start = _parse_hhmm(constraints.preferred_start_time)
-            day_end = _parse_hhmm(constraints.preferred_end_time)
-            if day_end <= day_start:
-                raise ValueError
+            window = PlanningTimeWindow.parse(constraints.preferred_start_time, constraints.preferred_end_time)
         except (ValueError, AttributeError):
-            day_start, day_end = _parse_hhmm(FALLBACK_START), _parse_hhmm(FALLBACK_END)
+            window = PlanningTimeWindow.parse(FALLBACK_START, FALLBACK_END)
+        # `day_end` bu noktadan itibaren HER ZAMAN SÜREKLİ — bkz.
+        # greedy_distance_strategy.py "Overnight Time Ranges" ve bu dosyanın
+        # kendi "Overnight time ranges — hard-constrained, not skipped"
+        # bölümü; GreedyDistanceStrategy.optimize ile BİREBİR AYNI türetme.
+        day_start, day_end = window.start_minutes, window.end_minutes
 
         max_days = constraints.duration_days if (constraints.duration_days and constraints.duration_days >= 1) else None
 
-        has_hard_windows = any(_valid_hard_window(p) is not None for p in places)
+        has_hard_windows = any(_parse_opening_hours(p.opening_hours) is not None for p in places)
 
         if has_hard_windows:
             # ── Day-aware yol (bkz. modül docstring "Day-aware scheduling") ──
@@ -677,9 +693,8 @@ class ORToolsRouteOptimizationStrategy(RouteOptimizationStrategy):
                         missing_hours_names.append(place.name)
                 else:
                     open_m, close_m = open_close
-                    if arrival < open_m:
-                        arrival = open_m  # açılışı bekle — sessizce
-                    if arrival >= close_m:
+                    arrival, conflict = _resolve_arrival(arrival, day_start, day_end, open_m, close_m)
+                    if conflict:
                         warnings.append(
                             f"{place.name}: planlanan varış saati belirtilen çalışma saatleriyle çakışıyor"
                         )

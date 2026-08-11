@@ -110,12 +110,23 @@ def test_impossible_day_budget_still_returns_all_stops_with_warning():
     assert any("sığmayan duraklar" in w for w in result.warnings)
 
 
-def test_invalid_time_window_falls_back_to_default_window():
-    """end_time <= start_time normalde OptimizationService'te reddedilir,
-    ama strateji tek başına çağrılırsa çökmez, sessizce varsayılana düşer —
-    greedy ile birebir aynı savunma."""
-    result = _run([_place(1, "A", 41.0, 29.0)], preferred_start_time="18:00", preferred_end_time="09:00")
+def test_equal_start_and_end_time_falls_back_to_default_window():
+    """`end_time == start_time` normalde OptimizationService'te reddedilir
+    (bkz. "Overnight Time Ranges" — eşit değerler HÂLÂ geçersiz, mevcut
+    sözleşmenin korunan kısmı), ama strateji tek başına çağrılırsa çökmez,
+    sessizce varsayılana düşer — greedy ile birebir aynı savunma."""
+    result = _run([_place(1, "A", 41.0, 29.0)], preferred_start_time="12:00", preferred_end_time="12:00")
     assert result.days[0].stops[0].arrival_time == "09:00"
+
+
+def test_end_time_before_start_time_is_now_a_valid_overnight_window():
+    """`18:00 → 09:00` ARTIK geçerli bir overnight planlama penceresi
+    (15 saat) — fallback'e DÜŞMEZ, tek mekan doğrudan 18:00'de (day_start)
+    planlanır. Bu, önceki milestone'un 'end <= start her zaman fallback'
+    davranışının kasıtlı olarak DEĞİŞTİĞİ nokta (bkz. "Overnight Time
+    Ranges")."""
+    result = _run([_place(1, "A", 41.0, 29.0)], preferred_start_time="18:00", preferred_end_time="09:00")
+    assert result.days[0].stops[0].arrival_time == "18:00"
 
 
 # ─── Unavailable / degenerate coordinates ───────────────────────────────────
@@ -410,36 +421,90 @@ def test_hard_window_combined_with_multi_day_splitting_still_works():
     assert len(result.days) > 1
 
 
-# ─── Overnight / edge-time window: unsupported by the current model,
-# must degrade gracefully (no crash), not silently drop the place ──────────
+# ─── Overnight time ranges — hard-constrained, not skipped ──────────────────
+#
+# Önceki milestone'da bu bölüm "overnight pencereler desteklenmiyor, sert
+# kısıt atlanıyor" başlığı altındaydı — bkz. ortools_strategy.py "Overnight
+# time ranges — hard-constrained, not skipped" ve
+# greedy_distance_strategy.py "Overnight Time Ranges" için YENİ modelin
+# tam açıklaması. Bu bölüm o eski davranışın YERİNE geçiyor.
 
-def test_overnight_window_does_not_crash_and_falls_back_to_soft_warning():
-    """'22:00-02:00' gibi gece-yarısını aşan pencereler bu modelde
-    desteklenmiyor (bkz. ortools_strategy.py 'Overnight/edge-time
-    limitation' — _parse_opening_hours, GreedyDistanceStrategy'den import
-    edilir ve DEĞİŞTİRİLMEZ, ters aralığı doğru ayrıştırmaz). Bu strateji bu
-    durumda ÇÖKMEMELİ — o tek mekan için sert kısıt atlanır, mevcut yumuşak
-    çakışma uyarısı (değişmedi) yine çalışır."""
-    places = [
-        _place(1, "Gece Kulübü", 41.00, 29.00, opening_hours="22:00-02:00"),
-        _place(2, "Normal", 41.05, 29.05),
-    ]
-    result = _run(places)  # çökmemeli
+def test_overnight_place_window_is_hard_constrained_not_skipped():
+    """Tek mekan, overnight açılış penceresi (22:00-02:00), overnight
+    PLANLAMA penceresi (18:00→01:00) — mekan artık SERT kısıtlı olarak
+    (unconstrained_ids'e DÜŞMEDEN) planlanır: açılıştan önce sessizce
+    bekler, hiçbir çakışma uyarısı üretmez, ÇÖKMEZ (bkz. tarihsel not:
+    ham (open>close) bir çift SetRange'e verilirse solver çöker — bu artık
+    asla olamaz)."""
+    result = _run(
+        [_place(1, "Gece Kulübü", 41.00, 29.00, opening_hours="22:00-02:00")],
+        preferred_start_time="18:00", preferred_end_time="01:00",
+    )
+    stop = result.days[0].stops[0]
+    assert stop.arrival_time == "22:00"
+    assert not any("çakışıyor" in w for w in result.warnings)
 
-    ids = sorted(s.place_id for d in result.days for s in d.stops)
-    assert ids == [1, 2]
+
+def test_overnight_planning_window_accepts_valid_post_midnight_place_window():
+    """docs/trip-optimizer.md 'Overnight Time Ranges → Case C': planlama
+    18:00→01:00, mekan 00:00-04:00 — 00:00 mekanın kendi açılışı, planlama
+    penceresinin 01:00 kesintisinden ÖNCE, bu yüzden GEÇERLİ bir varış."""
+    result = _run(
+        [_place(1, "Gece Yarısı Sonrası", 41.00, 29.00, opening_hours="00:00-04:00")],
+        preferred_start_time="18:00", preferred_end_time="01:00",
+    )
+    stop = result.days[0].stops[0]
+    assert stop.arrival_time == "00:00"
+    assert not any("çakışıyor" in w for w in result.warnings)
+
+
+def test_overnight_planning_window_place_already_closed_gets_conflict_warning():
+    """Planlama 18:00→01:00 (overnight) olsa bile, bir mekanın penceresi bu
+    planlama gününü hiç örtmüyorsa (burada: yalnızca 16:00-17:00, günün
+    18:00 başlangıcından ÖNCE kapanmış, ertesi tekrarı da 01:00 kesintisinin
+    ÖTESİNDE) hâlâ 'çakışıyor' uyarısı almalı — sert kısıt unconstrained'e
+    düşer (bkz. `_window_overlaps_day`), ama yumuşak son-işleme kontrolü
+    (`_resolve_arrival`, her iki stratejide de KOŞULSUZ çalışır) yine de
+    gerçek varışı değerlendirir."""
+    result = _run(
+        [_place(1, "Öğleden Sonra Mekanı", 41.00, 29.00, opening_hours="16:00-17:00")],
+        preferred_start_time="18:00", preferred_end_time="01:00",
+    )
     assert any("çakışıyor" in w for w in result.warnings)
 
 
-def test_overnight_window_mixed_with_a_real_hard_window_does_not_crash():
-    """Ters (overnight) bir pencere İLE geçerli bir sert pencerenin AYNI
-    çağrıda bir arada bulunması — solver'a geçersiz bir CumulVar aralığı
-    sızmamalı (bkz. `_valid_hard_window`)."""
-    result = _run([
-        _place(1, "Gece Kulübü", 41.00, 29.00, opening_hours="22:00-02:00"),
-        _place(2, "Sabit Pencere", 41.05, 29.05, opening_hours="09:00-10:00"),
-        _place(3, "Normal", 41.10, 29.10),
-    ])
+def test_overnight_place_window_incompatible_with_non_overnight_day_is_unconstrained_not_lost():
+    """docs/trip-optimizer.md 'Overnight Time Ranges → Case D': planlama
+    09:00-18:00 (overnight DEĞİL), mekan 22:00-02:00 — bu pencere BU günü
+    hiç örtmüyor (`_window_overlaps_day` False), bu yüzden sert kısıt hiç
+    uygulanmaz (mevcut 'açılış saati bilinmeyen mekan' ile aynı muamele) —
+    ama mekan yine de PLANLANIR, kaybolmaz, çökme olmaz; sahte bir 'ikinci
+    gün' de İCAT EDİLMEZ (gün sayısı bu tek mekan/normal mekan çifti için
+    değişmeden kalır)."""
+    result = _run(
+        [
+            _place(1, "Gece Kulübü", 41.00, 29.00, opening_hours="22:00-02:00"),
+            _place(2, "Normal", 41.05, 29.05),
+        ],
+        preferred_start_time="09:00", preferred_end_time="18:00",
+    )
+    ids = sorted(s.place_id for d in result.days for s in d.stops)
+    assert ids == [1, 2]
+
+
+def test_overnight_window_mixed_with_a_same_day_hard_window_does_not_crash():
+    """Ters (overnight) bir pencere İLE aynı-gün geçerli bir sert pencerenin
+    AYNI çağrıda bir arada bulunması — solver'a ASLA geçersiz (lower>upper)
+    bir CumulVar aralığı sızmamalı (bkz. `_day_relative_window`'un kendi
+    `rel_close >= rel_open` garantisi), üç mekan da kaybolmamalı."""
+    result = _run(
+        [
+            _place(1, "Gece Kulübü", 41.00, 29.00, opening_hours="22:00-02:00"),
+            _place(2, "Sabit Pencere", 41.05, 29.05, opening_hours="19:00-20:00"),
+            _place(3, "Normal", 41.10, 29.10),
+        ],
+        preferred_start_time="18:00", preferred_end_time="01:00",
+    )
     ids = sorted(s.place_id for d in result.days for s in d.stops)
     assert ids == [1, 2, 3]
 

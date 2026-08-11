@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.domain.repositories.optimization_repository import AbstractOptimizationRepository
 from app.domain.optimization.models import PlaceInput, OptimizationResult
+from app.infrastructure.optimization.greedy_distance_strategy import _date_for
 from app.models.trip import Trip
 from app.models.trip_stop import TripStop
 from app.models.trip_collaborator import TripCollaborator
@@ -17,6 +18,7 @@ from app.models.place import Place
 from app.models.place_save import PlaceSave
 from app.models.trip_itinerary import TripItinerary
 from app.models.trip_itinerary_stop import TripItineraryStop
+from app.models.trip_itinerary_apply_history import TripItineraryApplyHistory
 from app.core.analytics_events import AnalyticsEvent
 from app.application.services.analytics_service import AnalyticsService, get_analytics_service
 
@@ -144,6 +146,15 @@ class SqlOptimizationRepository(AbstractOptimizationRepository):
             return None
 
         days = self._stops_by_day(itinerary.id)
+        # `params` isteğin kendi kopyasıdır (bkz. TripItinerary.params doc
+        # yorumu — tekrar üretilebilirlik/denetim için saklanır). `start_date`
+        # her zaman orada bulunur (verilmediyse None/anahtar yok) — burada
+        # OKUNUYOR (Trip Planning Date milestone'undan önce hiç okunmuyordu),
+        # ama YAZILMIYOR: itinerary'nin kendi kayıtlı isteği hâlâ tek kaynak,
+        # bu satır yalnızca onu yanıta yansıtıyor. `_date_for` stratejilerin
+        # zaten kullandığı AYNI paylaşılan yardımcı — takvim günü aritmetiği
+        # burada TEKRARLANMIYOR (bkz. greedy_distance_strategy.py).
+        start_date = (itinerary.params or {}).get("start_date")
         return {
             "id": itinerary.id,
             "trip_id": itinerary.trip_id,
@@ -154,7 +165,7 @@ class SqlOptimizationRepository(AbstractOptimizationRepository):
             "warnings": itinerary.warnings or [],
             "created_at": itinerary.created_at.isoformat() if itinerary.created_at else None,
             "days": [
-                {"day_index": k, "stops": days[k]}
+                {"day_index": k, "date": _date_for(start_date, k), "stops": days[k]}
                 for k in sorted(days.keys())
             ],
         }
@@ -203,6 +214,24 @@ class SqlOptimizationRepository(AbstractOptimizationRepository):
                 "stops_count": stops_count_by_id.get(it.id, 0),
             }
             for it in rows
+        ]
+
+    # ── Apply History: bkz. docs/trip-optimizer.md "Apply History & Undo" ──
+
+    def _snapshot_trip_stops(self, trip_id: int) -> List[Dict[str, Any]]:
+        """Bir apply/undo işleminden HEMEN ÖNCE TripStop'ta ne varsa, onun
+        JSON-serileştirilebilir anlık görüntüsü — apply_itinerary VE
+        undo_apply_history TARAFINDAN paylaşılan TEK kaynak (aynı mantığın
+        iki yerde tekrarlanmasını önler)."""
+        rows = (
+            self._db.query(TripStop)
+            .filter(TripStop.trip_id == trip_id)
+            .order_by(TripStop.day_index.asc(), TripStop.order_index.asc())
+            .all()
+        )
+        return [
+            {"place_id": s.place_id, "day_index": s.day_index, "order_index": s.order_index}
+            for s in rows
         ]
 
     # ── Apply: TripItinerary → kanonik TripStop (REPLACE) ───────────────────
@@ -263,6 +292,13 @@ class SqlOptimizationRepository(AbstractOptimizationRepository):
 
         now = datetime.utcnow()
 
+        # Apply History: bu değişiklikten HEMEN ÖNCEki durumun anlık
+        # görüntüsü — TripStop SİLİNMEDEN ÖNCE alınır (bkz. docs/trip-optimizer.md
+        # "Apply History & Undo → Snapshot semantics"). `previous_itinerary_id`
+        # bu değer `trip.applied_itinerary_id` DEĞİŞTİRİLMEDEN önce okunuyor.
+        previous_stops_snapshot = self._snapshot_trip_stops(trip.id)
+        previous_itinerary_id = trip.applied_itinerary_id
+
         # ── Mutasyon: doğrulama tamamen bitti, buradan sonrası tek commit'e kadar geri dönüşsüz değil (rollback edilebilir) ──
         self._db.query(TripStop).filter(TripStop.trip_id == trip.id).delete()
         for stop, place in stop_rows:
@@ -272,6 +308,12 @@ class SqlOptimizationRepository(AbstractOptimizationRepository):
             ))
         trip.applied_itinerary_id = itinerary.id
         trip.itinerary_applied_at = now
+        self._db.add(TripItineraryApplyHistory(
+            trip_id=trip.id, itinerary_id=itinerary.id,
+            previous_itinerary_id=previous_itinerary_id,
+            previous_stops=previous_stops_snapshot,
+            is_undo=False, actor_user_id=user_id, applied_at=now,
+        ))
         self._db.commit()
 
         # Best-effort — apply zaten commit edildi, analytics yazımı başarısız
@@ -300,5 +342,220 @@ class SqlOptimizationRepository(AbstractOptimizationRepository):
                 for stop, place in stop_rows
             ],
             "stops_count": len(stop_rows),
+            "applied_at": now.isoformat(),
+        }
+
+    # ── Delete: TripItinerary + TripItineraryStop, TripStop/Place hiç etkilenmez ──
+
+    def delete_itinerary(self, itinerary_id: int, user_id: int) -> str:
+        itinerary = self._db.query(TripItinerary).filter(TripItinerary.id == itinerary_id).first()
+        if itinerary is None:
+            return "not_found"
+
+        # Anti-enumeration: get_itinerary/apply_itinerary ile AYNI ilke —
+        # trip'e hiç erişimi olmayan biri için "yok" ile "yasak" ayrımı
+        # sızdırılmaz.
+        access = self.resolve_access(itinerary.trip_id, user_id)
+        if access is None:
+            return "not_found"
+        if access not in ("owner", "editor"):
+            return "forbidden"
+
+        # SQLite test ortamında FK ondelete=CASCADE/SET NULL pragma
+        # (`PRAGMA foreign_keys=ON`) olmadan uygulanmaz — bu yüzden alt
+        # kayıtları ve Trip.applied_itinerary_id referansını burada elle
+        # temizliyoruz. SqlTripRepository.delete_trip'in AYNI notu/deseni;
+        # Postgres'te de doğru — DB-seviyesi FK action'lar (bkz. migration'lar)
+        # zaten aynı sonucu üretir, bu yalnızca ortamdan bağımsız garanti eder.
+        self._db.query(TripItineraryStop).filter(
+            TripItineraryStop.itinerary_id == itinerary_id
+        ).delete()
+
+        trip = self._db.query(Trip).filter(Trip.id == itinerary.trip_id).first()
+        if trip is not None and trip.applied_itinerary_id == itinerary_id:
+            # Dangling FK bırakma — bu itinerary "son uygulanan" olarak
+            # işaretliyse referansı temizle (bkz. Trip.applied_itinerary_id
+            # doc yorumu: "itinerary ileride silinebilir bir özellik
+            # kazanırsa Trip bundan etkilenmemeli, yalnızca 'son uygulanan'
+            # işaretçisini kaybetmeli" — tam da bu senaryo).
+            trip.applied_itinerary_id = None
+            trip.itinerary_applied_at = None
+
+        # AYNI SQLite-FK-enforcement notu: TripItineraryApplyHistory'nin
+        # `itinerary_id`/`previous_itinerary_id` kolonları da bu itineraries'e
+        # işaret edebilir — geçmiş kayıtların KENDİSİ asla silinmez (bkz.
+        # docs/trip-optimizer.md "Apply History & Undo → Deletion semantics"),
+        # yalnızca artık var olmayan itinerary'e olan referansları temizlenir.
+        self._db.query(TripItineraryApplyHistory).filter(
+            TripItineraryApplyHistory.itinerary_id == itinerary_id
+        ).update({TripItineraryApplyHistory.itinerary_id: None}, synchronize_session=False)
+        self._db.query(TripItineraryApplyHistory).filter(
+            TripItineraryApplyHistory.previous_itinerary_id == itinerary_id
+        ).update({TripItineraryApplyHistory.previous_itinerary_id: None}, synchronize_session=False)
+
+        self._db.delete(itinerary)
+        self._db.commit()
+        return "ok"
+
+    # ── Apply History: list + undo ──────────────────────────────────────────
+
+    def list_apply_history(self, trip_id: int, user_id: int) -> Optional[List[Dict[str, Any]]]:
+        if self.resolve_access(trip_id, user_id) is None:
+            return None
+
+        # Tek sorgu, tek LEFT JOIN — N+1 yok (Req "Do not make the list
+        # endpoint perform N+1 queries"). `TripItinerary` yalnızca hâlâ var
+        # olan bir itinerary için `itinerary_created_at`'i doldurmak amacıyla
+        # OUTER join edilir; itinerary silinmişse (`itinerary_id` zaten
+        # ondelete=SET NULL ile NULL olmuştur) `itinerary` de `None` gelir.
+        rows = (
+            self._db.query(TripItineraryApplyHistory, TripItinerary)
+            .outerjoin(TripItinerary, TripItinerary.id == TripItineraryApplyHistory.itinerary_id)
+            .filter(TripItineraryApplyHistory.trip_id == trip_id)
+            .order_by(TripItineraryApplyHistory.id.desc())
+            .all()
+        )
+        if not rows:
+            return []
+
+        # Zaten id DESC sıralı olduğundan ilk satır en yenisi.
+        latest_id = rows[0][0].id
+
+        return [
+            {
+                "id": history.id,
+                "itinerary_id": history.itinerary_id,
+                "itinerary_created_at": itinerary.created_at.isoformat() if itinerary and itinerary.created_at else None,
+                "is_undo": history.is_undo,
+                "applied_at": history.applied_at.isoformat() if history.applied_at else None,
+                "actor_user_id": history.actor_user_id,
+                "is_undoable": history.id == latest_id,
+            }
+            for history, itinerary in rows
+        ]
+
+    def undo_apply_history(self, trip_id: int, history_id: int, user_id: int) -> Dict[str, Any]:
+        # apply_itinerary'nin KENDİ erişim konvansiyonu (403 forbidden) —
+        # delete_itinerary'nin ekstra-sıkı anti-enumeration'ı burada
+        # UYGULANMADI (bkz. AbstractOptimizationRepository.undo_apply_history
+        # doc yorumu).
+        access = self.resolve_access(trip_id, user_id)
+        if access is None:
+            return {"status": "trip_not_found"}
+        if access not in ("owner", "editor"):
+            return {"status": "forbidden"}
+
+        trip = self._db.query(Trip).filter(Trip.id == trip_id).first()
+        if trip is None:
+            return {"status": "trip_not_found"}
+
+        history = (
+            self._db.query(TripItineraryApplyHistory)
+            .filter(
+                TripItineraryApplyHistory.id == history_id,
+                TripItineraryApplyHistory.trip_id == trip_id,
+            )
+            .first()
+        )
+        if history is None:
+            return {"status": "history_not_found"}
+
+        # Latest-only safety rule (KRİTİK — bkz. docs/trip-optimizer.md
+        # "Apply History & Undo → Latest-only safety rule"): yalnızca bu
+        # trip'in EN SON apply-history kaydı geri alınabilir. Aksi halde
+        # aradan geçmiş daha yeni bir apply/undo'nun durak değişiklikleri
+        # sessizce ezilirdi.
+        latest = (
+            self._db.query(TripItineraryApplyHistory)
+            .filter(TripItineraryApplyHistory.trip_id == trip_id)
+            .order_by(TripItineraryApplyHistory.id.desc())
+            .first()
+        )
+        if latest is None or latest.id != history.id:
+            return {"status": "stale"}
+
+        # Restore edilecek anlık görüntüdeki place'lerin hâlâ var olduğunu
+        # doğrula — apply_itinerary'nin kendi invalid_places kontrolüyle AYNI
+        # savunma ilkesi (bkz. o metodun kendi yorumu: JOIN sonucu kontrol
+        # edilir, ham FK kolonuna güvenilmez).
+        snapshot = history.previous_stops or []
+        snapshot_place_ids = [s["place_id"] for s in snapshot]
+        places_by_id = (
+            {p.id: p for p in self._db.query(Place).filter(Place.id.in_(snapshot_place_ids)).all()}
+            if snapshot_place_ids else {}
+        )
+        if any(s["place_id"] not in places_by_id for s in snapshot):
+            return {"status": "invalid_places"}
+
+        now = datetime.utcnow()
+
+        # Bu undo'nun KENDİ apply-history kaydı için: şu an SİLİNMEK ÜZERE
+        # olan (undo edilen olayın sonucu) durumun anlık görüntüsü —
+        # `_snapshot_trip_stops` apply_itinerary ile AYNI yardımcı.
+        current_snapshot = self._snapshot_trip_stops(trip.id)
+        current_itinerary_id = trip.applied_itinerary_id
+
+        self._db.query(TripStop).filter(TripStop.trip_id == trip.id).delete()
+        for s in snapshot:
+            self._db.add(TripStop(
+                trip_id=trip.id, place_id=s["place_id"],
+                day_index=s["day_index"], order_index=s["order_index"],
+            ))
+        trip.applied_itinerary_id = history.previous_itinerary_id
+        # `applied_itinerary_id`/`itinerary_applied_at` her zaman BİRLİKTE
+        # anlamlı — restore edilen durum itinerary-kökenli değilse (bkz.
+        # "Do not guess" gereksinimi) "en son NE ZAMAN bir itinerary
+        # uygulandı" sorusunun artık bir cevabı yok, bu yüzden ikisi de None.
+        trip.itinerary_applied_at = now if history.previous_itinerary_id is not None else None
+
+        new_history = TripItineraryApplyHistory(
+            trip_id=trip.id, itinerary_id=history.previous_itinerary_id,
+            previous_itinerary_id=current_itinerary_id,
+            previous_stops=current_snapshot,
+            is_undo=True, actor_user_id=user_id, applied_at=now,
+        )
+        self._db.add(new_history)
+        self._db.commit()
+        self._db.refresh(new_history)
+
+        restored_rows = (
+            self._db.query(TripStop, Place)
+            .join(Place, Place.id == TripStop.place_id)
+            .filter(TripStop.trip_id == trip.id)
+            .order_by(TripStop.day_index.asc(), TripStop.order_index.asc())
+            .all()
+        )
+
+        # Best-effort — undo zaten commit edildi, analytics yazımı
+        # başarısız olsa bile kullanıcıya hata dönmemeli (apply_itinerary'nin
+        # KENDİ analytics çağrısıyla aynı yerleşim/gerekçe).
+        self._analytics.track(
+            event=AnalyticsEvent.SHARED_TRIP_ITINERARY_APPLY_UNDONE,
+            trip_id=trip.id,
+            platform="server",
+            user_id=user_id,
+            source="itinerary_apply_undo",
+            kind="trip",
+            metadata={
+                "undone_history_id": history.id,
+                "new_history_id": new_history.id,
+                "restored_itinerary_id": history.previous_itinerary_id,
+            },
+        )
+
+        return {
+            "status": "ok",
+            "trip_id": trip.id,
+            "history_id": new_history.id,
+            "itinerary_id": history.previous_itinerary_id,
+            "stops": [
+                {
+                    "place_id": place.id, "name": place.name, "lat": place.lat, "lng": place.lng,
+                    "city": place.city, "category": place.category,
+                    "day_index": stop.day_index, "order_index": stop.order_index,
+                }
+                for stop, place in restored_rows
+            ],
+            "stops_count": len(restored_rows),
             "applied_at": now.isoformat(),
         }

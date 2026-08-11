@@ -171,6 +171,30 @@ class ItineraryNotFoundException(TripClipException):
         )
 
 
+class ApplyHistoryNotFoundException(TripClipException):
+    def __init__(self, history_id: int):
+        super().__init__(
+            f"Uygulama geçmişi kaydı bulunamadı (ID: {history_id})",
+            code="APPLY_HISTORY_NOT_FOUND",
+            status_code=404,
+            details={"history_id": history_id},
+        )
+
+
+class StaleApplyHistoryUndoException(TripClipException):
+    """Yalnızca bir trip'in EN SON apply-history kaydı geri alınabilir —
+    bkz. docs/trip-optimizer.md "Apply History & Undo → Latest-only safety
+    rule". Daha eski bir kaydı geri almak, aradan geçen daha yeni bir
+    apply/undo'nun durak değişikliklerini SESSİZCE ezerdi."""
+    def __init__(self, history_id: int):
+        super().__init__(
+            "Yalnızca en son uygulama/geri alma işlemi geri alınabilir. Bu kayıt artık en son değil.",
+            code="STALE_UNDO",
+            status_code=409,
+            details={"history_id": history_id},
+        )
+
+
 # ── Trip Sharing ──────────────────────────────────────────────────────────────
 
 class InvalidShareRequestException(TripClipException):

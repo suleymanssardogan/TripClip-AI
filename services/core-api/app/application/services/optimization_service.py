@@ -16,6 +16,9 @@ from app.application.dto.optimization_dto import (
     ItineraryListResponse,
     ItinerarySummaryResponse,
     ApplyItineraryResponse,
+    ApplyHistoryListResponse,
+    ApplyHistoryEntryResponse,
+    UndoApplyResponse,
 )
 from app.infrastructure.optimization.strategy_registry import get_strategy, available_strategies
 from app.core.exceptions import (
@@ -23,6 +26,8 @@ from app.core.exceptions import (
     PermissionDeniedException,
     InvalidOptimizationRequestException,
     ItineraryNotFoundException,
+    ApplyHistoryNotFoundException,
+    StaleApplyHistoryUndoException,
 )
 
 
@@ -79,9 +84,15 @@ class OptimizationService:
 
         _validate_hhmm(request.preferred_start_time, "preferred_start_time")
         _validate_hhmm(request.preferred_end_time, "preferred_end_time")
-        if _to_minutes(request.preferred_end_time) <= _to_minutes(request.preferred_start_time):
+        # `preferred_end_time < preferred_start_time` artık GEÇERLİ — gece
+        # yarısını aşan (overnight) bir planlama penceresi anlamına gelir
+        # (bkz. greedy_distance_strategy.py "Overnight Time Ranges",
+        # docs/trip-optimizer.md "Overnight Time Ranges"). Yalnızca EŞİT
+        # değerler hâlâ reddedilir — bu, bu milestone'dan ÖNCEki sözleşmenin
+        # KORUNAN kısmı (bkz. o zamanki `<=` kontrolünün `==` özel durumu).
+        if _to_minutes(request.preferred_end_time) == _to_minutes(request.preferred_start_time):
             raise InvalidOptimizationRequestException(
-                "preferred_end_time, preferred_start_time'dan sonra olmalı."
+                "preferred_end_time, preferred_start_time'a eşit olamaz."
             )
 
         if request.start_date is not None:
@@ -167,6 +178,54 @@ class OptimizationService:
         # bırakılıyor — ApplyItineraryResponse'ta karşılığı yok).
         return ApplyItineraryResponse(
             trip_id=result["trip_id"],
+            itinerary_id=result["itinerary_id"],
+            stops=result["stops"],
+            stops_count=result["stops_count"],
+            applied_at=result["applied_at"],
+        )
+
+    def delete_itinerary(self, itinerary_id: int, user_id: int) -> None:
+        """bkz. docs/trip-optimizer.md 'Delete Saved Itinerary'. Anti-enumeration
+        — apply_itinerary'nin "not_found" → 404 / "forbidden" → 403 ayrımının
+        AKSİNE, delete için ikisi de aynı 404'e daraltılır: bir itinerary
+        ID'sinin var olup olmadığı, ona owner/editor erişimi olmayan hiç
+        kimseye (viewer dahil) sızdırılmaz."""
+        status = self._repo.delete_itinerary(itinerary_id, user_id)
+        if status in ("not_found", "forbidden"):
+            raise ItineraryNotFoundException(itinerary_id)
+
+    def list_apply_history(self, trip_id: int, user_id: int) -> ApplyHistoryListResponse:
+        rows = self._repo.list_apply_history(trip_id, user_id)
+        if rows is None:
+            raise TripNotFoundException(trip_id)
+        return ApplyHistoryListResponse(entries=[ApplyHistoryEntryResponse(**r) for r in rows])
+
+    def undo_apply(self, trip_id: int, history_id: int, user_id: int) -> UndoApplyResponse:
+        """bkz. docs/trip-optimizer.md 'Apply History & Undo'. `forbidden`
+        apply_itinerary'nin KENDİ 403 konvansiyonunu izler — undo,
+        delete_itinerary'nin ekstra-sıkı anti-enumeration kuralına tabi
+        DEĞİL (bkz. AbstractOptimizationRepository.undo_apply_history)."""
+        result = self._repo.undo_apply_history(trip_id, history_id, user_id)
+        status = result["status"]
+
+        if status == "trip_not_found":
+            raise TripNotFoundException(trip_id)
+        if status == "forbidden":
+            raise PermissionDeniedException(
+                "Bu geziyi düzenleme yetkiniz yok — yalnızca sahibi ve editörler geri alabilir."
+            )
+        if status == "history_not_found":
+            raise ApplyHistoryNotFoundException(history_id)
+        if status == "stale":
+            raise StaleApplyHistoryUndoException(history_id)
+        if status == "invalid_places":
+            raise InvalidOptimizationRequestException(
+                "Geri alınacak durumda artık var olmayan (silinmiş) mekanlar var, geri alınamıyor."
+            )
+
+        return UndoApplyResponse(
+            trip_id=result["trip_id"],
+            history_id=result["history_id"],
             itinerary_id=result["itinerary_id"],
             stops=result["stops"],
             stops_count=result["stops_count"],

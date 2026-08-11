@@ -152,3 +152,58 @@ def test_unknown_place_category_both_strategies_fall_back_to_default_duration():
     for strategy in _strategies():
         result = strategy.optimize(places, OptimizationConstraints())
         assert result.days[0].stops[0].visit_duration_minutes == 60, strategy.name
+
+
+# ─── Overnight time ranges — cross-strategy agreement (Req 10/16 "Cross-
+# strategy": aynı pencere için ikisi de aynı kullanılabilirlik yorumunu
+# üretmeli, farklı bir rota/kalite üretseler bile) ────────────────────────────
+
+def test_overnight_planning_window_accepted_identically_by_both_strategies():
+    """18:00→01:00 — ikisi de fallback'e DÜŞMEDEN, tek mekanı doğrudan
+    18:00'de (day_start) planlar."""
+    places = [_place(1, "A", 41.0, 29.0)]
+    constraints = OptimizationConstraints(preferred_start_time="18:00", preferred_end_time="01:00")
+    for strategy in _strategies():
+        result = strategy.optimize(places, constraints)
+        assert result.days[0].stops[0].arrival_time == "18:00", strategy.name
+
+
+def test_overnight_place_window_availability_agrees_across_strategies():
+    """Aynı overnight mekan penceresi (22:00-02:00), aynı overnight planlama
+    penceresi (18:00→01:00) — İKİ strateji de bu mekanı 22:00'da (açılışında)
+    planlamalı, ikisi de 'çakışıyor' uyarısı ÜRETMEMELİ. Rota KALİTESİ
+    (sıralama, skor) farklı olabilir — burada test edilen yalnızca pencere
+    YORUMU (bkz. modül docstring 'aynı SÖZLEŞMEyi sağladığını doğruluyoruz')."""
+    places = [_place(1, "Gece Kulübü", 41.0, 29.0, opening_hours="22:00-02:00")]
+    constraints = OptimizationConstraints(preferred_start_time="18:00", preferred_end_time="01:00")
+    for strategy in _strategies():
+        result = strategy.optimize(places, constraints)
+        stop = result.days[0].stops[0]
+        assert stop.arrival_time == "22:00", strategy.name
+        assert not any("çakışıyor" in w for w in result.warnings), strategy.name
+
+
+def test_overnight_place_window_incompatible_with_daytime_planning_agrees_across_strategies():
+    """Case D: mekan 22:00-02:00, planlama 09:00-18:00 (overnight DEĞİL) —
+    İKİ strateji de mekanı kaybetmeden planlamalı (hangi saatte olursa
+    olsun) — pencere bu günü hiç örtmediğinden ikisi de onu kısıtsız/
+    bilinmiyor gibi ele almalı, hiçbiri çökmemeli/mekanı düşürmemeli."""
+    places = [
+        _place(1, "Gece Kulübü", 41.0, 29.0, opening_hours="22:00-02:00"),
+        _place(2, "Normal", 41.05, 29.05),
+    ]
+    constraints = OptimizationConstraints(preferred_start_time="09:00", preferred_end_time="18:00")
+    for strategy in _strategies():
+        result = strategy.optimize(places, constraints)
+        ids = sorted(s.place_id for d in result.days for s in d.stops)
+        assert ids == [1, 2], strategy.name
+
+
+def test_overnight_place_window_conflict_detection_agrees_across_strategies():
+    """Bir mekanın overnight penceresi GERÇEKTEN kapandıysa (planlama
+    overnight olsa bile) İKİ strateji de 'çakışıyor' uyarısı üretmeli."""
+    places = [_place(1, "Sabah Mekanı", 41.0, 29.0, opening_hours="10:00-11:00")]
+    constraints = OptimizationConstraints(preferred_start_time="20:00", preferred_end_time="06:00")
+    for strategy in _strategies():
+        result = strategy.optimize(places, constraints)
+        assert any("çakışıyor" in w for w in result.warnings), strategy.name

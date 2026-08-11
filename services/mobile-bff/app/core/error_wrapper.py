@@ -41,6 +41,8 @@ _MOBILE_MESSAGES: dict[str, str] = {
     "CANNOT_JOIN_OWN_TRIP":     "Kendi gezinize collaborator olarak katılamazsınız.",
     "INVALID_OPTIMIZATION_REQUEST": "Gezi optimize edilemedi. Seçimlerinizi kontrol edip tekrar deneyin.",
     "ITINERARY_NOT_FOUND":      "Bu itinerary artık mevcut değil.",
+    "APPLY_HISTORY_NOT_FOUND":  "Bu uygulama geçmişi kaydı artık mevcut değil.",
+    "STALE_UNDO":               "Yalnızca en son uygulama geri alınabilir. Bu kayıt artık en son değil.",
     "ML_SERVICE_UNAVAILABLE":    "AI analiz servisi şu an meşgul. Lütfen bekleyin.",
     "DATABASE_ERROR":            "Sunucu geçici olarak kullanılamıyor.",
     "SERVICE_UNAVAILABLE":       "Servis şu an kullanılamıyor. Lütfen daha sonra deneyin.",
@@ -61,7 +63,7 @@ def _parse_core_error(data: dict) -> tuple[str, str, int]:
     status   = 500 if code in {"INTERNAL_SERVER_ERROR", "DATABASE_ERROR", "ML_SERVICE_UNAVAILABLE"} else 400
     if code in {"UNAUTHORIZED", "AUTH_ERROR"}:
         status = 401
-    if code in {"VIDEO_NOT_FOUND", "TRIP_NOT_FOUND", "SHARE_NOT_FOUND", "SHARE_TOKEN_INVALID", "ITINERARY_NOT_FOUND"}:
+    if code in {"VIDEO_NOT_FOUND", "TRIP_NOT_FOUND", "SHARE_NOT_FOUND", "SHARE_TOKEN_INVALID", "ITINERARY_NOT_FOUND", "APPLY_HISTORY_NOT_FOUND"}:
         status = 404
     # Yetki hatası 400'e düşüyordu; başkasının planını silmeye/düzenlemeye
     # çalışmak istemcide "geçersiz istek" gibi görünüyordu.
@@ -69,6 +71,11 @@ def _parse_core_error(data: dict) -> tuple[str, str, int]:
         status = 403
     if code in {"RATE_LIMIT_EXCEEDED", "DAILY_QUOTA_EXCEEDED"}:
         status = 429
+    # Bir apply-history kaydının artık en son olmadığı anlamına gelir —
+    # yeniden denemek anlamsız (istek KENDİSİ geçersiz değil, DURUM
+    # değişmiş) — bu yüzden 400 DEĞİL, 409 (Apply History & Undo milestone'u).
+    if code == "STALE_UNDO":
+        status = 409
     return code, message, status
 
 

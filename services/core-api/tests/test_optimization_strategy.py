@@ -157,6 +157,80 @@ def test_no_start_date_leaves_date_none():
     assert result.days[0].date is None
 
 
+# ─── Overnight time ranges (bkz. greedy_distance_strategy.py "Overnight
+# Time Ranges") ───────────────────────────────────────────────────────────────
+
+def test_overnight_planning_window_is_accepted_not_fallback():
+    """18:00→01:00 fallback'e DÜŞMEMELİ — tek mekan doğrudan 18:00'de
+    (day_start) planlanır, önceki milestone'un varsayılan 09:00'ına DEĞİL."""
+    result = _run([_place(1, "A", 41.0, 29.0)], preferred_start_time="18:00", preferred_end_time="01:00")
+    assert result.days[0].stops[0].arrival_time == "18:00"
+
+
+def test_overnight_place_window_arrival_before_midnight_is_valid():
+    result = _run(
+        [_place(1, "Gece Kulübü", 41.0, 29.0, opening_hours="22:00-02:00")],
+        preferred_start_time="18:00", preferred_end_time="01:00",
+    )
+    stop = result.days[0].stops[0]
+    assert stop.arrival_time == "22:00"
+    assert not any("çakışıyor" in w for w in result.warnings)
+
+
+def test_overnight_place_window_arrival_after_midnight_is_valid():
+    """İki mekan: ilki 22:00'a kadar günü doldurur (uzun ziyaret süresi),
+    ikinci mekan (aynı overnight pencere) gece yarısını AŞARAK varılır —
+    reddedilmemeli."""
+    places = [
+        _place(1, "Akşam Yemeği", 41.0, 29.0, category="restaurant"),  # 18:00'da başlar, 60dk
+        _place(2, "Gece Kulübü", 41.001, 29.001, opening_hours="20:30-03:00"),
+    ]
+    result = _run(places, preferred_start_time="18:00", preferred_end_time="04:00")
+    stops = result.days[0].stops
+    assert len(stops) == 2
+    assert not any("çakışıyor" in w for w in result.warnings)
+
+
+def test_overnight_place_window_arrival_after_closing_gets_conflict_warning():
+    """Planlama penceresi overnight olsa bile (20:00→06:00), bir mekanın
+    kendi penceresi gün başlamadan ÇOK önce kapanmışsa (10:00-11:00 — ne
+    bugün ne "ertesi tekrarı" bu overnight günün bütçesine sığar) hâlâ
+    'çakışıyor' uyarısı almalı — overnight desteği bu kontrolü DEVRE DIŞI
+    bırakmaz (bkz. test_overnight_time_window.py'nin eşdeğer birim testi,
+    `test_resolve_arrival_after_closing_same_day_conflicts`'in overnight-gün
+    karşılığı)."""
+    result = _run(
+        [_place(1, "Sabah Mekanı", 41.0, 29.0, opening_hours="10:00-11:00")],
+        preferred_start_time="20:00", preferred_end_time="06:00",
+    )
+    assert any("çakışıyor" in w for w in result.warnings)
+
+
+def test_overnight_window_plus_day_split_no_stop_lost():
+    """Overnight bir planlama penceresi ALTINDA da gün bölme mekanizması
+    (mevcut, DEĞİŞMEDİ) çalışmaya devam etmeli — hiçbir durak kaybolmaz."""
+    places = [
+        _place(i, f"Müze {i}", 41.0 + i * 0.2, 29.0 + i * 0.2, category="museum")
+        for i in range(6)
+    ]
+    result = _run(places, preferred_start_time="20:00", preferred_end_time="23:00")
+    total_stops = sum(len(d.stops) for d in result.days)
+    assert total_stops == 6
+    assert len(result.days) > 1
+
+
+def test_no_opening_hours_regression_still_unaffected_by_overnight_support():
+    """Açılış saati olmayan bir mekan İÇİN overnight desteği hiçbir şey
+    değiştirmemeli — mevcut 'bilinmiyor' uyarısı, aynı-gün varsayılan
+    davranış (bu dosyanın en üstündeki testlerle AYNI, yalnızca burada
+    overnight desteğinin bir regresyon YARATMADIĞINI doğrudan doğrulamak
+    için tekrarlanıyor)."""
+    result = _run([_place(1, "Ayasofya", 41.0086, 28.9802)])
+    assert result.days[0].stops[0].arrival_time == "09:00"
+    assert any("Açılış saatleri bilinmiyor" in w for w in result.warnings)
+    assert not any("çakışıyor" in w for w in result.warnings)
+
+
 # ─── Score bounds ────────────────────────────────────────────────────────────
 
 def test_score_never_negative_even_with_many_warnings():
