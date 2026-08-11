@@ -83,6 +83,30 @@ _LOCATIONS_SCHEMA = {
     "required": ["locations"],
 }
 
+_ASSISTANT_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "answer": {"type": "STRING"},
+        # Model'in cevabında bahsettiği, context'te GERÇEKTEN var olan
+        # duraklara işaret eder — array index DEĞİL, context'in kendi
+        # (day_index, place_id) kimliği (bkz. Trip Assistant "reference
+        # generation"). Sunucu tarafında `TripContext.find_stop()` ile
+        # DOĞRULANIR; şemaya uysa bile var olmayan bir referans elenir.
+        "references": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "day_index": {"type": "INTEGER"},
+                    "place_id":  {"type": "INTEGER"},
+                },
+                "required": ["day_index", "place_id"],
+            },
+        },
+    },
+    "required": ["answer"],
+}
+
 _TRAVEL_TIPS_SCHEMA = {
     "type": "OBJECT",
     "properties": {
@@ -148,7 +172,7 @@ class GeminiService:
     # ─────────────────────────────────────────────────────────────
 
     def _call(self, parts: List[Dict], timeout: int = 60, max_retries: int = 3,
-              response_schema: Optional[Dict] = None) -> str:
+              response_schema: Optional[Dict] = None, system_instruction: Optional[str] = None) -> str:
         """Gemini REST API'ye istek at, ham metin döndür.
         503/429 hatalarında otomatik retry (1s → 3s → 7s backoff).
 
@@ -198,10 +222,17 @@ class GeminiService:
         if response_schema is not None:
             generation_config["responseMimeType"] = "application/json"
             generation_config["responseSchema"] = response_schema
-        body = {
+        body: Dict = {
             "contents": [{"parts": parts}],
             "generationConfig": generation_config,
         }
+        # Trip Assistant (M26) bunu kullanır — grounding kurallarını
+        # `contents`'e METİN olarak karıştırmak yerine Gemini'nin kendi
+        # ayrı `systemInstruction` alanına koyar (talimat/veri ayrımı,
+        # promptla karışmaz). Mevcut çağıranlar (extract_locations,
+        # generate_travel_tips) bunu hiç GEÇMİYOR, geriye dönük UYUMLU.
+        if system_instruction:
+            body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
         last_exc = None
         for attempt in range(max_retries):
             try:
@@ -578,3 +609,33 @@ class GeminiService:
             # sağlıyoruz.
             logger.error("Gemini travel tips hatası: %s", e)
             raise
+
+    # ─────────────────────────────────────────────────────────────
+    # Trip Assistant (M26) — serbest-metin soru-cevap, trip context'ine
+    # GROUNDED. Bu servisin ilk YAPILANDIRMASIZ (non-schema-locked video)
+    # sohbet metodu — location extraction/travel tips'ten farklı olarak
+    # kullanıcı girdisi (soru) DÖNGÜYE giriyor, bu yüzden `system_prompt`
+    # (talimatlar) `contents`'ten AYRI, Gemini'nin kendi `systemInstruction`
+    # alanından gider (bkz. `_call`'ın yeni parametresi) — kullanıcı mesajı
+    # asla talimat gibi yorumlanmaz (bkz. "Security → prompt injection
+    # resistance").
+    # ─────────────────────────────────────────────────────────────
+
+    def answer_question(self, system_prompt: str, user_message: str) -> Dict:
+        """
+        Döner: `{"answer": str, "references": [{"day_index": int, "place_id": int}, ...]}`.
+
+        Ne cache'lenir ne retry-idempotency anahtarı taşır — travel
+        tips/location extraction'ın aksine her kullanıcı sorusu GERÇEKTEN
+        FARKLI (aynı trip için bile), video_id gibi tekrar-eden bir
+        anahtar yok.
+        """
+        raw = self._call(
+            [{"text": user_message}], timeout=30,
+            response_schema=_ASSISTANT_SCHEMA, system_instruction=system_prompt,
+        )
+        data = self._parse_json(raw)
+        return {
+            "answer": (data.get("answer") or "").strip(),
+            "references": data.get("references") or [],
+        }

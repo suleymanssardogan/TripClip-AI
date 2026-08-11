@@ -195,6 +195,22 @@ class StaleApplyHistoryUndoException(TripClipException):
         )
 
 
+# ── Trip Assistant ──────────────────────────────────────────────────────────
+
+class InvalidAssistantRequestException(TripClipException):
+    """Boş/yalnızca-boşluk bir mesaj — asistana gönderilecek gerçek bir soru yok."""
+    def __init__(self, message: str):
+        super().__init__(message, code="INVALID_ASSISTANT_REQUEST", status_code=400)
+
+
+class AssistantUnavailableException(TripClipException):
+    """AI sağlayıcısı yapılandırılmamış (GEMINI_API_KEY yok) ya da sağlayıcı
+    çağrısı başarısız oldu — kullanıcıya ham provider hatası/stack trace asla
+    sızdırılmaz (bkz. docs/trip-assistant.md "Failure behavior")."""
+    def __init__(self, message: str = "AI asistanı şu anda kullanılamıyor. Lütfen daha sonra tekrar deneyin."):
+        super().__init__(message, code="ASSISTANT_UNAVAILABLE", status_code=503)
+
+
 # ── Trip Sharing ──────────────────────────────────────────────────────────────
 
 class InvalidShareRequestException(TripClipException):
