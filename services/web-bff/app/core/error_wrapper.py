@@ -37,6 +37,8 @@ _WEB_MESSAGES: dict[str, str] = {
     "TRIP_NOT_FOUND":            "Aradığınız gezi bulunamadı.",
     "INVALID_OPTIMIZATION_REQUEST": "Gezi optimize edilemedi. Seçimlerinizi kontrol edip tekrar deneyin.",
     "ITINERARY_NOT_FOUND":       "Aradığınız itinerary bulunamadı.",
+    "APPLY_HISTORY_NOT_FOUND":   "Aradığınız uygulama geçmişi kaydı bulunamadı.",
+    "STALE_UNDO":                "Yalnızca en son uygulama geri alınabilir. Bu kayıt artık en son değil.",
 }
 
 _DEFAULT_MESSAGE = "Bir hata oluştu. Lütfen sayfayı yenileyip tekrar deneyin."
@@ -51,10 +53,15 @@ def _parse_core_error(data: dict) -> tuple[str, str, int]:
         status = 401
     elif code == "PERMISSION_DENIED":
         status = 403
-    elif code in {"VIDEO_NOT_FOUND", "SHARE_TOKEN_INVALID", "TRIP_NOT_FOUND", "ITINERARY_NOT_FOUND"}:
+    elif code in {"VIDEO_NOT_FOUND", "SHARE_TOKEN_INVALID", "TRIP_NOT_FOUND", "ITINERARY_NOT_FOUND", "APPLY_HISTORY_NOT_FOUND"}:
         status = 404
     elif code in {"RATE_LIMIT_EXCEEDED", "DAILY_QUOTA_EXCEEDED"}:
         status = 429
+    elif code == "STALE_UNDO":
+        # Bir apply-history kaydının artık en son olmadığı anlamına gelir —
+        # istek KENDİSİ geçersiz değil, DURUM değişmiş (Apply History &
+        # Undo milestone'u).
+        status = 409
     elif code in {"DATABASE_ERROR", "ML_SERVICE_UNAVAILABLE", "SERVICE_UNAVAILABLE", "INTERNAL_SERVER_ERROR"}:
         status = 503
     else:

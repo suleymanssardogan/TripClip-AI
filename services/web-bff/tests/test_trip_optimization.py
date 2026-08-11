@@ -284,3 +284,150 @@ def test_apply_itinerary_core_api_unreachable_returns_503(client, auth_headers, 
     resp = client.post("/api/web/itineraries/4/apply", headers=auth_headers)
     assert resp.status_code == 503
     assert resp.json()["code"] == "SERVICE_UNAVAILABLE"
+
+
+# ─── delete_itinerary (Milestone 19 — Delete Saved Itinerary from History) ─────
+
+def test_delete_itinerary_requires_auth(client):
+    resp = client.delete("/api/web/itineraries/4")
+    assert resp.status_code == 401
+
+
+def test_delete_itinerary_happy_path(client, auth_headers, mock_core_api, make_response):
+    mock_core_api.delete.return_value = make_response(200, {"success": True})
+
+    resp = client.delete("/api/web/itineraries/4", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"success": True}
+
+    args, kwargs = mock_core_api.delete.call_args
+    assert args[0].endswith("/internal/itineraries/4")
+    assert kwargs["headers"]["x-user-id"] == "1"
+
+
+def test_delete_itinerary_propagates_not_found_as_404(client, auth_headers, mock_core_api, make_response):
+    mock_core_api.delete.return_value = make_response(
+        404, {"error": {"code": "ITINERARY_NOT_FOUND", "message": "not found"}}
+    )
+    resp = client.delete("/api/web/itineraries/999", headers=auth_headers)
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "ITINERARY_NOT_FOUND"
+
+
+def test_delete_itinerary_propagates_upstream_internal_error_as_503(client, auth_headers, mock_core_api, make_response):
+    """Web BFF, `INTERNAL_SERVER_ERROR`'ı (mobile-bff'in aksine) 503'e
+    eşler — bkz. `error_wrapper._parse_core_error`, bu milestone'dan
+    ÖNCE var olan, dokunulmamış davranış."""
+    mock_core_api.delete.return_value = make_response(
+        500, {"error": {"code": "INTERNAL_SERVER_ERROR", "message": "boom"}}
+    )
+    resp = client.delete("/api/web/itineraries/4", headers=auth_headers)
+    assert resp.status_code == 503
+    assert resp.json()["code"] == "INTERNAL_SERVER_ERROR"
+
+
+def test_delete_itinerary_core_api_unreachable_returns_503(client, auth_headers, mock_core_api):
+    mock_core_api.delete.side_effect = httpx.ConnectError("connection refused")
+
+    resp = client.delete("/api/web/itineraries/4", headers=auth_headers)
+    assert resp.status_code == 503
+    assert resp.json()["code"] == "SERVICE_UNAVAILABLE"
+
+
+# ─── Apply History & Undo (Milestone 20) ───────────────────────────────────────
+
+def test_list_apply_history_requires_auth(client):
+    resp = client.get("/api/web/trips/1/itinerary-apply-history")
+    assert resp.status_code == 401
+
+
+def test_undo_apply_history_requires_auth(client):
+    resp = client.post("/api/web/trips/1/itinerary-apply-history/1/undo")
+    assert resp.status_code == 401
+
+
+def test_list_apply_history_happy_path(client, auth_headers, mock_core_api, make_response):
+    mock_core_api.get.return_value = make_response(200, {"entries": [
+        {"id": 2, "itinerary_id": None, "itinerary_created_at": None, "is_undo": True,
+         "applied_at": "2026-08-10T10:05:00", "actor_user_id": 1, "is_undoable": True},
+    ]})
+
+    resp = client.get("/api/web/trips/1/itinerary-apply-history", headers=auth_headers)
+    assert resp.status_code == 200
+    assert len(resp.json()["entries"]) == 1
+
+    args, kwargs = mock_core_api.get.call_args
+    assert args[0].endswith("/internal/trips/1/itinerary-apply-history")
+    assert kwargs["headers"]["x-user-id"] == "1"
+
+
+def test_list_apply_history_propagates_trip_not_found_as_404(client, auth_headers, mock_core_api, make_response):
+    mock_core_api.get.return_value = make_response(
+        404, {"error": {"code": "TRIP_NOT_FOUND", "message": "not found"}}
+    )
+    resp = client.get("/api/web/trips/999/itinerary-apply-history", headers=auth_headers)
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "TRIP_NOT_FOUND"
+
+
+def test_undo_apply_history_happy_path(client, auth_headers, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(200, {
+        "trip_id": 1, "history_id": 3, "itinerary_id": 4,
+        "stops": [{"place_id": 12, "name": "Ayasofya", "lat": 41.0086, "lng": 28.9802,
+                   "city": None, "category": None, "day_index": 0, "order_index": 0}],
+        "stops_count": 1, "applied_at": "2026-08-10T10:10:00",
+    })
+
+    resp = client.post("/api/web/trips/1/itinerary-apply-history/2/undo", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["history_id"] == 3
+
+    args, kwargs = mock_core_api.post.call_args
+    assert args[0].endswith("/internal/trips/1/itinerary-apply-history/2/undo")
+    assert kwargs["headers"]["x-user-id"] == "1"
+
+
+def test_undo_apply_history_propagates_not_found_as_404(client, auth_headers, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(
+        404, {"error": {"code": "APPLY_HISTORY_NOT_FOUND", "message": "not found"}}
+    )
+    resp = client.post("/api/web/trips/1/itinerary-apply-history/999/undo", headers=auth_headers)
+    assert resp.status_code == 404
+    assert resp.json()["code"] == "APPLY_HISTORY_NOT_FOUND"
+
+
+def test_undo_apply_history_propagates_conflict_as_409(client, auth_headers, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(
+        409, {"error": {"code": "STALE_UNDO", "message": "not latest"}}
+    )
+    resp = client.post("/api/web/trips/1/itinerary-apply-history/2/undo", headers=auth_headers)
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "STALE_UNDO"
+
+
+def test_undo_apply_history_propagates_permission_denied_as_403(client, auth_headers, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(
+        403, {"error": {"code": "PERMISSION_DENIED", "message": "forbidden"}}
+    )
+    resp = client.post("/api/web/trips/1/itinerary-apply-history/2/undo", headers=auth_headers)
+    assert resp.status_code == 403
+    assert resp.json()["code"] == "PERMISSION_DENIED"
+
+
+def test_undo_apply_history_propagates_upstream_error_as_503(client, auth_headers, mock_core_api, make_response):
+    """Web BFF INTERNAL_SERVER_ERROR'ı 503'e eşler (bkz. Milestone 19'un
+    aynı bulgusu, `_parse_core_error`)."""
+    mock_core_api.post.return_value = make_response(
+        500, {"error": {"code": "INTERNAL_SERVER_ERROR", "message": "boom"}}
+    )
+    resp = client.post("/api/web/trips/1/itinerary-apply-history/2/undo", headers=auth_headers)
+    assert resp.status_code == 503
+    assert resp.json()["code"] == "INTERNAL_SERVER_ERROR"
+
+
+def test_undo_apply_history_core_api_unreachable_returns_503(client, auth_headers, mock_core_api):
+    mock_core_api.post.side_effect = httpx.ConnectError("connection refused")
+
+    resp = client.post("/api/web/trips/1/itinerary-apply-history/2/undo", headers=auth_headers)
+    assert resp.status_code == 503
+    assert resp.json()["code"] == "SERVICE_UNAVAILABLE"

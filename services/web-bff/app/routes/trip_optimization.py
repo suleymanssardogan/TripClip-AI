@@ -106,3 +106,70 @@ async def apply_itinerary(
         if resp.status_code >= 400:
             raise_from_response(resp, request_id=rid)
         return resp.json()
+
+
+@router.delete("/itineraries/{itinerary_id}")
+async def delete_itinerary(
+    itinerary_id: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    """
+    Kayıtlı bir itinerary'i kalıcı olarak siler — API parity için mevcut
+    (bkz. docs/trip-optimizer-bff.md), ilk UI iOS'ta (bkz.
+    docs/ios-trip-optimizer.md "Delete Saved Itinerary"). Gövde
+    gerektirmez; core-api'nin kendi endpoint'i de almıyor.
+    """
+    rid = str(uuid.uuid4())[:8]
+    async with web_error_wrapper(request_id=rid):
+        async with internal_client(15.0) as client:
+            resp = await client.delete(
+                f"{CORE_API_URL}/internal/itineraries/{itinerary_id}",
+                headers={"x-user-id": str(user_id)},
+            )
+        if resp.status_code >= 400:
+            raise_from_response(resp, request_id=rid)
+        return resp.json()
+
+
+@router.get("/trips/{trip_id}/itinerary-apply-history")
+async def list_apply_history(
+    trip_id: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    """Bu trip'in TÜM apply/undo geçmişi, en yeniden eskiye — API parity
+    için mevcut, ilk UI iOS'ta (bkz. docs/trip-optimizer.md 'Apply History
+    & Undo')."""
+    rid = str(uuid.uuid4())[:8]
+    async with web_error_wrapper(request_id=rid):
+        async with internal_client(15.0) as client:
+            resp = await client.get(
+                f"{CORE_API_URL}/internal/trips/{trip_id}/itinerary-apply-history",
+                headers={"x-user-id": str(user_id)},
+            )
+        if resp.status_code >= 400:
+            raise_from_response(resp, request_id=rid)
+        return resp.json()
+
+
+@router.post("/trips/{trip_id}/itinerary-apply-history/{history_id}/undo")
+async def undo_apply_history(
+    trip_id: int,
+    history_id: int,
+    user_id: int = Depends(get_current_user_id),
+):
+    """
+    Belirtilen apply-history kaydının önceki TripStop anlık görüntüsünü
+    geri yükler — yalnızca bu trip'in EN SON apply-history kaydıysa. API
+    parity için mevcut, ilk UI iOS'ta. Gövde gerektirmez; core-api'nin
+    kendi endpoint'i de almıyor.
+    """
+    rid = str(uuid.uuid4())[:8]
+    async with web_error_wrapper(request_id=rid):
+        async with internal_client(15.0) as client:
+            resp = await client.post(
+                f"{CORE_API_URL}/internal/trips/{trip_id}/itinerary-apply-history/{history_id}/undo",
+                headers={"x-user-id": str(user_id)},
+            )
+        if resp.status_code >= 400:
+            raise_from_response(resp, request_id=rid)
+        return resp.json()
