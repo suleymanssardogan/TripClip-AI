@@ -150,9 +150,9 @@ provenance-update sequence shares one SQLAlchemy session and one final
 Applying the same itinerary twice (or a different itinerary after an
 earlier apply) is always safe — each apply is a fresh replace, not additive.
 `Trip.applied_itinerary_id`/`itinerary_applied_at` simply reflect whichever
-itinerary was applied *most recently*, not a history of every apply. Full
-apply history, if ever needed, would have to come from a separate log —
-out of scope here (see "Future improvements").
+itinerary was applied *most recently* — a durable log of *every* apply (and
+a safe way to undo the latest one) now also exists, as of the "Apply
+History & Undo" milestone below.
 
 ### Optimizer provenance
 
@@ -189,6 +189,181 @@ the collaboration/invite flow, and `SHARED_TRIP_CREATED`/`DELETED` are
 `kind="video"` (video-plan lifecycle, unrelated to the optimizer). Payload:
 `trip_id`, `user_id` (the applier), `kind="trip"`, and
 `metadata={"itinerary_id", "stops_count"}`.
+
+## Apply History & Undo
+
+`Trip.applied_itinerary_id`/`itinerary_applied_at` only ever answer "what's
+applied *right now*." They can't answer "what was applied before that,"
+"in what order," "what did the stops look like before this apply," or "can
+I safely undo the last one." This milestone adds a durable log —
+`trip_itinerary_apply_history` — and a safe, transactional `undo` operation
+built on top of it.
+
+### Data model
+
+```python
+class TripItineraryApplyHistory(Base):
+    __tablename__ = "trip_itinerary_apply_history"
+
+    id                     = Column(Integer, primary_key=True)
+    trip_id                = Column(Integer, ForeignKey("trips.id", ondelete="CASCADE"), nullable=False)
+    itinerary_id           = Column(Integer, ForeignKey("trip_itineraries.id", ondelete="SET NULL"), nullable=True)
+    previous_itinerary_id  = Column(Integer, ForeignKey("trip_itineraries.id", ondelete="SET NULL"), nullable=True)
+    previous_stops         = Column(JSON, nullable=False)
+    is_undo                = Column(Boolean, nullable=False, default=False)
+    actor_user_id          = Column(Integer, ForeignKey("users.id"), nullable=False)
+    applied_at             = Column(DateTime, default=datetime.utcnow)
+```
+
+Each row represents **one successful mutation of `TripStop`** — either a
+normal apply (`is_undo=False`) or an undo (`is_undo=True`). Both are
+modeled *identically*, deliberately: neither is a special case of the
+other. Every row captures, from the instant immediately **before** its own
+mutation:
+
+- `previous_stops` — the complete `TripStop` snapshot (`place_id`/
+  `day_index`/`order_index` — `TripStop`'s own columns; `id`/`trip_id` are
+  regenerated on restore, exactly like `apply_itinerary`'s existing
+  delete-and-reinsert already does). Not just place IDs — inspected the
+  actual `TripStop` model before designing this; there is nothing else on
+  it to lose.
+- `previous_itinerary_id` — what `Trip.applied_itinerary_id` was at that
+  instant. This is what an undo of *this* row restores as provenance.
+
+And, describing the mutation's own result:
+
+- `itinerary_id` — what `Trip.applied_itinerary_id` becomes as a result of
+  this row (the applied itinerary, for a normal apply; `previous_itinerary_id`
+  carried forward, for an undo).
+- `actor_user_id`, `applied_at`.
+
+### Why this symmetry matters: undo-of-undo is a natural redo
+
+Because an undo row is captured with exactly the same shape as an apply
+row (its own `previous_stops`/`previous_itinerary_id`, taken right before
+*its* mutation), the row an undo produces is itself a normal, undoable
+history entry under the same "latest only" rule below. Undoing an undo
+therefore restores the state from before the undo — i.e. a **redo** —
+without any special-casing. This wasn't a requirement handed down; it fell
+out of keeping the model uniform, and is treated as a deliberate, useful
+consequence rather than an accident.
+
+### First-apply behavior: no synthetic history
+
+`create_trip` already populates `TripStop` from the trip's initial
+`place_ids` at creation time (confirmed by inspection before writing any
+of this — see `test_apply_itinerary_happy_path_replaces_trip_stops`'s own
+`# create_trip zaten TripStop'ları doldurdu` comment). A trip therefore
+never has "no previous state," even on its very first apply — `previous_stops`
+is **never** nullable and never synthetic/fake. What *is* different about
+a first apply is `previous_itinerary_id`: it's `None`, because no
+itinerary had been applied yet. That's the only special case, and it isn't
+special-cased in code — it falls out of reading `trip.applied_itinerary_id`
+(which starts `None`) at snapshot time, same as any other apply.
+
+### Latest-only safety rule (critical)
+
+Only a trip's single most recent apply-history row (by `id`) may be
+undone. Concretely: Apply A, Apply B, then attempting to undo A's row is
+rejected — `409 STALE_UNDO`, `TripStop` left completely untouched. Without
+this rule, undoing A would silently overwrite whatever B changed, since
+A's `previous_stops` predates B entirely. The check itself is a single
+query (`MAX(id)` for the trip) compared against the requested row's `id`
+— no timestamp-ordering ambiguity, no race beyond what the row's own
+auto-increment `id` already resolves.
+
+### Undo transaction
+
+1. Resolve access (`owner`/`editor` — same convention as `apply`, not the
+   stricter one used by `DELETE /internal/itineraries/{id}` — see "Why
+   undo doesn't reuse delete's anti-enumeration rule" below).
+2. Look up the requested history row, scoped to `trip_id` (a row
+   referencing a *different* trip is `404`, not `409` — it isn't stale,
+   it never applied to this trip at all).
+3. Reject with `409 STALE_UNDO` unless it's the trip's latest row.
+4. Re-validate every `place_id` in `previous_stops` still resolves to a
+   live `Place` — the exact same defensive JOIN-based check
+   `apply_itinerary` already used (a raw FK column can't be trusted; see
+   "Safety" above), reused here rather than re-derived, because `TripStop.place_id`
+   has no `ondelete` action of its own and a place referenced by an old
+   snapshot could in principle have been removed since.
+5. Snapshot the *current* `TripStop` state (what's about to be replaced)
+   and the current `applied_itinerary_id` — these become the new row's
+   own `previous_stops`/`previous_itinerary_id`.
+6. Delete-and-reinsert `TripStop` from the target row's `previous_stops`.
+   Set `Trip.applied_itinerary_id`/`itinerary_applied_at` from the target
+   row's `previous_itinerary_id` — `itinerary_applied_at` is set to `None`
+   whenever the restored provenance is `None` (the pair is always
+   meaningful together, never one set without the other — no guessing).
+7. Insert the new `is_undo=True` history row.
+8. Single `commit()`.
+9. Best-effort `shared_trip_itinerary_apply_undone` analytics event.
+
+All validation (steps 1–4) happens before any write, identically to
+`apply_itinerary`'s own atomicity shape — a rejected undo (stale, invalid
+places, no permission) leaves `TripStop` and every history row completely
+untouched.
+
+**The saved `TripItinerary` is never written to by undo** — same
+invariant `apply_itinerary` already guarantees; undo only ever reads a
+`TripItineraryApplyHistory` row and writes `TripStop`/`Trip`/a new history
+row.
+
+### Why undo doesn't reuse delete's anti-enumeration rule
+
+`DELETE /internal/itineraries/{id}` deliberately collapses "doesn't exist"
+and "exists but you're a viewer" into the same `404` (see "Delete Saved
+Itinerary" above) — a one-off, stricter rule scoped to that destructive
+operation. Undo is conceptually a variant of *apply* (it performs the same
+kind of `TripStop` replace, through the same permission gate), so it
+follows `apply_itinerary`'s existing convention instead: a viewer gets
+`403 PERMISSION_DENIED`, a true outsider (or nonexistent trip) gets `404
+TRIP_NOT_FOUND`. Reusing delete's stricter rule here would have been
+inconsistent with the operation undo actually resembles.
+
+### Deletion semantics: history outlives the itinerary
+
+Both `itinerary_id` and `previous_itinerary_id` are `ondelete=SET NULL`,
+mirroring `Trip.applied_itinerary_id`'s own existing precedent exactly.
+Deleting an itinerary (`DELETE /internal/itineraries/{id}`) **never**
+removes apply-history rows that reference it — it only clears the FK on
+each affected row. A `GET` of the history afterward still shows the entry,
+with `itinerary_id: null`; the iOS/BFF layer renders this as "Silinmiş
+optimizasyon" (see `docs/ios-trip-optimizer.md`). This was verified to
+require an explicit fix: `delete_itinerary`'s existing SQLite-safe
+explicit-cleanup pattern (already used for `Trip.applied_itinerary_id`,
+since SQLite doesn't enforce `ON DELETE` actions without `PRAGMA foreign_keys=ON`)
+had to be extended to *also* clear `TripItineraryApplyHistory.itinerary_id`/
+`previous_itinerary_id` — a real bug caught by
+`test_delete_itinerary_does_not_destroy_apply_history` on the very first
+test run, fixed the same way `apply_itinerary`'s own FK-enforcement gap
+was fixed originally (see `SqlTripRepository.delete_trip`'s identical
+comment).
+
+Deleting a *trip* cascades its apply-history rows away entirely
+(`ondelete=CASCADE` on `trip_id`) — a trip's history has no meaning once
+the trip itself is gone, unlike an itinerary's history entries, which
+remain meaningful as long as the *trip* still exists.
+
+### Retrieval: one query, no N+1
+
+`GET /internal/trips/{trip_id}/itinerary-apply-history` issues a single
+query — `TripItineraryApplyHistory` LEFT JOINed to `TripItinerary` (for
+`itinerary_created_at`, `None` if the itinerary was deleted or the row
+never had one), ordered `id DESC`. `is_undoable` is computed once in
+Python from the already-fetched first row's `id`, not via a second query
+per row.
+
+### Analytics
+
+`shared_trip_itinerary_apply_undone` (`kind="trip"`) — fired from inside
+`undo_apply_history`, for the exact same reason `shared_trip_itinerary_applied`
+exists and is server-only: no existing event fits an undo (it's the
+inverse of `ITINERARY_APPLIED`, not a reinterpretation of it), and it's a
+server-driven mutation result a client can't be trusted to report itself.
+**Not** in `CLIENT_FIREABLE_EVENTS`. Payload mirrors apply's:
+`trip_id`, `user_id` (whoever triggered the undo), `kind="trip"`,
+`metadata={"undone_history_id", "new_history_id", "restored_itinerary_id"}`.
 
 ## Available strategies
 
@@ -570,29 +745,32 @@ all-or-nothing relaxation (which, per the false-"impossible" bug above,
 could discard every hard constraint in the whole trip over a single
 resolvable-by-day-splitting conflict).
 
-### Overnight/edge-time windows: unsupported, degrades safely
+### Overnight time ranges — hard-constrained, not skipped
 
-`_parse_opening_hours` (imported from `greedy_distance_strategy.py`,
-**unmodified** — this milestone's own constraint) does not correctly
-handle a window that crosses midnight, e.g. `"22:00-02:00"`: it returns
-`(1320, 120)` — a structurally "valid" tuple whose `open_minutes` exceeds
-`close_minutes`, not a wraparound range. Handing that directly to OR-Tools'
-`CumulVar.SetRange` **crashes** (confirmed empirically — the C++ solver
-raises `"CP Solver fail"`), since a range with `lower > upper` is an empty,
-invalid domain.
+**Resolved as of the Overnight Time Ranges milestone.** Both a place's
+`opening_hours` and the request's own `preferred_start_time`/
+`preferred_end_time` planning window can now cross midnight (`"22:00-02:00"`,
+`"18:00"→"01:00"`) and are handled as genuine, correctly-oriented
+constraints rather than being rejected or silently mishandled — see the
+new "## Overnight Time Ranges" section below for the complete design
+(continuous-timeline representation, planning-day semantics, and how both
+strategies stay consistent). This section is kept, renamed, for the
+historical context of *why* the fix mattered:
 
-`_valid_hard_window` guards against this: any place whose parsed window
-has `open_minutes > close_minutes` is treated as having **no** hard
-window — same free range as a place with no opening-hours data at all,
-for that one place only, on every day it's considered for (this does not
-affect any other place's constraints, and does not trigger the
-"impossible route" fallback). The existing soft post-processing check
-still runs unchanged in `_walk_day_groups`, so the place still gets its
-"çakışıyor" warning if its (day-local) arrival happens to land after the
-raw, inverted `close_minutes` value — behaviorally identical to how
-`greedy_distance` already (mis)handles the same input, since fixing
-`_parse_opening_hours`'s wraparound support is out of this milestone's
-scope too (would require modifying `greedy_distance_strategy.py`).
+`_parse_opening_hours` (imported from `greedy_distance_strategy.py`) does
+not itself reject a window that crosses midnight — `"22:00-02:00"` parses
+to `(1320, 120)`, a structurally valid tuple whose `open_minutes` simply
+exceeds `close_minutes`. Historically, handing that raw pair directly to
+OR-Tools' `CumulVar.SetRange` would **crash** (confirmed empirically at
+the time — the C++ solver raised `"CP Solver fail"`, since a range with
+`lower > upper` is an empty, invalid domain). The now-shared
+`_day_relative_window` helper (`greedy_distance_strategy.py`, imported by
+`ortools_strategy.py`) closes this permanently at the source: it always
+produces a `(rel_open, rel_close)` pair with `rel_close >= rel_open`,
+extending the closing minute by a full day (`+MINUTES_PER_DAY`) whenever
+the raw pair is inverted — so an invalid `SetRange` call is now
+structurally impossible, not just guarded against by skipping the
+constraint.
 
 ### Day boundaries
 
@@ -747,12 +925,11 @@ Architecture"), except where noted:
 - **Mutually incompatible hard windows fall back to distance-only
   ordering, with a warning** — `ortools` never fails the request or returns
   an incomplete itinerary; see "`ortools` strategy → Impossible routes."
-- **Overnight/midnight-crossing opening-hours windows aren't correctly
-  parsed by either strategy** (`_parse_opening_hours`, shared,
-  unmodified) — `ortools` additionally guards against this crashing the
-  solver (see "`ortools` strategy → Overnight/edge-time windows"), but
-  doesn't fix the underlying parsing; both strategies' behavior for such
-  input is unchanged from before this milestone.
+- ~~**Overnight/midnight-crossing opening-hours windows aren't correctly
+  parsed by either strategy.**~~ **Resolved by the Overnight Time Ranges
+  milestone** — see "## Overnight Time Ranges" below. Both a place's
+  `opening_hours` and the request's own planning window can now cross
+  midnight and are handled correctly, consistently, by both strategies.
 - **No real-world travel time, in either strategy.** No traffic, no
   walking-vs-driving distinction, no public transit — flat haversine
   distance over an assumed speed for both `greedy_distance` and `ortools`.
@@ -821,6 +998,7 @@ falls back to the default.
   "days": [
     {
       "day_index": 0,
+      "date": "2026-09-01",
       "stops": [
         {
           "place_id": 12, "name": "Ayasofya", "lat": 41.0086, "lng": 28.9802,
@@ -834,6 +1012,13 @@ falls back to the default.
   ]
 }
 ```
+
+`days[].date` is each day's calendar date (`"YYYY-MM-DD"`) **only when**
+`start_date` was given in the request — `null` otherwise (see "Trip
+Planning Date" below). This is not a new computation: both strategies
+already derived this value internally (`OptimizedDay.date`) since the
+optimizer's very first milestone; this field only started being *returned*
+in the response.
 
 Errors: `400 INVALID_OPTIMIZATION_REQUEST` (empty selection, unowned place
 id, bad `HH:MM`/date format, `end_time <= start_time`, `duration_days < 1`,
@@ -851,7 +1036,9 @@ Summary list, newest first, for anyone with any access to the trip
 ### `GET /internal/itineraries/{itinerary_id}`
 
 Full detail (same shape as the `optimize` response), for anyone with access
-to the itinerary's trip.
+to the itinerary's trip — including `days[].date`, re-derived from the
+itinerary's own persisted `start_date` every time this endpoint is called
+(see "Trip Planning Date" below), not just on the run that created it.
 
 ### `POST /internal/itineraries/{itinerary_id}/apply`
 
@@ -882,6 +1069,514 @@ Errors: `404 ITINERARY_NOT_FOUND`, `404 TRIP_NOT_FOUND`,
 `403 PERMISSION_DENIED`, `400 INVALID_OPTIMIZATION_REQUEST` (deleted place,
 empty itinerary, duplicate places — see "Apply semantics → Safety").
 
+### `DELETE /internal/itineraries/{itinerary_id}`
+
+Permanently deletes a saved itinerary and its `TripItineraryStop` rows.
+Requires `x-user-id` header (owner or editor of the itinerary's trip). No
+request body.
+
+```json
+{ "success": true }
+```
+
+**Anti-enumeration — stricter than `apply`.** `apply_itinerary` reveals a
+403/404 distinction (a viewer gets `PERMISSION_DENIED`, an outsider gets
+`ITINERARY_NOT_FOUND`), which lets a caller infer an itinerary exists even
+without access to it. `delete` deliberately collapses both cases into the
+same `404 ITINERARY_NOT_FOUND` — a viewer (or anyone else without
+owner/editor access) gets the identical response a nonexistent itinerary
+ID would produce. This is a one-off, intentional divergence from the
+`apply`/`get`/`list` convention, scoped to delete specifically because
+deletion is destructive and the milestone that added it required this
+exact anti-enumeration guarantee.
+
+**What gets deleted, and what never does:**
+
+- `TripItinerary` (the row itself) and its `TripItineraryStop` children —
+  deleted explicitly in application code, not left to the database's own
+  `ON DELETE CASCADE` (see "Why explicit deletion, not just the DB's FK
+  actions" below).
+- `TripStop` (the trip's canonical, currently-active stop list) — **never
+  touched**. An itinerary is a historical snapshot/preview, not the
+  source of truth for a trip's stops (see "Architecture" above); deleting
+  one has no bearing on what the trip's stops currently are, even if that
+  itinerary was previously applied.
+- `Place` rows — **never touched**. Deleting an itinerary only removes the
+  itinerary's own references to places (`TripItineraryStop.place_id`), not
+  the places themselves.
+- Other itineraries belonging to the same trip — **never touched**, each
+  `TripItinerary` row is independent.
+
+**Applied-itinerary reference.** If `Trip.applied_itinerary_id` currently
+points at the itinerary being deleted, it's set back to `NULL` (along with
+`itinerary_applied_at`) in the same transaction — never left dangling. If
+a *different* itinerary is currently applied, deleting some other
+itinerary has no effect on that reference. This mirrors exactly what
+`Trip.applied_itinerary_id`'s own `ON DELETE SET NULL` foreign key was
+already declared for (see its model doc comment — "if the itinerary later
+gains a deletable feature, the Trip shouldn't be affected by it, only lose
+its 'last applied' pointer" was written in anticipation of this exact
+milestone).
+
+**Why explicit deletion, not just the DB's FK actions.** Both
+`trip_itinerary_stops.itinerary_id` (`ON DELETE CASCADE`) and
+`trips.applied_itinerary_id` (`ON DELETE SET NULL`) already declare the
+correct cascade behavior at the schema level (see the original
+`add_trip_optimizer`/`add_trip_applied_itinerary` migrations) — so in a
+real Postgres deployment, a bare `db.delete(itinerary); db.commit()` would
+technically produce the correct result on its own. But this project's test
+suite runs against SQLite, which does not enforce `ON DELETE` actions
+without an explicit `PRAGMA foreign_keys=ON` this codebase doesn't set —
+`SqlOptimizationRepository.delete_itinerary` therefore deletes the child
+stop rows and clears the applied-itinerary reference explicitly, in
+application code, exactly mirroring the existing precedent
+`SqlTripRepository.delete_trip` already established for trip deletion (see
+that method's own identical comment). This makes the behavior correct and
+identical in both environments rather than silently relying on
+environment-specific DB enforcement.
+
+**No migration was needed.** Both FK actions this endpoint relies on
+already existed in the schema before this milestone — added specifically
+in anticipation of a future delete feature (see the `applied_itinerary_id`
+column's own doc comment, written well before this milestone).
+
+Errors: `404 ITINERARY_NOT_FOUND` (nonexistent itinerary, or no owner/editor
+access — see anti-enumeration above), `401 UNAUTHORIZED`.
+
+### `GET /internal/trips/{trip_id}/itinerary-apply-history`
+
+Requires `x-user-id` header — any resolved access (`owner`/`editor`/`viewer`)
+may read, same convention as `GET /internal/trips/{trip_id}/itineraries`
+(this is a read, not a mutation). Newest-first.
+
+```json
+{
+  "entries": [
+    {
+      "id": 3, "itinerary_id": null, "itinerary_created_at": null,
+      "is_undo": true, "applied_at": "2026-08-10T10:05:00",
+      "actor_user_id": 1, "is_undoable": true
+    },
+    {
+      "id": 2, "itinerary_id": 5, "itinerary_created_at": "2026-08-10T09:50:00",
+      "is_undo": false, "applied_at": "2026-08-10T10:00:00",
+      "actor_user_id": 1, "is_undoable": false
+    }
+  ]
+}
+```
+
+`itinerary_id`/`itinerary_created_at` are both `null` when the row's
+result isn't itinerary-derived (an undo that restored a manually-set
+state) **or** when the referenced itinerary was later deleted — the API
+doesn't distinguish these two cases in this field; see "Apply History &
+Undo → Deletion semantics" above for why that's safe (both are correctly
+represented as "no itinerary to point to"). `is_undoable` reflects the
+"latest-only" rule directly — only ever `true` for at most one entry.
+
+Errors: `404 TRIP_NOT_FOUND`, `401 UNAUTHORIZED`.
+
+### `POST /internal/trips/{trip_id}/itinerary-apply-history/{history_id}/undo`
+
+Requires `x-user-id` header (owner or editor). No request body. `POST`,
+not `DELETE` — undo is an *action* that mutates `TripStop`, not a deletion
+of the history record itself (the record survives, and becomes non-
+undoable once superseded by the new row this endpoint creates).
+
+```json
+{
+  "trip_id": 1,
+  "history_id": 4,
+  "itinerary_id": 5,
+  "stops": [
+    {
+      "place_id": 12, "name": "Ayasofya", "lat": 41.0086, "lng": 28.9802,
+      "city": "İstanbul", "category": "tarihi",
+      "day_index": 0, "order_index": 0
+    }
+  ],
+  "stops_count": 1,
+  "applied_at": "2026-08-10T10:10:00"
+}
+```
+
+Same shape as `ApplyItineraryResponse`, plus `history_id` (the *new* row
+this undo created — useful for a client that wants to act on it without
+an extra round trip) and an optional `itinerary_id` (the apply response's
+own field is never `null` — an undo's restored provenance legitimately can
+be).
+
+Errors: `404 TRIP_NOT_FOUND`, `404 APPLY_HISTORY_NOT_FOUND` (nonexistent
+row, or a row belonging to a different trip), `409 STALE_UNDO` (not the
+trip's latest row — see "Latest-only safety rule" above),
+`400 INVALID_OPTIMIZATION_REQUEST` (a place referenced by the snapshot
+being restored no longer exists), `403 PERMISSION_DENIED`,
+`401 UNAUTHORIZED`.
+
+## Trip Planning Date
+
+Lets the caller optionally anchor an itinerary to a real calendar date, so
+"Day 1"/"Day 2" can be shown as "September 1st"/"September 2nd" instead of
+bare ordinals — the iOS-facing goal (see `docs/ios-trip-optimizer.md`
+"Trip Planning Date"). **No new request field, no new domain concept, no
+migration** — `start_date` and its downstream derivation already existed
+end-to-end (request → `OptimizationConstraints.start_date` →
+`OptimizedDay.date` via `_date_for`, both strategies) since the optimizer's
+very first milestone; the one thing that never happened was the API
+actually *returning* that already-computed value. This section documents
+what changed and, just as importantly, what didn't.
+
+### What changed (the whole change)
+
+1. `ItineraryDayResponse` gained `date: Optional[str] = None`.
+2. `SqlOptimizationRepository.get_itinerary` now reads `start_date` back
+   out of the itinerary's own persisted `TripItinerary.params` (already
+   stored, for reproducibility/audit, since `optimize_trip`'s very first
+   version — see `TripItinerary.params` docstring) and computes each
+   day's `date` via `_date_for` — the exact same function
+   `greedy_distance_strategy.py`/`ortools_strategy.py` already import and
+   use, imported here too rather than reimplemented. **No calendar-day
+   arithmetic was written for this milestone** — `_date_for` already did
+   it correctly (`date.fromisoformat(start_date) + timedelta(days=day_index)`,
+   pure calendar-date math, no time-of-day/timezone component at all).
+
+That's the entire backend change. No new column, no Alembic migration
+(`params` was already a flexible JSON blob capturing this exact value on
+every request), no change to `OptimizeTripRequest` (`start_date` already
+existed there, `Optional[str] = None`, already validated as ISO
+`"YYYY-MM-DD"` by `OptimizationService`), and **no mobile-bff or web-bff
+change** — both already mirror `start_date` on the request side
+field-for-field, and both return `resp.json()` unmodified on the response
+side (no per-field DTO to update).
+
+### Why this was safe to add without touching the request contract
+
+`optimize_trip`'s own flow already round-trips through the repository
+before returning a response — it calls `save_itinerary` (persisting
+`params`, including `start_date` if given) and then immediately
+`get_itinerary` (reconstructing the response purely from persisted rows)
+rather than serializing the in-memory `OptimizationResult` directly. That
+existing architectural choice is what made this a **repository-only**
+change: fixing `get_itinerary` to read `date` back out fixes it
+identically for a fresh `.optimize` call *and* for every subsequent
+`GET /itineraries/{id}` (history reload) — one code path, both callers,
+no special-casing needed for "was this itinerary just generated or
+reloaded from history."
+
+### Backward compatibility
+
+A request that never sends `start_date` (every request before this
+milestone, and every request that continues to omit it) produces
+`days[].date: null` for every day — `_date_for(None, day_index)` already
+returned `None` before this milestone existed; nothing about that
+fallback changed. Existing itineraries persisted before this milestone
+also degrade gracefully: their `params` blob predates `date`-awareness on
+the *reading* side, but if they were saved without `start_date` in the
+first place (true for every itinerary ever created, since iOS never sent
+it before this milestone), `params.get("start_date")` is simply absent
+→ `None` → every day's `date` is `null`, identical to a fresh no-date
+request.
+
+### Timezone
+
+**None — deliberately, matching the rest of this system.** Every
+date/time field already in this domain (`preferred_start_time`,
+`arrival_time`, `departure_time`, `start_date` itself) is a naive,
+timezone-less string; there is no timezone concept anywhere in `Trip`,
+`TripStop`, `TripItinerary`, or either strategy (see "Assumptions"
+above). `start_date`/`date` follow the identical convention — a bare
+calendar date with no offset, no UTC anchor, nothing to convert. Adding
+timezone support here would be inventing a concept the rest of the domain
+doesn't have, not extending one that already exists — explicitly out of
+scope (see `docs/ios-trip-optimizer.md` "Trip Planning Date → Timezone
+behavior" for the client-facing consequence of this).
+
+### Opening hours: unaffected, and not date-specific
+
+`Place.opening_hours` (`"HH:MM-HH:MM"`, when present at all — see
+"Assumptions") is **not per-weekday, not per-date, and this milestone
+does not change that.** A planning date makes each *day* of a multi-day
+itinerary correspond to a real calendar date; it does **not** make a
+place's opening hours vary by which calendar date happens to land on that
+day. Monday's hours and the following Monday's hours are, and remain,
+indistinguishable to both strategies — there is no per-date opening-hours
+data to look up even if a strategy wanted to. `days[].date` is purely a
+labeling/display concern layered on top of scheduling that already
+happened; it plays no role in either strategy's constraint-solving.
+
+### Testing
+
+Three new tests in `test_trip_optimization.py` (route-level, full
+API round trip — the layer that actually exercises `get_itinerary`):
+without `start_date`, every day's `date` is `null` (backward
+compatibility); with `start_date` and a narrow preferred-time window
+forcing a two-day split, `days[0].date`/`days[1].date` land on
+consecutive calendar dates, not 24-hour increments; and — the one
+genuinely new code path this milestone touches — a `GET
+/internal/itineraries/{id}` call made *after* the original `optimize`
+response, on the same itinerary, still returns the correct `date`,
+proving the value survives a real history reload, not just the
+immediate response. `test_optimization_strategy.py`'s own pre-existing
+`start_date → calendar dates` coverage (unchanged) already established
+that `_date_for` itself is correct; these three only needed to prove the
+response DTO/repository now *surface* that value.
+
+## Overnight Time Ranges
+
+Both a place's `opening_hours` and the request's own `preferred_start_time`/
+`preferred_end_time` planning window can cross midnight — `"22:00-02:00"`,
+`"18:00"` → `"01:00"` — and are now handled as first-class, correctly
+constrained scheduling input by **both** strategies, rather than being
+rejected at the API boundary or silently mishandled downstream.
+
+### Semantic rule
+
+The same rule applies uniformly to a place's opening window and to the
+request's planning window:
+
+```text
+start <= end   →  same-day interval
+start >  end   →  overnight interval, crossing midnight
+```
+
+`start == end` remains **invalid** for the planning window specifically —
+this is the one part of the pre-existing contract this milestone
+deliberately preserved rather than extended (see "Preferred planning
+window" below); a place's own `opening_hours` has no equivalent
+API-level rejection (it's optional, unvalidated metadata — an equal-value
+window is parsed but degenerates to "never open," which the existing soft
+conflict check already surfaces correctly, unrelated to this milestone).
+
+### Preferred planning window: no new field, extended validation
+
+`OptimizeTripRequest.preferred_start_time`/`preferred_end_time` are
+unchanged — still the same two `"HH:MM"` string fields, same wire format,
+no new field was added or considered (Req 15's explicit constraint).
+`OptimizationService.optimize_trip`'s own validation changed by exactly
+one comparison operator:
+
+```python
+# Before: preferred_end_time <= preferred_start_time  → rejected
+# After:  preferred_end_time == preferred_start_time   → rejected
+```
+
+`18:00` → `01:00` (previously rejected with a 400) is now a valid ~7-hour
+overnight planning window; `09:00` → `18:00` continues to work exactly as
+before. Only genuinely equal values are still rejected — the error
+message was updated to match (`"preferred_end_time, preferred_start_time'a
+eşit olamaz."`, replacing the old "...'dan sonra olmalı." text); the
+*meaning* that survived from the old contract is "these two values must
+differ," not the old inequality's direction.
+
+### Planning-day semantics: one day, not two
+
+The most important design decision this milestone made: an overnight
+planning window still describes **exactly one optimizer planning day**,
+never two. For `start_date = "2026-08-10"`, `preferred_start_time = "18:00"`,
+`preferred_end_time = "01:00"`:
+
+```text
+Day 1 (day_index = 0):
+    starts 2026-08-10 18:00
+    continues through midnight
+    ends   2026-08-11 01:00
+```
+
+This is **not** two itinerary days — `ItineraryDay.date`/`day_index`
+semantics are completely unchanged (`day_index` still increments once per
+*optimizer* day, `date` is still `start_date + (day_index)` via the
+existing, unmodified `_date_for` — see "Date representation" below). A
+2-day trip with an overnight window produces exactly 2 `ItineraryDay`
+entries, not 4 — the same day count as an equivalent same-day window
+would, only each day's own internal timeline happens to span a midnight
+boundary.
+
+### Continuous-timeline representation
+
+Internally (never exposed in the API — `arrival_time`/`departure_time`
+remain plain `"HH:MM"` wall-clock strings, formatted via the existing,
+unmodified `%`-based `_format_minutes`), every planning day is represented
+on a **continuous** minute axis anchored at that day's own `day_start`,
+which is allowed to exceed `1440` (`MINUTES_PER_DAY`) once the day crosses
+midnight — `22:00-02:00` is represented internally as `22:00 → 26:00`
+relative to a day that starts before it, never as the raw, inverted
+`22:00 → 02:00` pair. This is exactly the translation Req 9 asked for, and
+it lives in exactly one place: `_day_relative_window` (see "New shared
+value types and helpers" below) — nothing downstream (OR-Tools'
+`SetRange`, the greedy strategy's arrival/departure walk, day-boundary
+flush checks) ever has to reason about midnight-wraparound itself; they
+all just compare monotonically increasing minute values, some of which
+happen to exceed 1440.
+
+`MINUTES_PER_DAY = 24 * 60` is defined exactly once (`greedy_distance_strategy.py`)
+and imported everywhere the concept is needed (`ortools_strategy.py`,
+including inside `_format_minutes`'s own wraparound formatting) — no
+second, independently-hardcoded `24 * 60` exists anywhere in either
+strategy module (Req 9's explicit ask).
+
+### New shared value types and helpers
+
+All framework-agnostic (no SQLAlchemy/FastAPI import), living in
+`greedy_distance_strategy.py` — the existing home for every
+strategy-shared constant/helper (`_parse_hhmm`, `_parse_opening_hours`,
+`_date_for`, category-duration table, etc.) — and imported by
+`ortools_strategy.py` exactly the way those already were, so the two
+strategies are structurally incapable of diverging on what an overnight
+window *means* (only on how they *schedule around* one, which is allowed
+— see "Cross-strategy agreement" below):
+
+- **`PlanningTimeWindow`** — a frozen dataclass wrapping the *request's*
+  planning window: `start_minutes`, `end_minutes` (always `>= start_minutes`,
+  already extended past `MINUTES_PER_DAY` when overnight), `is_overnight`,
+  `duration_minutes`. `PlanningTimeWindow.parse(start_raw, end_raw)`
+  replaces the small, previously-duplicated try/except parsing block both
+  strategies' `optimize()` used to carry independently — one shared
+  constructor, one place where "equal start/end still raises" lives.
+- **`_day_relative_window(open_m, close_m, day_start)`** — converts a
+  place's raw `(open_minutes, close_minutes)` into a day-relative,
+  always-monotonic `(rel_open, rel_close)` pair, correctly handling three
+  cases: the place is already open when the day starts (clips to `0` —
+  byte-for-byte the same result the pre-existing `max(0, open_m -
+  day_start)` logic gave, for every input this milestone didn't change
+  the meaning of); the place opens later the same day; and — new — the
+  place's *today* occurrence already closed before `day_start`, in which
+  case the *next* (tomorrow's) occurrence is used instead
+  (`+MINUTES_PER_DAY`). This third case is what makes an early place
+  window (e.g. `"00:00-04:00"`) correctly attach to *tonight's* overnight
+  session rather than being (mis)read as a window that already passed.
+- **`_window_overlaps_day(open_m, close_m, day_start, day_end)`** — `True`
+  iff a place's window has *any* relevant occurrence within
+  `[day_start, day_start + day_budget]`. Used by `ortools` to build
+  `unconstrained_ids` (a window that can never be satisfied *on any day*,
+  since every day repeats the same `day_start`/`day_end`, is relaxed
+  up-front rather than driving the solver toward an artificial
+  infeasibility).
+- **`_resolve_arrival(current_time, day_start, day_end, open_m, close_m)`**
+  — the shared "soft" scheduling primitive both strategies' post-processing
+  walk now call (`GreedyDistanceStrategy.optimize`, `ortools_strategy.py`'s
+  `_walk_day_groups` and its own no-hard-windows fallback branch): waits
+  silently for opening exactly like before, still never reshuffles a
+  conflicting stop (Req 3's explicit "must not accidentally convert the
+  interval into a negative duration" — a conflict still just produces the
+  existing warning text, at the existing point in the schedule). The one
+  new behavior: if a place's window has already closed *today* but the
+  *next* occurrence still fits within `day_end`, arrival shifts to that
+  next occurrence instead of immediately conflicting — this is what makes
+  Case C below work, and is deliberately **not** applied when the shifted
+  occurrence would exceed `day_end` (Case D), so this never becomes an
+  unbounded "wait for a day that never comes" loop.
+
+### Opening-hours scheduling semantics, worked examples
+
+Given planning window `18:00 → 01:00` (`day_start = 18:00`, effective
+`day_end = 01:00` next day):
+
+- **Case A** — place open `19:00-23:00` (same-day): fully compatible.
+  Arrival waits silently until `19:00`, departs before `23:00`.
+- **Case B** — place open `22:00-02:00` (overnight, same shape as the
+  planning window itself): compatible. An arrival at `23:30` or `00:30` is
+  valid; an arrival at `03:00` is not (past the place's own closing) —
+  Req 7's exact three examples, all correctly distinguished.
+- **Case C** — place open `00:00-04:00` (same-day by the place's own
+  rule, but numerically early relative to an evening-starting planning
+  day): `_day_relative_window`'s third case attaches this to *tonight's*
+  occurrence — `00:00` (6 hours into the planning day) is a valid arrival;
+  anything past the planning window's own `01:00` cutoff is not, even
+  though the place itself stays open until `04:00` — the *user's own*
+  preferred end time is the binding constraint, never overridden by a
+  place staying open later (Req 8's explicit "the optimizer must not
+  schedule visits after the user's preferred end time").
+- **Case D** — planning window `09:00-18:00` (not overnight), place open
+  `22:00-02:00`: `_window_overlaps_day` returns `False` — this window can
+  never be satisfied on *any* day sharing this same `day_start`/`day_end`
+  (opening-hours are daily-only, see "Assumptions"), so the place is
+  treated exactly like one with no opening-hours data at all for hard-
+  constraint purposes. No hidden extra day is invented to "make room" for
+  it — Req 8's explicit "do not create a hidden second day just to
+  satisfy the opening window."
+
+### `ortools`: hard constraints, translated correctly
+
+`_solve_day`'s `CumulVar(node).SetRange(...)` call now receives
+`_day_relative_window`'s output, clipped into `[0, day_budget]` — always a
+valid (`lower <= upper`) range, by construction, never the raw inverted
+pair that used to crash the solver (see "`ortools` strategy → Overnight
+time ranges — hard-constrained, not skipped" above for the historical
+crash and the structural fix). `unconstrained_ids` (windows that overlap
+no day at all) is computed the same way it always was, just against the
+new, overnight-aware `_window_overlaps_day`.
+
+### `greedy_distance`: same semantics, same soft scheduling
+
+`GreedyDistanceStrategy.optimize` was, for the first time, actually
+modified by this milestone (every prior milestone since `ortools` shipped
+had explicitly left it untouched) — but only to call the new shared
+`PlanningTimeWindow.parse`/`_resolve_arrival` helpers in place of its own
+inline parsing/comparison logic; its own control flow (nearest-neighbor
+construction, day-splitting via `flush_day()`, category-based visit
+duration, scoring) is completely unchanged. It still never re-shuffles
+stops for opening-hours conflicts — a conflicting arrival still just
+produces a warning and keeps going, exactly as before.
+
+### Cross-strategy agreement
+
+Both strategies now derive `day_start`/`day_end` from the *same*
+`PlanningTimeWindow.parse` call and resolve every place's availability
+through the *same* `_day_relative_window`/`_window_overlaps_day`/
+`_resolve_arrival` functions — they cannot interpret an overnight window
+differently by construction, only *schedule around* one differently
+(`ortools` may place a stop on a different day than `greedy_distance`
+would, or route between stops differently — route *quality*, never window
+*meaning*, is where they're allowed to diverge; see "Available strategies
+→ When to prefer each"). `test_strategy_comparison.py` proves this
+directly: the same overnight-windowed fixture is asserted to produce
+*identical* arrival times and conflict-warning presence/absence across
+both strategies, even though their route ordering is never asserted to
+match.
+
+### Timezone: still none
+
+No timezone support was added, and none is planned as part of this
+milestone — matching "Timezone" above, an overnight interval is purely a
+**local planning-clock concept** (a naive minute-of-day value that
+happens to be allowed to exceed 1440 internally), not a timezone-aware
+datetime interval. `arrival_time`/`departure_time` remain plain `"HH:MM"`
+wall-clock strings with no date or offset attached — a stop scheduled at
+`"01:00"` on an overnight day carries no information, in the API response
+itself, about which calendar date it actually falls on; `ItineraryDay.date`
+(one value per *day*, not per *stop*) remains the only calendar-date
+signal this system produces, unchanged from "Trip Planning Date."
+
+### Performance
+
+The continuous-timeline representation adds no new search dimension, no
+new solver calls, and no change to `SOLUTION_LIMIT`/`TIME_LIMIT_SECONDS` —
+it only changes which numbers get passed into the *same* `SetRange`/
+comparison calls that already existed. Benchmarked at 10/20/40 places
+(`ortools`, scattered opening-hours windows on ~1/3 of places):
+
+| Places | No windows | ~1/3 same-day windowed | ~1/3 overnight windowed |
+|---|---|---|---|
+| 10 | 57 ms | 65 ms | 59 ms |
+| 20 | 171 ms | 180 ms | 240 ms |
+| 40 | 521 ms | 788 ms | 668 ms |
+
+Worst case — **every** place overnight-windowed, an overnight planning
+day with a budget tight enough to force one place per day:
+
+| Places | Time | Days |
+|---|---|---|
+| 10 | 103 ms | 10 |
+| 20 | 376 ms | 20 |
+| 40 | 1054 ms | 40 |
+
+No meaningful regression from overnight support — the overnight-windowed
+numbers sit in the same noisy range the same-day-windowed numbers already
+occupied before this milestone (see "`ortools` strategy → Performance"
+above for the original, still-valid same-day benchmark). The no-window
+path is untouched code-path-wise (it never calls `_day_relative_window`
+at all) and its numbers are reproduced here unchanged, confirming that.
+
 ## Testing
 
 ```bash
@@ -890,6 +1585,7 @@ pytest tests/test_optimization_strategy.py -v   # greedy_distance unit — no DB
 pytest tests/test_ortools_strategy.py -v         # ortools unit — no DB, no HTTP
 pytest tests/test_strategy_comparison.py -v      # both strategies, shared fixtures/invariants
 pytest tests/test_trip_optimization.py -v        # integration — full API round trip
+pytest tests/test_overnight_time_window.py -v    # shared PlanningTimeWindow/day-relative helpers, strategy-agnostic
 pytest tests/ -q                                  # full suite (confirms no regressions)
 ```
 
@@ -897,28 +1593,53 @@ pytest tests/ -q                                  # full suite (confirms no regr
 (`PlaceInput` in, `OptimizationResult` out): empty input, a single place,
 category-based visit duration, opening-hours clipping vs. conflict,
 day-splitting, `duration_days` derivation and overflow, `start_date` →
-calendar dates, and score bounds. **Unchanged by this milestone** — same
-19 tests, still passing, confirming `GreedyDistanceStrategy` itself was
-never touched.
+calendar dates, and score bounds — plus, **new as of the Overnight Time
+Ranges milestone** (22 tests total now; this was the first milestone to
+actually modify `GreedyDistanceStrategy.optimize` since `ortools` shipped,
+though only to call the new shared parsing/scheduling helpers, not to
+change its own control flow): an overnight planning window is accepted,
+not silently defaulted; an overnight place window's arrival before and
+after midnight are both handled correctly; an arrival genuinely past an
+overnight place's closing still warns; day-splitting still works under an
+overnight planning window; and a no-opening-hours regression check
+confirms none of the above changed the pre-existing default-window
+behavior.
 
-`test_ortools_strategy.py` (45 tests) mirrors `test_optimization_strategy.py`'s
-structure for `ortools`, in three layers:
+`test_ortools_strategy.py` (49 tests: 45 through the day-aware milestone,
+plus 4 net-new for Overnight Time Ranges — 2 old "invalid window falls
+back" tests were replaced by 2 more precisely-named ones, and the old
+2-test "unsupported, must not crash" section was replaced by 5 tests
+proving overnight windows are now genuinely hard-constrained, not just
+non-crashing) mirrors `test_optimization_strategy.py`'s structure for
+`ortools`, in four layers:
 
 - **v1 edge cases** (19 tests, unchanged since `ortools`'s own first
   milestone): 0/1/2 places, duplicate places, multiple cities, impossible
   day budgets, identical/degenerate coordinates, missing opening hours,
   multi-day splitting, a 60-place set completing quickly, and two
   determinism tests.
-- **Single-pass hard-window tests** (12 tests, from the hard-opening-hours
-  milestone, still passing byte-identical): a place open all day, a narrow
-  window forcing a measurably costlier reorder vs. pure distance (the
-  461.6→545.5 km example in "`ortools` strategy → Examples"), compatible
-  sequential windows, unconstrained places staying freely optimizable
-  alongside a constrained one, overnight/edge-time no-crash checks, a
-  40-place set with scattered windows, an infeasibility-detected-quickly
-  timing check, and score-formula preservation. Two of this layer's
-  original tests were **updated** this milestone (not just kept) — see
-  next bullet.
+- **Single-pass hard-window tests** (13 tests: 12 from the
+  hard-opening-hours milestone, `test_invalid_time_window_falls_back_to_default_window`
+  split into `test_equal_start_and_end_time_falls_back_to_default_window`
+  (still-invalid case, renamed for accuracy) and
+  `test_end_time_before_start_time_is_now_a_valid_overnight_window` (the
+  new, opposite assertion for the exact same input this milestone made
+  valid)): a place open all day, a narrow window forcing a measurably
+  costlier reorder vs. pure distance (the 461.6→545.5 km example in
+  "`ortools` strategy → Examples"), compatible sequential windows,
+  unconstrained places staying freely optimizable alongside a constrained
+  one, a 40-place set with scattered windows, an infeasibility-detected-
+  quickly timing check, and score-formula preservation.
+- **Overnight time ranges — hard-constrained, not skipped** (5 tests, new
+  this milestone, replacing the 2 "unsupported, must not crash" tests from
+  the day-aware milestone — see "Overnight Time Ranges" above for the full
+  design): an overnight place window is genuinely hard-constrained
+  (Case B); an early place window under an overnight planning day attaches
+  to *tonight's* occurrence (Case C); a place window that's already closed
+  even under an overnight planning day still conflicts; an overnight place
+  window incompatible with a non-overnight planning day is unconstrained,
+  not lost (Case D); and an overnight window mixed with a same-day hard
+  window in the same request never crashes the solver.
 - **Day-aware tests** (14 tests, new this milestone): the critical
   regression test
   (`test_two_incompatible_same_window_places_satisfied_across_separate_days`
@@ -941,7 +1662,9 @@ structure for `ortools`, in three layers:
   two-far-apart-same-window scenario — are gone; asserting that outcome
   today would itself be a regression.
 
-`test_strategy_comparison.py` (35 tests, new) runs both strategies over
+`test_strategy_comparison.py` (39 tests: 35 from the `ortools` milestone,
+plus 4 new for Overnight Time Ranges — see "Overnight Time Ranges →
+Cross-strategy agreement" above) runs both strategies over
 the same six fixtures and asserts the shared contract without requiring
 identical routes: registry sanity (both resolvable, `greedy_distance`
 still `DEFAULT_STRATEGY_NAME`), `OptimizationResult`/`OptimizedStop`
@@ -958,18 +1681,40 @@ cities, empty trip, unavailable opening-hours metadata — plus request
 validation and permission checks (owner/editor/viewer, non-collaborator,
 anti-enumeration 404s matching the Trip Sharing convention), `apply_itinerary`
 (happy path with `TripStop` before/after DB assertions, permissions,
-atomicity, repeated application, provenance, analytics), and — new this
-milestone — `strategy: "ortools"` end-to-end (optimize → `strategy_name`
-persisted correctly → coexists with a `greedy_distance` itinerary on the
-same trip in history → applies to `TripStop` exactly like any other
-itinerary, since apply is strategy-agnostic by construction).
+atomicity, repeated application, provenance, analytics), `strategy:
+"ortools"` end-to-end (optimize → `strategy_name` persisted correctly →
+coexists with a `greedy_distance` itinerary on the same trip in history →
+applies to `TripStop` exactly like any other itinerary, since apply is
+strategy-agnostic by construction) — and, new for Overnight Time Ranges,
+`test_end_time_before_start_time_is_rejected` was split into
+`test_equal_start_and_end_time_is_rejected` (the one input still actually
+invalid) and `test_overnight_preferred_time_range_is_accepted` (a full
+`POST /optimize` round trip proving `18:00`→`01:00` now returns `200`
+with the itinerary's first stop arriving at `"18:00"`, not a `400`).
 
-**441 tests total in the full suite (was 429 before this milestone; +14
-net new day-aware tests in `test_ortools_strategy.py`, 2 old tests
-replaced), zero regressions** — `test_optimization_strategy.py`
-(`greedy_distance`, untouched), `test_strategy_comparison.py`, and
-`test_trip_optimization.py` all pass completely unchanged. Full suite:
-45.9s.
+`test_overnight_time_window.py` (31 tests, new) tests the shared
+`PlanningTimeWindow`/`_day_relative_window`/`_window_overlaps_day`/
+`_resolve_arrival`/`_day_budget` helpers directly, independent of either
+strategy — parser normal/overnight/malformed/missing/equal-window cases,
+`PlanningTimeWindow.parse`'s same-day/overnight/equal/malformed cases,
+`_day_budget`'s same-day/overnight-raw/overnight-already-extended
+(idempotency) cases, `_day_relative_window`'s four semantic cases
+(already-open, opens-later, overnight, rolls-to-tomorrow) plus a
+property-style monotonicity check across eight input combinations,
+`_window_overlaps_day`'s four overlap/non-overlap cases, and
+`_resolve_arrival`'s full behavioral matrix (Cases A/B/C/D from
+"Overnight Time Ranges" above, plus the pre-existing same-day conflict
+case and the degenerate equal-window case) — this is the layer other
+milestones' cross-strategy tests ultimately depend on being correct.
+
+**490 tests total in the full suite (was 441 before this milestone; +49
+net new: +6 in `test_optimization_strategy.py`, +4 net in
+`test_ortools_strategy.py`, +4 in `test_strategy_comparison.py`, +2 net
+in `test_trip_optimization.py`, +31 new `test_overnight_time_window.py`,
+2 tests replaced in each of `test_ortools_strategy.py`/
+`test_trip_optimization.py` for inputs that changed meaning), zero
+regressions in anything this milestone didn't intentionally change** —
+full suite: ~44s.
 
 ## Future improvements
 
@@ -998,7 +1743,14 @@ Ranked roughly by what unlocks the most value next:
    warns about missing hours, and `ortools`'s hard-window machinery, while
    fully implemented and tested, has no real production data to act on yet.
 5. **Weekday/seasonal opening hours**, not just a flat daily window.
-6. **Apply history** — `Trip.applied_itinerary_id` only tracks the most
-   recent apply; a full log of every apply (who, when, which itinerary,
-   which strategy) would need a separate table, not attempted here since
-   nothing yet needs more than "what's currently applied."
+6. ~~**Apply history**~~ **Resolved** — see "Apply History & Undo" above.
+7. **Apply-history retention/pruning** — `trip_itinerary_apply_history`
+   grows unbounded per trip (one row per apply/undo, forever); there's no
+   cap, archival, or pagination on `GET .../itinerary-apply-history` yet.
+   Not a practical concern at current usage scale, but worth revisiting if
+   a trip accumulates hundreds of applies.
+8. **Redo as a distinct, labeled action** — undoing an undo already works
+   and correctly restores the pre-undo state (see "Apply History & Undo →
+   Why this symmetry matters"), but the UI doesn't yet present this as a
+   dedicated "Redo" affordance — it's just "Undo" again, on what happens
+   to be an undo row.

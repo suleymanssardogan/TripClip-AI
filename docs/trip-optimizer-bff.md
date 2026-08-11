@@ -49,6 +49,15 @@ registered — `app.include_router(trip_optimization.router, prefix="/api/mobile
 | GET | `/api/mobile/trips/{trip_id}/itineraries` | `/api/web/trips/{trip_id}/itineraries` | `GET /internal/trips/{trip_id}/itineraries` | required (owner/editor/viewer) |
 | GET | `/api/mobile/itineraries/{itinerary_id}` | `/api/web/itineraries/{itinerary_id}` | `GET /internal/itineraries/{itinerary_id}` | required (owner/editor/viewer) |
 | POST | `/api/mobile/itineraries/{itinerary_id}/apply` | `/api/web/itineraries/{itinerary_id}/apply` | `POST /internal/itineraries/{itinerary_id}/apply` | required (owner/editor) |
+| DELETE | `/api/mobile/itineraries/{itinerary_id}` | `/api/web/itineraries/{itinerary_id}` | `DELETE /internal/itineraries/{itinerary_id}` | required (owner/editor) |
+| GET | `/api/mobile/trips/{trip_id}/itinerary-apply-history` | `/api/web/trips/{trip_id}/itinerary-apply-history` | `GET /internal/trips/{trip_id}/itinerary-apply-history` | required (owner/editor/viewer) |
+| POST | `/api/mobile/trips/{trip_id}/itinerary-apply-history/{history_id}/undo` | `/api/web/trips/{trip_id}/itinerary-apply-history/{history_id}/undo` | `POST /internal/trips/{trip_id}/itinerary-apply-history/{history_id}/undo` | required (owner/editor) |
+
+The delete/apply-history/undo routes were added to both BFFs in earlier
+milestones (see `docs/trip-optimizer.md` "Delete Saved Itinerary" and
+"Apply History & Undo") using the exact same pass-through pattern described
+above — no separate contract section here since they don't deviate from it
+in any way this doc doesn't already cover.
 
 "Required" means a valid `Authorization: Bearer <JWT>` — role enforcement
 (owner/editor vs. viewer) happens in core-api's `OptimizationService`, not
@@ -93,6 +102,7 @@ Response body: core-api's `OptimizeTripResponse`, returned unchanged
   "days": [
     {
       "day_index": 0,
+      "date": "2026-09-01",
       "stops": [
         {
           "place_id": 12, "name": "Ayasofya", "lat": 41.0086, "lng": 28.9802,
@@ -249,13 +259,32 @@ Full suite (confirms no regressions on existing routes):
 
 ```bash
 cd services/mobile-bff && pytest tests/ -q   # 102 passed (96 pre-existing + 6 new)
-cd services/web-bff     && pytest tests/ -q   # 59 passed (53 pre-existing + 6 new)
+cd services/web-bff     && pytest tests/ -q   # 82 passed (includes 8 for the new trips.py list/detail proxy — see "Web UI consumer" below)
 ```
 
-## What's still missing
+## Web UI consumer (Milestone 21)
 
-`optimize`/`list itineraries`/`get itinerary` are consumed by iOS (see
-`docs/ios-trip-optimizer.md`); `apply` is consumed by iOS's "Trip'e Uygula"
-action (same doc). No web UI calls any of these four routes yet — web-bff
-exposes the full surface for parity, but the first web consumer hasn't
-been built (see `docs/trip-optimizer.md` "Future improvements").
+All seven routes above are now consumed by a web frontend — see
+`docs/web-trip-optimizer.md` for the full UI-side writeup (routes,
+component architecture, map limitations, tests). Two things worth noting
+here, since they're BFF-adjacent decisions made while building that UI:
+
+1. **A new, separate `trips.py` router was added to web-bff only**
+   (`services/web-bff/app/routes/trips.py`) — `GET /api/web/trips` and
+   `GET /api/web/trips/{trip_id}`, proxying `GET /internal/trips` and
+   `GET /internal/trips/{trip_id}` the same pass-through way as
+   `trip_optimization.py`. This was necessary because, before this
+   milestone, web-bff had **no** route that could even resolve "does this
+   trip exist, what's its title, what stops does it have" — the Trip
+   Optimizer's own seven routes all assume a `trip_id` the caller already
+   has, they don't let you discover trips or list a trip's stops. Deliberately
+   minimal and **read-only**: no create/reorder/delete-stop routes were
+   added, since trip creation and stop editing remain iOS-only by product
+   decision (unchanged — see `docs/trip-optimizer.md`'s own "web is
+   read/optimize, iOS is create/manage" framing, which this extends rather
+   than contradicts).
+2. **No new optimizer routes were added.** The web UI calls the exact same
+   seven routes iOS does; the whole point of this BFF layer already being
+   platform-symmetric (see "Why both BFFs expose the same three [now
+   seven] endpoints" above) is that a second frontend didn't require any
+   backend contract changes.
