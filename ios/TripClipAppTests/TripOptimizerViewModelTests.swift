@@ -46,7 +46,7 @@ final class TripOptimizerViewModelTests: XCTestCase {
 
         await vm.optimize(tripID: 42, placeIDs: [1, 2, 3], auth: auth)
 
-        guard case .optimizeTrip(let tripID, let placeIDs, let durationDays, let startTime, let endTime) = fake.lastEndpoint else {
+        guard case .optimizeTrip(let tripID, let placeIDs, let durationDays, let startTime, let endTime, let startDate) = fake.lastEndpoint else {
             XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
             return
         }
@@ -55,6 +55,7 @@ final class TripOptimizerViewModelTests: XCTestCase {
         XCTAssertNil(durationDays)  // çağrıda belirtilmedi -> Otomatik
         XCTAssertEqual(startTime, .defaultStart)  // çağrıda belirtilmedi -> core-api'nin kendi varsayılanı
         XCTAssertEqual(endTime, .defaultEnd)
+        XCTAssertNil(startDate)  // çağrıda belirtilmedi -> "Otomatik" (tarih yok)
         XCTAssertEqual(fake.lastToken, "test-token")
     }
 
@@ -69,7 +70,7 @@ final class TripOptimizerViewModelTests: XCTestCase {
 
         await vm.optimize(tripID: 42, placeIDs: [1, 2, 3], durationDays: 4, auth: auth)
 
-        guard case .optimizeTrip(_, _, let durationDays, _, _) = fake.lastEndpoint else {
+        guard case .optimizeTrip(_, _, let durationDays, _, _, _) = fake.lastEndpoint else {
             XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
             return
         }
@@ -90,7 +91,7 @@ final class TripOptimizerViewModelTests: XCTestCase {
             auth: auth
         )
 
-        guard case .optimizeTrip(_, _, _, let startTime, let endTime) = fake.lastEndpoint else {
+        guard case .optimizeTrip(_, _, _, let startTime, let endTime, _) = fake.lastEndpoint else {
             XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
             return
         }
@@ -108,7 +109,7 @@ final class TripOptimizerViewModelTests: XCTestCase {
 
         await vm.optimize(tripID: 1, placeIDs: [1], preferredStartTime: ClockTime(hour: 6, minute: 0), auth: auth)
 
-        guard case .optimizeTrip(_, _, _, let startTime, let endTime) = fake.lastEndpoint else {
+        guard case .optimizeTrip(_, _, _, let startTime, let endTime, _) = fake.lastEndpoint else {
             XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
             return
         }
@@ -127,12 +128,75 @@ final class TripOptimizerViewModelTests: XCTestCase {
 
         await vm.optimize(tripID: 1, placeIDs: [1], preferredEndTime: ClockTime(hour: 23, minute: 0), auth: auth)
 
-        guard case .optimizeTrip(_, _, _, let startTime, let endTime) = fake.lastEndpoint else {
+        guard case .optimizeTrip(_, _, _, let startTime, let endTime, _) = fake.lastEndpoint else {
             XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
             return
         }
         XCTAssertEqual(startTime, .defaultStart)
         XCTAssertEqual(endTime, ClockTime(hour: 23, minute: 0))
+    }
+
+    // MARK: - Trip Planning Date forwarding (Req 13: request encoding, backward compatibility)
+
+    /// Geriye dönük uyumluluk: `startDate` belirtilmezse (bu milestone'dan
+    /// önceki her çağrı gibi) `nil` olarak forward edilmeli — `Endpoint.body`
+    /// bu durumda `start_date` alanını hiç eklemez (bkz. OptimizerEndpointTests).
+    func test_optimize_omitsStartDate_whenNotProvided() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.itinerary())
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        await vm.optimize(tripID: 1, placeIDs: [1], auth: auth)
+
+        guard case .optimizeTrip(_, _, _, _, _, let startDate) = fake.lastEndpoint else {
+            XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
+            return
+        }
+        XCTAssertNil(startDate)
+    }
+
+    func test_optimize_forwardsStartDate_whenProvided() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.itinerary())
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        await vm.optimize(
+            tripID: 1, placeIDs: [1],
+            startDate: PlanningDate(year: 2026, month: 9, day: 1),
+            auth: auth
+        )
+
+        guard case .optimizeTrip(_, _, _, _, _, let startDate) = fake.lastEndpoint else {
+            XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
+            return
+        }
+        XCTAssertEqual(startDate, PlanningDate(year: 2026, month: 9, day: 1))
+    }
+
+    /// Seçilen tarih diğer alanlara (yer seçimi/süre/saatler) dokunmamalı —
+    /// yalnızca `start_date` değişir.
+    func test_optimize_startDate_doesNotAffectOtherParameters() async {
+        let fake = FakeAPIClient()
+        fake.result = .success(OptimizerFixtures.itinerary())
+        let auth = makeAuth(fake: fake)
+        let vm = TripOptimizerViewModel()
+
+        await vm.optimize(
+            tripID: 1, placeIDs: [5, 6], durationDays: 2,
+            startDate: PlanningDate(year: 2026, month: 9, day: 1),
+            auth: auth
+        )
+
+        guard case .optimizeTrip(_, let placeIDs, let durationDays, let startTime, let endTime, _) = fake.lastEndpoint else {
+            XCTFail("Beklenmeyen endpoint: \(String(describing: fake.lastEndpoint))")
+            return
+        }
+        XCTAssertEqual(placeIDs, [5, 6])
+        XCTAssertEqual(durationDays, 2)
+        XCTAssertEqual(startTime, .defaultStart)
+        XCTAssertEqual(endTime, .defaultEnd)
     }
 
     // MARK: - Error

@@ -6,6 +6,13 @@ struct TripDetailView: View {
     var preloaded:     TripDetail? = nil
 
     @Environment(AuthEnvironment.self) private var auth
+    /// Ekran ömrünü aşan, uygulama oturumu boyunca yaşayan, trip-bazlı
+    /// paylaşılan optimizer yapılandırma önbelleği — `TripOptimizerConfigView`'a
+    /// `init` parametresi olarak geçiriliyor (bkz. o dosyadaki doc yorumu —
+    /// `@Environment`'ın orada doğrudan okunamama nedeni, `OptimizerRouteCache`
+    /// ile AYNI desen). Bkz. docs/ios-trip-optimizer.md "Persistent
+    /// Optimizer Configuration".
+    @Environment(OptimizerConfigurationStore.self) private var optimizerConfigStore
     @Environment(\.dismiss) private var dismiss
     @State private var vm = TripDetailViewModel()
     @State private var focusedPin: LocationPin?
@@ -35,6 +42,7 @@ struct TripDetailView: View {
                         destination: TripOptimizerConfigView(
                             tripID: trip.id,
                             stops: trip.allStops,
+                            configStore: optimizerConfigStore,
                             onApplied: { Task { await vm.load(tripID: tripID, auth: auth) } }
                         )
                     ) {
@@ -52,6 +60,19 @@ struct TripDetailView: View {
                         )
                     ) {
                         Image(systemName: "clock.arrow.circlepath")
+                            .foregroundStyle(AppColors.accentText)
+                    }
+                }
+            }
+            if let trip = vm.trip, vm.hasApplyHistory {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink(
+                        destination: ItineraryApplyHistoryView(
+                            tripID: trip.id,
+                            onChanged: { Task { await vm.load(tripID: tripID, auth: auth) } }
+                        )
+                    ) {
+                        Image(systemName: "arrow.uturn.backward.circle")
                             .foregroundStyle(AppColors.accentText)
                     }
                 }
@@ -94,6 +115,7 @@ struct TripDetailView: View {
         }
         .task { await vm.load(tripID: tripID, auth: auth, preloaded: preloaded) }
         .task { await vm.refreshItineraryHistoryFlag(tripID: tripID, auth: auth) }
+        .task { await vm.refreshApplyHistoryFlag(tripID: tripID, auth: auth) }
     }
 
     @ViewBuilder

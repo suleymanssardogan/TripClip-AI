@@ -53,7 +53,8 @@ enum Endpoint {
     // bir önizleme.
     case optimizeTrip(
         tripID: Int, placeIDs: [Int], durationDays: Int? = nil,
-        preferredStartTime: ClockTime = .defaultStart, preferredEndTime: ClockTime = .defaultEnd
+        preferredStartTime: ClockTime = .defaultStart, preferredEndTime: ClockTime = .defaultEnd,
+        startDate: PlanningDate? = nil
     )
     case itineraries(tripID: Int)
     case itineraryDetail(itineraryID: Int)
@@ -62,6 +63,17 @@ enum Endpoint {
     /// Builder'ı ilk kez kasıtlı olarak mutasyona uğratan istek. Gövde
     /// gerektirmez.
     case applyItinerary(itineraryID: Int)
+    /// Kayıtlı bir itinerary'i kalıcı olarak siler — TripStop/Place hiç
+    /// etkilenmez (bkz. docs/trip-optimizer.md "Delete Saved Itinerary").
+    /// Gövde gerektirmez; core-api'nin kendi endpoint'i de almıyor.
+    case deleteItinerary(itineraryID: Int)
+    /// Bu trip'in TÜM apply/undo geçmişi, en yeniden eskiye (bkz.
+    /// docs/ios-trip-optimizer.md "Apply History & Undo").
+    case applyHistory(tripID: Int)
+    /// Belirtilen apply-history kaydının önceki TripStop anlık görüntüsünü
+    /// geri yükler — yalnızca bu trip'in EN SON apply-history kaydıysa.
+    /// Kaydedilmiş itinerary'e ASLA yazmaz. Gövde gerektirmez.
+    case undoApplyHistory(tripID: Int, historyID: Int)
 
     // Analytics — shared-trip büyüme hunisi (bkz. docs/analytics/shared-trip-events.md)
     case trackAnalyticsEvent(event: String, tripID: Int, source: String)
@@ -92,20 +104,24 @@ extension Endpoint {
         case .tripDetail(let id):           return "/api/mobile/trips/\(id)"
         case .updateTripStopOrder(let id, _): return "/api/mobile/trips/\(id)/order"
         case .deleteTrip(let id):           return "/api/mobile/trips/\(id)"
-        case .optimizeTrip(let id, _, _, _, _): return "/api/mobile/trips/\(id)/optimize"
+        case .optimizeTrip(let id, _, _, _, _, _): return "/api/mobile/trips/\(id)/optimize"
         case .itineraries(let id):          return "/api/mobile/trips/\(id)/itineraries"
         case .itineraryDetail(let id):      return "/api/mobile/itineraries/\(id)"
         case .applyItinerary(let id):       return "/api/mobile/itineraries/\(id)/apply"
+        case .deleteItinerary(let id):      return "/api/mobile/itineraries/\(id)"
+        case .applyHistory(let tripID):     return "/api/mobile/trips/\(tripID)/itinerary-apply-history"
+        case .undoApplyHistory(let tripID, let historyID):
+            return "/api/mobile/trips/\(tripID)/itinerary-apply-history/\(historyID)/undo"
         case .trackAnalyticsEvent:          return "/api/mobile/analytics/events"
         }
     }
 
     var method: HTTPMethod {
         switch self {
-        case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl, .createTrip, .optimizeTrip, .applyItinerary, .trackAnalyticsEvent: return .post
+        case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl, .createTrip, .optimizeTrip, .applyItinerary, .undoApplyHistory, .trackAnalyticsEvent: return .post
         case .registerDeviceToken: return .put
         case .updateStopOrder, .updateTripStopOrder: return .patch
-        case .deletePlan, .deleteTrip: return .delete
+        case .deletePlan, .deleteTrip, .deleteItinerary: return .delete
         default: return .get
         }
     }
@@ -143,7 +159,7 @@ extension Endpoint {
         case .updateTripStopOrder(_, let order):
             return ["order": order]
 
-        case .optimizeTrip(_, let placeIDs, let durationDays, let preferredStartTime, let preferredEndTime):
+        case .optimizeTrip(_, let placeIDs, let durationDays, let preferredStartTime, let preferredEndTime, let startDate):
             // preferred_start_time/end_time artık HER ZAMAN gönderiliyor —
             // Optimizer Yapılandırma ekranının kendi zaman seçicileri her
             // zaman somut bir değere sahip (varsayılanları backend'in
@@ -151,15 +167,19 @@ extension Endpoint {
             // defaultEnd), "Otomatik" gibi bir üçüncü durumları yok — bu
             // yüzden duration_days'in aksine hiçbir zaman alan atlanmıyor
             // (bkz. docs/ios-trip-optimizer.md "Preferred Start/End Time
-            // Controls"). start_date/strategy kasıtlı olarak hâlâ
-            // gönderilmiyor — core-api'nin kendi varsayılanları
-            // (greedy_distance) kullanılır.
+            // Controls"). strategy kasıtlı olarak hâlâ gönderilmiyor —
+            // core-api'nin kendi varsayılanı (greedy_distance) kullanılır.
+            // start_date, duration_days'le AYNI "Otomatik" deseni izler —
+            // nil ise (varsayılan: "belirli bir tarih yok") alan hiç
+            // eklenmez, backend günleri yalnızca sıra numarasıyla döner
+            // (bkz. docs/ios-trip-optimizer.md "Trip Planning Date").
             var body: [String: Any] = [
                 "selected_place_ids":   placeIDs,
                 "preferred_start_time": preferredStartTime.apiValue,
                 "preferred_end_time":   preferredEndTime.apiValue,
             ]
             if let durationDays { body["duration_days"] = durationDays }
+            if let startDate { body["start_date"] = startDate.apiValue }
             return body
 
         case .trackAnalyticsEvent(let event, let tripID, let source):

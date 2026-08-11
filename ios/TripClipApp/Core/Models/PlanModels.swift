@@ -46,6 +46,25 @@ enum APIDate {
         return naiveUTC.date(from: withoutFraction)
     }
 
+    /// Yalnızca-tarih (saat bileşeni YOK) varyant — core-api'nin
+    /// `start_date`/`ItineraryDayResponse.date` gibi salt takvim tarihi
+    /// alanları için: `"YYYY-MM-DD"`, Python'ın `datetime.date.isoformat()`'ı
+    /// (bkz. `_date_for`, greedy_distance_strategy.py) — `created_at`'ın
+    /// `T`'li tam datetime biçiminden KASITLI olarak farklı, bu yüzden
+    /// yukarıdaki `parse(_:)` bunu ayrıştıramaz (üçü de bir `T` bekliyor).
+    private static let dateOnly: DateFormatter = {
+        let f = DateFormatter()
+        f.locale     = Locale(identifier: "en_US_POSIX")
+        f.timeZone   = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// Bkz. `dateOnly` — "2026-09-01" → `Date`. Geçersiz/eksik girdide `nil`.
+    static func parseDateOnly(_ raw: String) -> Date? {
+        dateOnly.date(from: raw)
+    }
+
     /// Uygulama tamamen Türkçe — tarih de cihaz diline değil uygulamanın diline
     /// uymalı, yoksa "29 July 2026" gibi karışık bir sonuç çıkıyor.
     static let displayLocale = Locale(identifier: "tr_TR")
@@ -54,6 +73,17 @@ enum APIDate {
     static func displayString(from date: Date) -> String {
         date.formatted(
             .dateTime.day().month(.wide).year().locale(displayLocale)
+        )
+    }
+
+    /// "12 Ağustos" — gün + ay, yıl YOK. `displayString`'in daha kısa
+    /// varyantı; dar alanlarda (ör. gün seçici çipleri, bkz.
+    /// `OptimizerMapDay.chipLabel`) yıl gereksiz/sığmıyor. Ay adı
+    /// `Locale`'den geliyor (Foundation'ın `.dateTime.month(.wide)`
+    /// `FormatStyle`'ı) — elle bir Türkçe ay adı tablosu tutulmuyor.
+    static func shortDisplayString(from date: Date) -> String {
+        date.formatted(
+            .dateTime.day().month(.wide).locale(displayLocale)
         )
     }
 }

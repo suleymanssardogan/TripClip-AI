@@ -312,4 +312,121 @@ final class OptimizerRouteMapDataTests: XCTestCase {
         XCTAssertEqual(missingCoordStop.id, sameStopAgain.id)
         XCTAssertEqual(missingCoordStop.id, "0-2-5")   // dayIndex-orderIndex-placeId
     }
+
+    // MARK: - Date-aware Map Day Selector milestone
+
+    /// `OptimizerRouteMapData.init` her `ItineraryDay.date`'i ilgili
+    /// `OptimizerMapDay.date`'e AYNEN taşır — burada hiçbir dönüşüm/
+    /// yeniden hesaplama yok.
+    func test_init_propagatesItineraryDayDate_intoOptimizerMapDay() {
+        let itinerary = OptimizerFixtures.itinerary(days: [
+            ItineraryDay(dayIndex: 0, date: "2026-08-12", stops: [stop(dayIndex: 0, orderIndex: 0)])
+        ])
+        let data = OptimizerRouteMapData(itinerary: itinerary)
+
+        XCTAssertEqual(data.days[0].date, "2026-08-12")
+    }
+
+    /// Persistent Optimizer Route Cache milestone: `Itinerary.id` her günün
+    /// `OptimizerMapDay.itineraryID`'sine aynen taşınmalı — rota önbellek
+    /// anahtarının itinerary izolasyonu (Req 4) buna dayanıyor, bkz.
+    /// `OptimizerRouteCalculator.cacheKey`/`legKey`.
+    func test_init_propagatesItineraryID_intoOptimizerMapDay() {
+        let itinerary = OptimizerFixtures.itinerary(
+            id: 42,
+            days: [ItineraryDay(dayIndex: 0, stops: [stop(dayIndex: 0, orderIndex: 0)])]
+        )
+        let data = OptimizerRouteMapData(itinerary: itinerary)
+
+        XCTAssertEqual(data.days[0].itineraryID, 42)
+    }
+
+    /// Req 1: tarih varsa çip etiketi "12 Ağustos" — yıl YOK, ham ISO
+    /// dizgisi ("2026-08-12") HİÇ gösterilmez.
+    func test_chipLabel_withDate_showsDayAndMonth_noYear_noRawISOString() {
+        let day = OptimizerMapDay(dayIndex: 0, date: "2026-08-12", stops: [
+            OptimizerMapStop(id: "1", dayIndex: 0, orderIndex: 0, name: "A", latitude: 41, longitude: 29)
+        ])
+
+        XCTAssertEqual(day.chipLabel, "12 Ağustos")
+        XCTAssertFalse(day.chipLabel.contains("2026"))
+        XCTAssertFalse(day.chipLabel.contains("-"))
+    }
+
+    /// Req 2: `date == nil` → eski sıra-numarası etiketine düş (geriye dönük
+    /// uyumluluk, tarihsiz/eski kayıtlı itinerary'ler).
+    func test_chipLabel_withoutDate_fallsBackToOrdinalLabel() {
+        let day = OptimizerMapDay(dayIndex: 0, date: nil, stops: [
+            OptimizerMapStop(id: "1", dayIndex: 0, orderIndex: 0, name: "A", latitude: 41, longitude: 29)
+        ])
+
+        XCTAssertEqual(day.chipLabel, "1. Gün")
+    }
+
+    /// Bozuk/ayrıştırılamayan bir `date` dizgisi de (Req 9 "malformed/
+    /// invalid date safely falls back") crash etmeden aynı geriye dönük
+    /// düşüşe gitmeli — `APIDate.parseDateOnly` zaten `nil` döner, burada
+    /// ekstra bir doğrulama YAPILMIYOR, yalnızca sonucu ele alıyoruz.
+    func test_chipLabel_withMalformedDateString_fallsBackSafely_doesNotCrash() {
+        let day = OptimizerMapDay(dayIndex: 2, date: "not-a-real-date", stops: [
+            OptimizerMapStop(id: "1", dayIndex: 2, orderIndex: 0, name: "A", latitude: 41, longitude: 29)
+        ])
+
+        XCTAssertEqual(day.chipLabel, "3. Gün")
+    }
+
+    /// Req: "multiple consecutive dates" — art arda günlerin her biri
+    /// kendi tarihini doğru gösterir, birbirine karışmaz. Aritmetik burada
+    /// YAPILMIYOR (backend zaten hesapladı) — yalnızca üç ayrı, zaten-doğru
+    /// dizgi doğru biçimlendiriliyor mu diye bakılıyor.
+    func test_chipLabel_multipleConsecutiveDates_eachDayFormatsIndependently() {
+        let itinerary = OptimizerFixtures.itinerary(days: [
+            ItineraryDay(dayIndex: 0, date: "2026-08-12", stops: [stop(placeId: 1, dayIndex: 0, orderIndex: 0)]),
+            ItineraryDay(dayIndex: 1, date: "2026-08-13", stops: [stop(placeId: 2, dayIndex: 1, orderIndex: 0)]),
+            ItineraryDay(dayIndex: 2, date: "2026-08-14", stops: [stop(placeId: 3, dayIndex: 2, orderIndex: 0)]),
+        ])
+        let data = OptimizerRouteMapData(itinerary: itinerary)
+
+        XCTAssertEqual(data.days.map(\.chipLabel), ["12 Ağustos", "13 Ağustos", "14 Ağustos"])
+    }
+
+    /// Saved itinerary (Itinerary History'den `.viewSaved`) ile taze
+    /// `.generate` sonucu AYNI mekanizmadan geçer — `OptimizerRouteMapData`
+    /// hangi moddan geldiğini bilmez/farklı davranmaz.
+    func test_chipLabel_worksIdenticallyForSavedItineraryShape() {
+        let saved = OptimizerFixtures.itinerary(id: 9, days: [
+            ItineraryDay(dayIndex: 0, date: "2026-09-01", stops: [stop(dayIndex: 0, orderIndex: 0)])
+        ])
+        let data = OptimizerRouteMapData(itinerary: saved)
+
+        XCTAssertEqual(data.days[0].chipLabel, "1 Eylül")
+    }
+
+    /// Req 3: gün seçim KİMLİĞİ hâlâ yalnızca `dayIndex` — `Identifiable`
+    /// uygunluğu (`id`) tarih eklendikten SONRA da `dayIndex`'e dayanıyor,
+    /// tarihe değil (aynı tarihe sahip iki farklı gün asla aynı `id`'yi
+    /// paylaşmaz, farklı tarihli iki gün de `dayIndex` aynıysa aynı `id`'yi
+    /// paylaşır — pratikte olmaz ama mekanizma yalnızca `dayIndex`'i okur).
+    func test_id_stillDerivesFromDayIndex_notDate() {
+        let day = OptimizerMapDay(dayIndex: 3, date: "2026-08-12", stops: [
+            OptimizerMapStop(id: "1", dayIndex: 3, orderIndex: 0, name: "A", latitude: 41, longitude: 29)
+        ])
+        XCTAssertEqual(day.id, 3)
+    }
+
+    // MARK: - chipAccessibilityLabel (Req 7)
+
+    func test_chipAccessibilityLabel_withDate_includesDayNumberAndDate() {
+        let day = OptimizerMapDay(dayIndex: 0, date: "2026-08-12", stops: [
+            OptimizerMapStop(id: "1", dayIndex: 0, orderIndex: 0, name: "A", latitude: 41, longitude: 29)
+        ])
+        XCTAssertEqual(day.chipAccessibilityLabel, "1. gün, 12 Ağustos")
+    }
+
+    func test_chipAccessibilityLabel_withoutDate_stillIdentifiesTheDayNumber() {
+        let day = OptimizerMapDay(dayIndex: 1, date: nil, stops: [
+            OptimizerMapStop(id: "1", dayIndex: 1, orderIndex: 0, name: "A", latitude: 41, longitude: 29)
+        ])
+        XCTAssertEqual(day.chipAccessibilityLabel, "2. gün")
+    }
 }

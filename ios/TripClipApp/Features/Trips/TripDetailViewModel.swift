@@ -57,6 +57,28 @@ final class TripDetailViewModel {
         }
     }
 
+    // MARK: - Apply History girişi
+    //
+    // `refreshItineraryHistoryFlag` ile AYNI desen/gerekçe — "Uygulama
+    // Geçmişi" toolbar butonu yalnızca gerçekten bir apply/undo geçmişi
+    // varsa gösterilir (bkz. docs/ios-trip-optimizer.md "Apply History &
+    // Undo"). Ayrı bir best-effort metod: `load()`/`refreshItineraryHistoryFlag`'i
+    // hiç etkilemez, trip'in kendi yüklenmesini yavaşlatmaz.
+
+    private(set) var hasApplyHistory = false
+
+    func refreshApplyHistoryFlag(tripID: Int, auth: AuthEnvironment) async {
+        guard let token = auth.user?.token else { return }
+        do {
+            let response: ApplyHistoryListResponse = try await auth.apiClient.send(
+                .applyHistory(tripID: tripID), token: token
+            )
+            hasApplyHistory = !response.entries.isEmpty
+        } catch {
+            // best-effort — gösterge sessizce false kalır
+        }
+    }
+
     // MARK: - Durak Düzenleme
     //
     // Trip Builder şu an oluşturma anında tüm durakları tek güne (days[0])

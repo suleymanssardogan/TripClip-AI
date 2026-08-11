@@ -14,6 +14,12 @@ struct ItineraryHistoryView: View {
 
     @Environment(AuthEnvironment.self) private var auth
     @State private var vm = ItineraryHistoryViewModel()
+    /// Silme onayı bekleyen satır — `nil` iken hiçbir dialog gösterilmiyor.
+    /// Doğrudan `Bool` yerine `ItinerarySummary?` tutuluyor: onay mesajının
+    /// HANGİ itinerary'nin silineceğini açıkça belirtmesi gerekiyor (Req
+    /// "The confirmation should clearly identify the itinerary being
+    /// deleted") — `summary.formattedCreatedAt` bunun için yeterli/mevcut.
+    @State private var itineraryPendingDeletion: ItinerarySummary?
 
     var body: some View {
         ZStack {
@@ -33,6 +39,42 @@ struct ItineraryHistoryView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await vm.load(tripID: tripID, auth: auth) }
         .refreshable { await vm.load(tripID: tripID, auth: auth) }
+        // TripDetailView'ın kendi "Bu geziyi silmek istiyor musun?" silme
+        // onayıyla AYNI desen (confirmationDialog + "Sil"/"Vazgeç", bkz. o
+        // dosya) — ikinci bir onay biçimi İCAT EDİLMEDİ.
+        .confirmationDialog(
+            "Bu optimizasyon geçmişini silmek istediğine emin misin?",
+            isPresented: Binding(
+                get: { itineraryPendingDeletion != nil },
+                set: { if !$0 { itineraryPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Sil", role: .destructive) {
+                if let summary = itineraryPendingDeletion {
+                    Task { await vm.deleteItinerary(id: summary.id, auth: auth) }
+                }
+                itineraryPendingDeletion = nil
+            }
+            Button("Vazgeç", role: .cancel) { itineraryPendingDeletion = nil }
+        } message: {
+            if let summary = itineraryPendingDeletion, !summary.formattedCreatedAt.isEmpty {
+                Text("\(summary.formattedCreatedAt) tarihli bu itinerary kalıcı olarak silinecek. Bu işlem geri alınamaz.")
+            } else {
+                Text("Bu işlem geri alınamaz.")
+            }
+        }
+        .alert(
+            "Silinemedi",
+            isPresented: Binding(
+                get: { vm.deleteError != nil },
+                set: { if !$0 { vm.deleteError = nil } }
+            )
+        ) {
+            Button("Tamam", role: .cancel) { vm.deleteError = nil }
+        } message: {
+            Text(vm.deleteError ?? "")
+        }
     }
 
     private var list: some View {
@@ -41,8 +83,25 @@ struct ItineraryHistoryView: View {
                 ForEach(vm.itineraries) { summary in
                     NavigationLink(destination: TripOptimizerView(mode: .viewSaved(itineraryID: summary.id), onApplied: onApplied)) {
                         ItineraryHistoryRowView(summary: summary)
+                            // Silme sürerken satırı görsel olarak meşgul göster —
+                            // yeni bir yükleme göstergesi İCAT EDİLMEDİ, mevcut
+                            // "isApplying sırasında opacity düşür" deseniyle
+                            // AYNI dil (bkz. TripOptimizerView.applyButton).
+                            .opacity(vm.deletingID == summary.id ? 0.5 : 1)
                     }
                     .buttonStyle(PressableButtonStyle())
+                    .disabled(vm.deletingID == summary.id)
+                    // HistoryView.swift'teki (Core Data geçmişi) AYNI
+                    // ScrollView+LazyVStack içi `.swipeActions` deseni —
+                    // `List`e geçmeye gerek yok, bu proje zaten bu tam
+                    // kombinasyonda çalıştığını kanıtlamış durumda.
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            itineraryPendingDeletion = summary
+                        } label: {
+                            Label("Sil", systemImage: "trash")
+                        }
+                    }
                 }
             }
             .padding(.horizontal, 16)

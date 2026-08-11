@@ -32,7 +32,12 @@ final class ClockTimeTests: XCTestCase {
         XCTAssertEqual(ClockTime.defaultEnd.apiValue, "18:00")
     }
 
-    // MARK: - Comparable (istemci-taraf zaman aralığı doğrulamasının temeli)
+    // MARK: - Comparable (genel amaçlı sıralama — Overnight Time Ranges
+    // milestone'undan itibaren istemci-taraf zaman aralığı doğrulaması
+    // (`TripOptimizerConfigViewModel.isTimeRangeValid`) ARTIK bunu
+    // kullanmıyor, `!=` kullanıyor — bkz. docs/ios-trip-optimizer.md
+    // "Overnight Time Ranges"; bu tip yine de genel bir sıralama
+    // yeteneği olarak faydalı, bu yüzden korunuyor.
 
     func test_comparable_earlierHourIsLess() {
         XCTAssertLessThan(ClockTime(hour: 9, minute: 0), ClockTime(hour: 10, minute: 0))

@@ -72,4 +72,37 @@ enum OptimizerFixtures {
             daysCount: daysCount, stopsCount: stopsCount
         )
     }
+
+    static func applyHistoryEntry(
+        id: Int,
+        itineraryId: Int? = 4,
+        itineraryCreatedAt: String? = "2026-08-08T09:00:00",
+        isUndo: Bool = false,
+        appliedAt: String? = "2026-08-08T10:00:00",
+        actorUserId: Int = 1,
+        isUndoable: Bool = false
+    ) -> ApplyHistoryEntry {
+        ApplyHistoryEntry(
+            id: id, itineraryId: itineraryId, itineraryCreatedAt: itineraryCreatedAt,
+            isUndo: isUndo, appliedAt: appliedAt, actorUserId: actorUserId, isUndoable: isUndoable
+        )
+    }
+
+    static func undoResult(
+        tripId: Int = 1,
+        historyId: Int = 3,
+        itineraryId: Int? = 4,
+        stopsCount: Int = 2
+    ) -> UndoApplyResult {
+        UndoApplyResult(
+            tripId: tripId, historyId: historyId, itineraryId: itineraryId,
+            stops: [
+                AppliedTripStop(
+                    placeId: 12, name: "Ayasofya", lat: 41.0086, lng: 28.9802,
+                    city: "İstanbul", category: "tarihi", dayIndex: 0, orderIndex: 0
+                ),
+            ],
+            stopsCount: stopsCount, appliedAt: "2026-08-08T10:10:00"
+        )
+    }
 }

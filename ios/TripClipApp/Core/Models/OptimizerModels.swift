@@ -25,9 +25,38 @@ struct Itinerary: Decodable, Identifiable, Hashable {
 
 struct ItineraryDay: Decodable, Identifiable, Hashable {
     let dayIndex: Int
+    /// İsteğin `start_date`'i verildiyse bu günün takvim tarihi
+    /// (`"YYYY-MM-DD"`) — verilmediyse `nil` (bkz. Trip Planning Date
+    /// milestone, docs/ios-trip-optimizer.md). Backend zaten hesaplıyor
+    /// (`_date_for`, greedy_distance_strategy.py) — iOS burada hiçbir
+    /// takvim aritmetiği YAPMIYOR, yalnızca gösteriyor.
+    let date:     String?
     let stops:    [ItineraryStop]
 
+    // Elle yazılmış, `date` için varsayılan değerli bir memberwise init —
+    // property'nin kendi bildirimine `= nil` eklemek yerine burada (bkz.
+    // Swift'in bilinen tuzağı: `let x: T = value` biçimindeki bir property,
+    // sentezlenen `Decodable.init(from:)`'dan SESSİZCE HARİÇ TUTULUR, yani
+    // `date` her zaman `nil` decode edilirdi — gerçek sunucu yanıtları dahil.
+    // Bu elle yazılmış init, sentezlenen Decodable'a DOKUNMUYOR (yalnızca
+    // kendi `init(from:)`'unuzu yazarsanız o etkilenir), yalnızca eski test
+    // fixture'larının `date` belirtmeden derlenmeye devam etmesini sağlıyor.
+    init(dayIndex: Int, date: String? = nil, stops: [ItineraryStop]) {
+        self.dayIndex = dayIndex
+        self.date = date
+        self.stops = stops
+    }
+
     var id: Int { dayIndex }
+
+    /// "12 Ağustos 2026" — `date` yoksa `nil` (çağıran taraf `"1. Gün"` gibi
+    /// bir sıra-numarası etiketine düşer, bkz. `ItineraryDaySection`).
+    /// `Itinerary.formattedCreatedAt` ile AYNI desen, farklı ayrıştırıcı
+    /// (`parseDateOnly` — bu alan `T`'li tam bir datetime DEĞİL, salt tarih).
+    var formattedDate: String? {
+        guard let date, let parsed = APIDate.parseDateOnly(date) else { return nil }
+        return APIDate.displayString(from: parsed)
+    }
 }
 
 struct ItineraryStop: Decodable, Identifiable, Hashable {
@@ -98,6 +127,42 @@ struct AppliedTripStop: Decodable, Identifiable, Hashable {
 struct ApplyItineraryResult: Decodable {
     let tripId:      Int
     let itineraryId: Int
+    let stops:       [AppliedTripStop]
+    let stopsCount:  Int
+    let appliedAt:   String?
+}
+
+// MARK: - Apply History & Undo — bkz. docs/ios-trip-optimizer.md "Apply
+// History & Undo". Alan adları core-api'nin ApplyHistoryEntryResponse/
+// UndoApplyResponse'uyla birebir eşleşir.
+
+struct ApplyHistoryEntry: Decodable, Identifiable, Hashable {
+    let id:                  Int
+    /// `nil` — bu olayın sonucu itinerary-kökenli değil (ör. trip'in
+    /// orijinal/manuel durak listesine dönen bir undo), YA DA kaynak
+    /// itinerary sonradan silinmiş (`ondelete=SET NULL`). Bu ikisi
+    /// `isUndo` ile birlikte ayırt edilir — bkz. `ItineraryApplyHistoryRowView`.
+    let itineraryId:         Int?
+    let itineraryCreatedAt:  String?
+    let isUndo:              Bool
+    let appliedAt:           String?
+    let actorUserId:         Int
+    let isUndoable:          Bool
+
+    var formattedAppliedAt: String {
+        guard let raw = appliedAt, let date = APIDate.parse(raw) else { return "" }
+        return APIDate.displayString(from: date)
+    }
+}
+
+struct ApplyHistoryListResponse: Decodable {
+    let entries: [ApplyHistoryEntry]
+}
+
+struct UndoApplyResult: Decodable {
+    let tripId:      Int
+    let historyId:   Int
+    let itineraryId: Int?
     let stops:       [AppliedTripStop]
     let stopsCount:  Int
     let appliedAt:   String?

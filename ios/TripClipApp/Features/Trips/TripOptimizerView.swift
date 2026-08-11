@@ -22,7 +22,8 @@ struct TripOptimizerView: View {
         /// — bkz. TripOptimizerConfigViewModel.
         case generate(
             tripID: Int, placeIDs: [Int], durationDays: Int? = nil,
-            preferredStartTime: ClockTime = .defaultStart, preferredEndTime: ClockTime = .defaultEnd
+            preferredStartTime: ClockTime = .defaultStart, preferredEndTime: ClockTime = .defaultEnd,
+            startDate: PlanningDate? = nil
         )
         case viewSaved(itineraryID: Int)
     }
@@ -33,6 +34,37 @@ struct TripOptimizerView: View {
     var onApplied: (() -> Void)? = nil
 
     @Environment(AuthEnvironment.self) private var auth
+    /// Ekran ömrünü aşan, uygulama oturumu boyunca yaşayan paylaşılan rota
+    /// önbelleği — `TripClipApp.swift`'te bir kez oluşturulup enjekte
+    /// edilir (bkz. docs/ios-trip-optimizer.md "Persistent Optimizer Route
+    /// Cache"). `OptimizerRouteMapSection`'a `init` parametresi olarak
+    /// geçiriliyor (bkz. o dosyadaki doc yorumu — `@Environment`'ın orada
+    /// doğrudan okunamama nedeni).
+    @Environment(OptimizerRouteCache.self) private var routeCache
+    /// Ekran ömrünü aşan, uygulama oturumu boyunca yaşayan paylaşılan
+    /// gün/durak seçimi önbelleği — `routeCache` ile AYNI DI deseni. Bu
+    /// View, önbelleğin KENDİ doğrulama/geri-getirme mantığını hiç bilmez
+    /// — yalnızca `load()` içinde `resolveSelection(for:)`'u çağırıp
+    /// sonucu kendi `selection` state'ine atar, ve `selection` her
+    /// değiştiğinde (`onChange`) güncel değeri geri yazar. Bkz.
+    /// docs/ios-trip-optimizer.md "Persistent Optimizer Map Selection".
+    @Environment(OptimizerSelectionStore.self) private var selectionStore
+    /// Ekran ömrünü aşan, uygulama oturumu boyunca yaşayan, trip-bazlı
+    /// paylaşılan optimizer yapılandırma önbelleği. `itinerary.tripId` için
+    /// kaydedilmiş SON taşıma modunu okuyup `OptimizerRouteMapSection`'ın
+    /// başlangıç değerini tohumlamak için kullanılır (bkz. o dosyadaki
+    /// `initialTransportMode` parametresi) — Persistent Optimizer
+    /// Transport Mode Sync milestone'undan itibaren TERSİ yönde de akış
+    /// var: harita kendi mod değişikliğini `onTransportModeChanged`
+    /// callback'iyle raporlar, bu View de `configStore.updateTransportMode`'u
+    /// çağırarak GERİ yazar (bkz. `resultContent`). Yapılandırma ekranının
+    /// KENDİ state'inin (seçili mekanlar/süre/saat/tarih) geri kalanını
+    /// hâlâ hiç bilmez/yazmaz — yalnızca `transportMode`, ve yalnızca
+    /// `OptimizerConfigurationStore`'un kendi merkezi
+    /// `updateTransportMode` metodu aracılığıyla. Bkz.
+    /// docs/ios-trip-optimizer.md "Persistent Optimizer Configuration" ve
+    /// "Persistent Optimizer Transport Mode Sync".
+    @Environment(OptimizerConfigurationStore.self) private var configStore
     @Environment(\.dismiss) private var dismiss
     @State private var vm = TripOptimizerViewModel()
     @State private var showSavedConfirmation = false
@@ -46,6 +78,14 @@ struct TripOptimizerView: View {
     /// state, o metotların hiçbirinden çağrılmaz (Req 5/6: seçim, ne yeni
     /// bir optimizasyon isteği ne apply ne de gereksiz bir rota
     /// hesaplaması başlatır).
+    ///
+    /// Persistent Optimizer Map Selection milestone'unda: `load()`
+    /// tamamlanır tamamlanmaz `selectionStore.resolveSelection(for:)`
+    /// sonucuyla başlatılır (bkz. `load()`), ardından HER değişikliğinde
+    /// (`onChange`, aşağıda) o değer önbelleğe geri yazılır — yine de TEK
+    /// gerçek kaynak bu — `OptimizerSelectionStore` yalnızca onun bir
+    /// itinerary'e göre anahtarlanmış GEÇMİŞİNİ tutuyor, ikinci bir
+    /// state modeli İCAT EDİLMEDİ.
     @State private var selection = OptimizerSelection()
 
     private static let mapAnchor = "optimizer-route-map"
@@ -82,6 +122,21 @@ struct TripOptimizerView: View {
             }
         }
         .task { await load() }
+        // Req 8 "user interaction must update the store": `selection`in
+        // KAYNAĞI ne olursa olsun (gün çipi, harita durak dokunuşu,
+        // itinerary satırı, ya da `load()`'ın kendi geri-yükleme ataması)
+        // her değiştiğinde güncel değeri önbelleğe yazar — tek, merkezi
+        // senkronizasyon noktası. `OptimizerRouteMapSection`/
+        // `ItineraryDaySection`'ın HİÇBİRİ bu önbelleğin varlığını bilmez
+        // (Req 2), yalnızca kendi payına düşen `selection` mutasyonlarını
+        // yapmaya devam ederler. İlk (varsayılan) değer için TETİKLENMEZ
+        // (`onChange`in kendi `initial: false` varsayılanı) — yalnızca
+        // GERÇEK bir değişiklikte.
+        .onChange(of: selection) { _, newSelection in
+            if let itinerary = vm.itinerary {
+                selectionStore.store(newSelection, for: itinerary.id)
+            }
+        }
         .alert("Kaydedildi", isPresented: $showSavedConfirmation) {
             Button("Tamam") { dismiss() }
         } message: {
@@ -128,13 +183,25 @@ struct TripOptimizerView: View {
 
     private func load() async {
         switch mode {
-        case .generate(let tripID, let placeIDs, let durationDays, let preferredStartTime, let preferredEndTime):
+        case .generate(let tripID, let placeIDs, let durationDays, let preferredStartTime, let preferredEndTime, let startDate):
             await vm.optimize(
                 tripID: tripID, placeIDs: placeIDs, durationDays: durationDays,
-                preferredStartTime: preferredStartTime, preferredEndTime: preferredEndTime, auth: auth
+                preferredStartTime: preferredStartTime, preferredEndTime: preferredEndTime,
+                startDate: startDate, auth: auth
             )
         case .viewSaved(let itineraryID):
             await vm.loadItinerary(itineraryID: itineraryID, auth: auth)
+        }
+        // Itinerary artık mevcutsa (Req 7 "selection restoration should
+        // happen only after the Itinerary is available") — `vm.itinerary`
+        // atandıktan HEMEN sonra, aynı senkron adımda, `resultContent`
+        // hiç `nil`/`nil` ("Tümü") anlık görüntüsüyle çizilmeden ÖNCE
+        // doğrulanmış seçimi kur. `await` YOK bu iki satır arasında, bu
+        // yüzden SwiftUI'nin bir sonraki render'ı ikisini BİRLİKTE
+        // yansıtır — geçici bir "Tümü" yanıp sönmesi (ve onun tetikleyeceği
+        // gereksiz "tüm günleri yükle" isteği) engellenmiş olur.
+        if let itinerary = vm.itinerary {
+            selection = selectionStore.resolveSelection(for: itinerary)
         }
     }
 
@@ -193,6 +260,8 @@ struct TripOptimizerView: View {
                 OptimizerRouteMapSection(
                     itinerary: itinerary,
                     selection: $selection,
+                    routeCache: routeCache,
+                    initialTransportMode: configStore.configuration(for: itinerary.tripId)?.transportMode ?? .automobile,
                     onStopSelectedFromMap: { stop in
                         // Req 2 "Map → Itinerary": itinerary listesini,
                         // haritada dokunulan durağın satırına kaydır —
@@ -201,6 +270,19 @@ struct TripOptimizerView: View {
                         withAnimation {
                             proxy.scrollTo(ItineraryDaySection.rowID(for: stop.id), anchor: .center)
                         }
+                    },
+                    onTransportModeChanged: { mode in
+                        // Persistent Optimizer Transport Mode Sync: harita
+                        // artık kendi mod değişikliğini buraya raporluyor —
+                        // birleştirme/varsayılan mantığı (bu trip için
+                        // yapılandırma ekranı hiç ziyaret edilmemiş olabilir,
+                        // ör. Itinerary History'den doğrudan `.viewSaved`)
+                        // TEK bir yerde, `OptimizerConfigurationStore`'un
+                        // kendisinde yaşıyor — bkz. `updateTransportMode`.
+                        configStore.updateTransportMode(
+                            mode, for: itinerary.tripId,
+                            fallbackSelectedPlaceIDs: Set(itinerary.days.flatMap(\.stops).compactMap(\.placeId))
+                        )
                     }
                 )
                 .id(Self.mapAnchor)

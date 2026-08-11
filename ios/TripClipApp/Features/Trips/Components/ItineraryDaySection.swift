@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Bir günün başlığı + sıralı, saatli durakları:
-///   1. Gün
+///   1. Gün                            (start_date verilmediyse)
+///   12 Ağustos 2026                   (start_date verildiyse — bkz. `ItineraryDay.formattedDate`)
 ///   09:00  Colosseum          60 dk ziyaret
 ///   11:00  Roman Forum        45 dk ziyaret
 ///
@@ -20,7 +21,12 @@ struct ItineraryDaySection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("\(day.dayIndex + 1). Gün")
+            // Req: "günler yalnızca sıra numarasıyla DEĞİL, gerçek takvim
+            // günleriyle gösterilebilsin" — start_date verilmişse
+            // `formattedDate` "12 Ağustos 2026" döner; verilmemişse (bu
+            // milestone'dan önceki her itinerary dahil) `nil` döner ve
+            // eski "N. Gün" etiketine düşülür (Req 4: geriye dönük uyumlu).
+            Text(day.formattedDate ?? "\(day.dayIndex + 1). Gün")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(AppColors.textSecondary)
                 .textCase(.uppercase)

@@ -23,16 +23,22 @@ final class TripOptimizerViewModel {
     /// `ClockTime.defaultStart`/`defaultEnd`) — çağıran taraf bunları
     /// belirtmezse davranış, bu milestone'dan önceki (backend'in kendi
     /// varsayılanlarına bırakılan) davranışla özdeş kalır.
+    /// `startDate` `nil` ise (varsayılan — "Otomatik", `durationDays` ile
+    /// AYNI desen) istek `start_date` alanını hiç göndermez; günler yalnızca
+    /// sıra numarasıyla döner, bu milestone'dan önceki davranışla özdeş
+    /// (bkz. docs/ios-trip-optimizer.md "Trip Planning Date").
     func optimize(
         tripID: Int, placeIDs: [Int], durationDays: Int? = nil,
         preferredStartTime: ClockTime = .defaultStart, preferredEndTime: ClockTime = .defaultEnd,
+        startDate: PlanningDate? = nil,
         auth: AuthEnvironment
     ) async {
         await run(auth: auth) { token in
             try await auth.apiClient.send(
                 .optimizeTrip(
                     tripID: tripID, placeIDs: placeIDs, durationDays: durationDays,
-                    preferredStartTime: preferredStartTime, preferredEndTime: preferredEndTime
+                    preferredStartTime: preferredStartTime, preferredEndTime: preferredEndTime,
+                    startDate: startDate
                 ),
                 token: token
             )
