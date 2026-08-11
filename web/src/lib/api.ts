@@ -533,6 +533,41 @@ export async function undoApply(tripId: number, historyId: number) {
   });
 }
 
+// ─── Trip Assistant (Milestone 26) ──────────────────────────────────────────
+//
+// core-api'nin AssistantRequestDTO/AssistantResponseDTO'suyla birebir eşleşir
+// (bkz. docs/trip-assistant.md "API contract") — burada hiçbir AI/context
+// mantığı YOK, yalnızca Web BFF'i (zaten var olan) proxy'liyoruz. Salt-okunur:
+// hiçbir trip/itinerary state'ini DEĞİŞTİRMEZ.
+
+export interface AssistantMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface AssistantReference {
+  type: "stop";
+  day_index: number;
+  place_id: number;
+}
+
+export interface AssistantRequest {
+  message: string;
+  history?: AssistantMessage[];
+}
+
+export interface AssistantResponse {
+  answer: string;
+  references: AssistantReference[];
+}
+
+export async function askTripAssistant(tripId: number, body: AssistantRequest) {
+  return request<AssistantResponse>(`/trips/${tripId}/assistant`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 // ─── Tipler ────────────────────────────────────────────────────────────────
 
 export interface Plan {
