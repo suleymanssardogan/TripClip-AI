@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
-import { LayoutDashboard, Compass, LogOut, Menu, X } from "lucide-react";
+import { LayoutDashboard, Compass, LogOut, Menu, X, Map } from "lucide-react";
 import ThemeToggle from "./ThemeToggle";
 import { logout } from "@/lib/api";
 
@@ -27,6 +27,7 @@ export default function Navbar() {
     { href: "/explore",   label: "Keşfet",    icon: Compass },
     ...(authed ? [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/trips",     label: "Geziler",   icon: Map },
     ] : []),
   ];
 

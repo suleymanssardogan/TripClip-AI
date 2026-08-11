@@ -103,6 +103,7 @@ function extractErrorMessage(body: unknown, status: number): string {
     401: "Oturum sona erdi. Lütfen tekrar giriş yapın.",
     403: "Bu işlem için yetkiniz yok.",
     404: "Kaynak bulunamadı.",
+    409: "Bu işlem artık geçerli değil — sayfa güncel olmayabilir.",
     413: "Dosya çok büyük.",
     422: "Gönderilen veriler hatalı.",
     429: "Çok fazla istek gönderildi. Lütfen bekleyin.",
@@ -111,6 +112,44 @@ function extractErrorMessage(body: unknown, status: number): string {
     504: "Sunucu zaman aşımına uğradı.",
   };
   return HTTP_MESSAGES[status] ?? `Bir hata oluştu (HTTP ${status}).`;
+}
+
+/**
+ * Yanıt gövdesinden makine-okunabilir hata kodunu (core-api'nin kendi
+ * `code` alanı, ör. "STALE_UNDO"/"ITINERARY_NOT_FOUND") çıkarır — `Error.message`
+ * yalnızca İNSAN-okunabilir metni taşıdığından, bir çağıranın belirli bir
+ * hatayı (ör. STALE_UNDO'yu "sayfayı yenile" davranışıyla) TÜRKÇE METNİ
+ * eşleştirerek değil, bu koddan ayırt edebilmesi için (bkz. ApiError altında).
+ */
+function extractErrorCode(body: unknown): string | undefined {
+  if (body && typeof body === "object") {
+    const obj = body as Record<string, unknown>;
+    if (typeof obj.code === "string") return obj.code;
+    if (obj.error && typeof obj.error === "object") {
+      const err = obj.error as Record<string, unknown>;
+      if (typeof err.code === "string") return err.code;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * `Error`'ın, sunucunun makine-okunabilir `code`'unu VE HTTP durumunu da
+ * taşıyan genişletilmiş biçimi — yalnızca belirli bir hata koduna göre dallanma
+ * GEREKEN çağıranlar (bkz. Apply History → `STALE_UNDO` işleme) bunu
+ * `instanceof ApiError` ile kontrol eder; geri kalan her yer zaten olduğu
+ * gibi `error.message`i kullanmaya devam eder.
+ */
+export class ApiError extends Error {
+  readonly code?: string;
+  readonly status: number;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
 }
 
 async function request<T>(path: string, options: RequestInit = {}, _retried = false): Promise<T> {
@@ -142,7 +181,7 @@ async function request<T>(path: string, options: RequestInit = {}, _retried = fa
     }
 
     const body = await res.json().catch(() => null);
-    throw new Error(extractErrorMessage(body, res.status));
+    throw new ApiError(extractErrorMessage(body, res.status), res.status, extractErrorCode(body));
   }
 
   return res.json();
@@ -301,6 +340,197 @@ export interface SharePreview {
 
 export interface AcceptShareResult {
   trip_id: number;
+}
+
+// ─── Trip Builder (Milestone 21 — Web AI Trip Optimizer) ───────────────────
+//
+// Bilerek MİNİMAL: yalnızca okuma (list/detail) — trip OLUŞTURMA/durak
+// düzenleme/silme burada YOK, iOS'a özel kalmaya devam ediyor (bkz.
+// services/web-bff/app/routes/trips.py'nin kendi doc yorumu,
+// docs/ios-trip-optimizer.md "Web AI Trip Optimizer"). Alan adları
+// core-api'nin TripDetailResponse/TripStopDTO'suyla birebir aynı (web-bff
+// burada hiçbir dönüşüm yapmıyor, ham JSON'u olduğu gibi iletiyor).
+
+export interface TripStop {
+  place_id: number;
+  name: string;
+  lat: number;
+  lng: number;
+  city: string | null;
+  category: string | null;
+  day_index: number;
+  order_index: number;
+}
+
+export interface TripSummary {
+  id: number;
+  title: string;
+  total_distance_km: number | null;
+  created_at: string | null;
+  stops_count: number;
+  role: string;
+}
+
+export interface TripDetail {
+  id: number;
+  title: string;
+  total_distance_km: number | null;
+  created_at: string | null;
+  days: TripStop[][];
+  stops_count: number;
+  owner_id: number;
+  /** 'owner' | 'editor' | 'viewer' — yalnızca UI ipucu, sunucu her isteği ayrıca doğrular. */
+  your_role: string;
+  applied_itinerary_id: number | null;
+  itinerary_applied_at: string | null;
+}
+
+export async function getTrips() {
+  return request<{ trips: TripSummary[] }>("/trips");
+}
+
+export async function getTrip(id: number) {
+  return request<TripDetail>(`/trips/${id}`);
+}
+
+/** Trip'in kendi TÜM duraklarının (day'lerden bağımsız, tekilleştirilmiş) düz listesi. */
+export function flattenTripStops(trip: TripDetail): TripStop[] {
+  return trip.days.flat();
+}
+
+// ─── AI Trip Optimizer (Milestone 21) ───────────────────────────────────────
+//
+// core-api'nin OptimizeTripRequest/OptimizeTripResponse'uyla birebir eşleşir
+// (bkz. docs/trip-optimizer.md "API") — burada hiçbir optimizasyon mantığı
+// YOK, yalnızca Web BFF'i (zaten var olan) proxy'liyoruz.
+
+export type TransportMode = "automobile" | "walking" | "transit";
+
+export interface OptimizeTripRequest {
+  selected_place_ids: number[];
+  start_date?: string | null;
+  duration_days?: number | null;
+  preferred_start_time?: string;
+  preferred_end_time?: string;
+  strategy?: string;
+}
+
+export interface ItineraryStop {
+  place_id: number | null;
+  name: string;
+  lat: number | null;
+  lng: number | null;
+  day_index: number;
+  order_index: number;
+  arrival_time: string | null;
+  departure_time: string | null;
+  visit_duration_minutes: number;
+  travel_time_to_next_minutes: number | null;
+  travel_distance_to_next_km: number | null;
+}
+
+export interface ItineraryDay {
+  day_index: number;
+  date: string | null;
+  stops: ItineraryStop[];
+}
+
+export interface Itinerary {
+  id: number;
+  trip_id: number;
+  strategy_name: string;
+  optimization_score: number;
+  total_distance_km: number;
+  total_travel_time_minutes: number;
+  warnings: string[];
+  created_at: string | null;
+  days: ItineraryDay[];
+}
+
+export interface ItinerarySummary {
+  id: number;
+  trip_id: number;
+  strategy_name: string;
+  optimization_score: number;
+  total_distance_km: number;
+  total_travel_time_minutes: number;
+  warnings: string[];
+  created_at: string | null;
+  days_count: number;
+  stops_count: number;
+}
+
+export interface AppliedTripStop {
+  place_id: number;
+  name: string;
+  lat: number;
+  lng: number;
+  city: string | null;
+  category: string | null;
+  day_index: number;
+  order_index: number;
+}
+
+export interface ApplyResult {
+  trip_id: number;
+  itinerary_id: number;
+  stops: AppliedTripStop[];
+  stops_count: number;
+  applied_at: string;
+}
+
+export async function optimizeTrip(tripId: number, body: OptimizeTripRequest) {
+  return request<Itinerary>(`/trips/${tripId}/optimize`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getItineraries(tripId: number) {
+  return request<{ itineraries: ItinerarySummary[] }>(`/trips/${tripId}/itineraries`);
+}
+
+export async function getItinerary(id: number) {
+  return request<Itinerary>(`/itineraries/${id}`);
+}
+
+export async function applyItinerary(id: number) {
+  return request<ApplyResult>(`/itineraries/${id}/apply`, { method: "POST" });
+}
+
+export async function deleteItinerary(id: number) {
+  return request<{ success: boolean }>(`/itineraries/${id}`, { method: "DELETE" });
+}
+
+// ─── Apply History & Undo (Milestone 21) ────────────────────────────────────
+
+export interface ApplyHistoryEntry {
+  id: number;
+  itinerary_id: number | null;
+  itinerary_created_at: string | null;
+  is_undo: boolean;
+  applied_at: string;
+  actor_user_id: number;
+  is_undoable: boolean;
+}
+
+export interface UndoResult {
+  trip_id: number;
+  history_id: number;
+  itinerary_id: number | null;
+  stops: AppliedTripStop[];
+  stops_count: number;
+  applied_at: string;
+}
+
+export async function getApplyHistory(tripId: number) {
+  return request<{ entries: ApplyHistoryEntry[] }>(`/trips/${tripId}/itinerary-apply-history`);
+}
+
+export async function undoApply(tripId: number, historyId: number) {
+  return request<UndoResult>(`/trips/${tripId}/itinerary-apply-history/${historyId}/undo`, {
+    method: "POST",
+  });
 }
 
 // ─── Tipler ────────────────────────────────────────────────────────────────
