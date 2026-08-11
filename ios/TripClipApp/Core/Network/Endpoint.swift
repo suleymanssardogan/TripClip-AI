@@ -74,6 +74,11 @@ enum Endpoint {
     /// geri yükler — yalnızca bu trip'in EN SON apply-history kaydıysa.
     /// Kaydedilmiş itinerary'e ASLA yazmaz. Gövde gerektirmez.
     case undoApplyHistory(tripID: Int, historyID: Int)
+    /// Trip'in gerçek durak/itinerary verisine grounded, salt-okunur bir
+    /// soru-cevap (bkz. docs/trip-assistant.md). `history` sunucunun kendi
+    /// MAX_HISTORY_TURNS sınırına ek olarak, istemci tarafında da
+    /// ViewModel'de zaten kırpılmış olarak gelir.
+    case assistant(tripID: Int, message: String, history: [AssistantMessage])
 
     // Analytics — shared-trip büyüme hunisi (bkz. docs/analytics/shared-trip-events.md)
     case trackAnalyticsEvent(event: String, tripID: Int, source: String)
@@ -112,13 +117,14 @@ extension Endpoint {
         case .applyHistory(let tripID):     return "/api/mobile/trips/\(tripID)/itinerary-apply-history"
         case .undoApplyHistory(let tripID, let historyID):
             return "/api/mobile/trips/\(tripID)/itinerary-apply-history/\(historyID)/undo"
+        case .assistant(let tripID, _, _): return "/api/mobile/trips/\(tripID)/assistant"
         case .trackAnalyticsEvent:          return "/api/mobile/analytics/events"
         }
     }
 
     var method: HTTPMethod {
         switch self {
-        case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl, .createTrip, .optimizeTrip, .applyItinerary, .undoApplyHistory, .trackAnalyticsEvent: return .post
+        case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl, .createTrip, .optimizeTrip, .applyItinerary, .undoApplyHistory, .assistant, .trackAnalyticsEvent: return .post
         case .registerDeviceToken: return .put
         case .updateStopOrder, .updateTripStopOrder: return .patch
         case .deletePlan, .deleteTrip, .deleteItinerary: return .delete
@@ -184,6 +190,12 @@ extension Endpoint {
 
         case .trackAnalyticsEvent(let event, let tripID, let source):
             return ["event": event, "trip_id": tripID, "source": source]
+
+        case .assistant(_, let message, let history):
+            return [
+                "message": message,
+                "history": history.map { ["role": $0.role, "content": $0.content] },
+            ]
 
         default:
             return nil

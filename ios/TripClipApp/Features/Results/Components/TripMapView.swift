@@ -16,6 +16,12 @@ struct TripMapView: UIViewRepresentable {
     /// Listeden bir mekana basıldığında buraya gelir; harita o pine zoom yapıp
     /// baloncuğunu açar. nil ise tüm rotayı kapsayan varsayılan görünüm.
     var focusedPin: LocationPin? = nil
+    /// Kullanıcı haritada bir pine GERÇEKTEN dokunduğunda çağrılır (Req "Map
+    /// → Itinerary" — bkz. `OptimizerRouteMap.swift`'in AYNI
+    /// `didSelect`/`isProgrammaticSelection` deseni). Opsiyonel ve varsayılan
+    /// `nil`: bu view'ın diğer çağıranı (`ResultsView`) bu yönü hiç
+    /// kullanmıyor, geriye dönük UYUMLU.
+    var onSelectPin: ((LocationPin) -> Void)? = nil
 
     func makeUIView(context: Context) -> MKMapView {
         let map = MKMapView()
@@ -59,6 +65,7 @@ struct TripMapView: UIViewRepresentable {
         // Bölgeyi HER güncellemede değiştirmiyoruz; aksi halde alakasız bir
         // state değişimi kullanıcının kaydırdığı haritayı başa sarıyordu.
         let coordinator = context.coordinator
+        coordinator.onSelectPin = onSelectPin
 
         if let focusedPin, focusedPin.index != coordinator.lastFocusedIndex {
             // Listeden yeni bir mekana basıldı → o mekana zoom yap ve seç.
@@ -73,6 +80,12 @@ struct TripMapView: UIViewRepresentable {
                 animated: true
             )
             if let match = annotations.first(where: { $0.pinIndex == focusedPin.index }) {
+                // Bu, `didSelect`'i PROGRAMATİK olarak tetikleyecek — gerçek bir
+                // kullanıcı dokunuşundan ayırt etmek gerekiyor, aksi halde
+                // Itinerary → Map odaklanması `onSelectPin`'i tekrar çağırır ve
+                // SwiftUI state'iyle MKMapView arasında gereksiz bir geri-besleme
+                // turu oluşur (bkz. OptimizerRouteMap.swift'in AYNI deseni).
+                coordinator.isProgrammaticSelection = true
                 map.selectAnnotation(match, animated: true)
             }
         } else if !coordinator.didSetInitialRegion {
@@ -114,6 +127,13 @@ struct TripMapView: UIViewRepresentable {
         /// odak değişmediğinde kullanıcının kaydırdığı görünümü korumak için.
         var lastFocusedIndex:    Int?
         var didSetInitialRegion = false
+        /// `updateUIView`'dan HER render'da yenilenir — bkz. `onSelectPin`'in
+        /// kendi doc yorumu.
+        var onSelectPin: ((LocationPin) -> Void)?
+        /// `updateUIView`'ın kendi `map.selectAnnotation(...)` çağrısının
+        /// tetikleyeceği `didSelect`'i GERÇEK bir kullanıcı dokunuşundan ayırt
+        /// etmek için — bkz. `OptimizerRouteMap.swift`'in AYNI bayrağı.
+        var isProgrammaticSelection = false
 
         func mapView(_ mapView: MKMapView,
                      rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
@@ -145,6 +165,24 @@ struct TripMapView: UIViewRepresentable {
                 marker.rightCalloutAccessoryView = button
             }
             return view
+        }
+
+        /// Kullanıcı bir pine dokundu (Req "Map → Itinerary"). Programatik
+        /// seçim (Itinerary → Map yönünde `updateUIView`'ın kendi
+        /// `map.selectAnnotation` çağrısı) burayı SESSİZCE tüketir — yalnızca
+        /// gerçek kullanıcı dokunuşları `onSelectPin`'e ulaşır (bkz.
+        /// `isProgrammaticSelection`'ın kendi doc yorumu).
+        func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+            guard let annotation = view.annotation as? TripAnnotation else { return }
+            if isProgrammaticSelection {
+                isProgrammaticSelection = false
+                return
+            }
+            onSelectPin?(LocationPin(
+                index: annotation.pinIndex, name: annotation.placeName, type: "location",
+                latitude: annotation.coordinate.latitude, longitude: annotation.coordinate.longitude,
+                importance: 1.0
+            ))
         }
 
         /// Baloncuktaki butona basıldı → mekanı Apple Haritalar'da aç.

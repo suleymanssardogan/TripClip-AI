@@ -25,12 +25,20 @@ struct TripStop: Decodable, Identifiable, Hashable {
 }
 
 struct TripDetail: Decodable, Identifiable, Hashable {
-    let id:               Int
-    let title:            String
-    let totalDistanceKm:  Double?
-    let createdAt:        String?
-    let stopsCount:       Int
-    var days:              [[TripStop]]
+    let id:                 Int
+    let title:              String
+    let totalDistanceKm:    Double?
+    let createdAt:          String?
+    let stopsCount:         Int
+    var days:               [[TripStop]]
+    /// Bu trip'e en son uygulanan optimizer itinerary'sinin kimliği — nil
+    /// ise hiç itinerary uygulanmamış (bkz. core-api'nin TripDetailResponse'u,
+    /// docs/trip-optimizer.md "Apply semantics"). Backend bu alanları zaten
+    /// gönderiyordu, model onları şimdiye kadar hiç DEKODE ETMİYORDU (Req 8
+    /// "apply-state awareness" — mevcut backend state'i, yeni bir alan
+    /// İCAT EDİLMEDEN yüzeye çıkarılıyor).
+    let appliedItineraryId: Int?
+    let itineraryAppliedAt: String?
 
     /// Şimdilik tek gün destekleniyor (bkz. sql_trip_repository.create_trip) —
     /// UI çok günlü gruplamayı zaten destekliyor, yalnızca oluşturma anında tek gün dolduruluyor.
@@ -38,6 +46,11 @@ struct TripDetail: Decodable, Identifiable, Hashable {
 
     var formattedCreatedAt: String {
         guard let raw = createdAt, let date = APIDate.parse(raw) else { return "" }
+        return APIDate.displayString(from: date)
+    }
+
+    var formattedItineraryAppliedAt: String {
+        guard let raw = itineraryAppliedAt, let date = APIDate.parse(raw) else { return "" }
         return APIDate.displayString(from: date)
     }
 }

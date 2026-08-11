@@ -15,11 +15,16 @@ struct TripDetailView: View {
     @Environment(OptimizerConfigurationStore.self) private var optimizerConfigStore
     @Environment(\.dismiss) private var dismiss
     @State private var vm = TripDetailViewModel()
-    @State private var focusedPin: LocationPin?
+    /// Harita ↔ itinerary listesi arasında PAYLAŞILAN tek seçim — optimizer
+    /// sonuç ekranıyla AYNI, zaten var olan tip (`OptimizerSelection`), yeni
+    /// bir seçim durumu İCAT EDİLMEDİ (Req 3 "reuse existing... map/selection
+    /// infrastructure").
+    @State private var selection = OptimizerSelection()
     @State private var isEditing = false
     @State private var showDeleteConfirm = false
 
     private static let mapAnchor = "trip-detail-map"
+    private static func stopRowID(_ placeId: Int) -> String { "trip-detail-stop-\(placeId)" }
 
     var body: some View {
         ZStack {
@@ -36,6 +41,25 @@ struct TripDetailView: View {
         .navigationTitle(vm.trip?.title ?? "Gezi")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if let trip = vm.trip, !trip.allStops.isEmpty {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    NavigationLink(
+                        destination: TripAssistantView(
+                            tripID: trip.id, trip: trip,
+                            onFocusStop: { dayIndex, placeId in
+                                // `selectStop`'un AYNI (day_index, place_id)
+                                // kimlik formülü — bkz. `OptimizerSelection.focusing`.
+                                // Tam bir `TripStop` gerekmez, yalnızca bu iki
+                                // alan kullanılır.
+                                selection = .focusing(dayIndex: dayIndex, stopID: String(placeId))
+                            }
+                        )
+                    ) {
+                        Image(systemName: "message")
+                            .foregroundStyle(AppColors.accentText)
+                    }
+                }
+            }
             if let trip = vm.trip, !trip.allStops.isEmpty {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     NavigationLink(
@@ -122,40 +146,98 @@ struct TripDetailView: View {
     private func tripContent(_ trip: TripDetail) -> some View {
         let stops: [TripStop] = trip.allStops
         let pins: [LocationPin] = stops.map(\.asLocationPin)
-        let route: [RoutePoint]? = mapRoute(for: stops)
+        // `TripMapView`'ın kendi otoriter bir odak state'i yok — paylaşılan
+        // `selection`'ın salt-okunur bir izdüşümü (bkz. `ItineraryDaySection`'ın
+        // AYNI ilkesi, "kendi otoriter seçim state'ini icat etmez").
+        let focusedPin: LocationPin? = selection.stopID.flatMap { id in
+            stops.first(where: { String($0.placeId) == id })?.asLocationPin
+        }
+        // Çok günlü bir trip'te (Apply sonrası mümkün — bkz. TripStop.dayIndex)
+        // TÜM durakları TEK bir düz çizgiyle bağlamak günler arasında yanıltıcı
+        // bir rota çizerdi (Req 4 "no cross-day polyline"). `TripMapView`'ın
+        // kendisi gün-farkında değil (Results ekranıyla PAYLAŞILAN, tek renkli/
+        // tek rotalı basit bir bileşen) — yeni bir çok-renkli rota mimarisi
+        // İCAT ETMEK yerine, çok günlü durumda rota çizgisini basitçe
+        // GÖSTERMİYORUZ (pinler yine de görünür kalır); tek günlü trip'ler
+        // (bugün hâlâ yaygın durum) hiçbir davranış değişikliği görmez.
+        let route: [RoutePoint]? = trip.days.count > 1 ? nil : mapRoute(for: stops)
+        let hasMultipleDays = trip.days.count > 1
+        // Düzenleme (sıralama/silme) yalnızca TEK güne yazıyor
+        // (`TripDetailViewModel.persistDay` → `trip.days.first`) — çok günlü
+        // bir trip'te "Düzenle"yi göstermek, kullanıcı 2. Gün'ü görüntülerken
+        // sessizce 1. Gün'ü düzenlemesine yol açardı. Gün navigasyonunun kendisi
+        // bu riski YENİ ortaya çıkardığı için (öncesinde çok günlü bir görünüm
+        // hiç yoktu), en küçük hedefli düzeltme: çok günlü trip'lerde "Düzenle"
+        // affordance'ını tamamen gizle.
+        let canEditStops = !hasMultipleDays
 
         ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
 
                 if !stops.isEmpty {
-                    TripMapView(locations: pins, route: route, focusedPin: focusedPin)
-                        .frame(height: 260)
-                        .clipShape(RoundedRectangle(cornerRadius: 20))
-                        .padding(.horizontal, 16)
-                        .id(Self.mapAnchor)
+                    TripMapView(
+                        locations: pins, route: route, focusedPin: focusedPin,
+                        onSelectPin: { pin in
+                            guard let stop = stops.first(where: { $0.placeId == pin.index }) else { return }
+                            selectStop(stop)
+                            withAnimation { proxy.scrollTo(Self.stopRowID(stop.placeId), anchor: .center) }
+                        }
+                    )
+                    .frame(height: 260)
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    .padding(.horizontal, 16)
+                    .id(Self.mapAnchor)
                 }
 
                 statsStrip(trip).padding(.horizontal, 16)
 
+                if trip.appliedItineraryId != nil {
+                    appliedItineraryBanner(trip).padding(.horizontal, 16)
+                }
+
                 if !stops.isEmpty {
-                    stopsHeader(stops.count)
-                    VStack(spacing: 8) {
-                        ForEach(Array(stops.enumerated()), id: \.element.placeId) { offset, stop in
-                            if isEditing {
-                                LocationCard(
-                                    number: offset + 1,
-                                    pin:    stop.asLocationPin,
-                                    edit:   editActions(for: offset, stop: stop, count: stops.count)
-                                )
-                            } else {
-                                Button {
-                                    focusedPin = stop.asLocationPin
-                                    withAnimation { proxy.scrollTo(Self.mapAnchor, anchor: .top) }
-                                } label: {
-                                    LocationCard(number: offset + 1, pin: stop.asLocationPin)
+                    stopsHeader(stops.count, canEdit: canEditStops)
+
+                    if hasMultipleDays && !isEditing {
+                        daySelector(trip).padding(.horizontal, 16)
+                    }
+
+                    let visibleDays: [[TripStop]] = selection.dayIndex == nil
+                        ? trip.days
+                        : trip.days.filter { $0.first?.dayIndex == selection.dayIndex }
+
+                    VStack(alignment: .leading, spacing: 16) {
+                        ForEach(Array(visibleDays.enumerated()), id: \.offset) { _, dayStops in
+                            if hasMultipleDays && selection.dayIndex == nil, let dayIndex = dayStops.first?.dayIndex {
+                                Text("\(dayIndex + 1). Gün")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(AppColors.textSecondary)
+                                    .textCase(.uppercase)
+                                    .tracking(0.8)
+                            }
+                            VStack(spacing: 8) {
+                                ForEach(dayStops, id: \.placeId) { stop in
+                                    if isEditing, let offset = stops.firstIndex(where: { $0.placeId == stop.placeId }) {
+                                        LocationCard(
+                                            number: stop.orderIndex + 1,
+                                            pin:    stop.asLocationPin,
+                                            edit:   editActions(for: offset, stop: stop, count: stops.count)
+                                        )
+                                    } else {
+                                        Button {
+                                            selectStop(stop)
+                                            withAnimation { proxy.scrollTo(Self.mapAnchor, anchor: .top) }
+                                        } label: {
+                                            LocationCard(
+                                                number: stop.orderIndex + 1, pin: stop.asLocationPin,
+                                                isSelected: selection.stopID == String(stop.placeId)
+                                            )
+                                        }
+                                        .buttonStyle(PressableButtonStyle())
+                                        .id(Self.stopRowID(stop.placeId))
+                                    }
                                 }
-                                .buttonStyle(PressableButtonStyle())
                             }
                         }
                     }
@@ -172,7 +254,7 @@ struct TripDetailView: View {
         }
     }
 
-    private func stopsHeader(_ count: Int) -> some View {
+    private func stopsHeader(_ count: Int, canEdit: Bool) -> some View {
         HStack {
             Text("Duraklar (\(count))")
                 .font(.system(size: 14, weight: .semibold))
@@ -184,7 +266,7 @@ struct TripDetailView: View {
 
             if vm.isSavingStops {
                 ProgressView().controlSize(.small).tint(AppColors.accentText)
-            } else {
+            } else if canEdit {
                 Button(isEditing ? "Bitti" : "Düzenle") {
                     withAnimation { isEditing.toggle() }
                 }
@@ -206,10 +288,98 @@ struct TripDetailView: View {
                 Task { await vm.moveStops(from: [offset], to: offset + 2, auth: auth) }
             },
             onDelete: {
-                if focusedPin?.index == stop.placeId { focusedPin = nil }
+                if selection.stopID == String(stop.placeId) { selection = OptimizerSelection() }
                 Task { await vm.deleteStop(stop, auth: auth) }
             }
         )
+    }
+
+    // MARK: - Seçim (Req 1/2/3 "map ↔ itinerary experience")
+
+    /// Bir durağa (haritadan ya da itinerary listesinden) dokunulduğunda —
+    /// `OptimizerSelection.focusing` ile AYNI, zaten test edilmiş kural:
+    /// durak zaten aktif günün içindeyse gün değişmez, değilse o güne geçilir.
+    private func selectStop(_ stop: TripStop) {
+        selection = .focusing(dayIndex: stop.dayIndex, stopID: String(stop.placeId))
+    }
+
+    /// Gün çipine doğrudan dokunmak — seçili durak yeni günün kapsamında
+    /// değilse TEMİZLENİR, kapsamdaysa (ör. "Tümü"den o durağın kendi
+    /// gününe geçmek) KORUNUR. Web'in `selectDay()`'iyle AYNI kural (bkz.
+    /// docs/web-trip-optimizer.md "Map camera: selection-driven").
+    private func selectDay(_ dayIndex: Int?, in trip: TripDetail) {
+        let scope: [TripStop] = dayIndex == nil ? trip.allStops : (trip.days.first { $0.first?.dayIndex == dayIndex } ?? [])
+        let stopStillInScope = selection.stopID.map { id in scope.contains { String($0.placeId) == id } } ?? false
+        selection = OptimizerSelection(dayIndex: dayIndex, stopID: stopStillInScope ? selection.stopID : nil)
+    }
+
+    private func daySelector(_ trip: TripDetail) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                dayChip(title: "Tümü", isSelected: selection.dayIndex == nil) {
+                    selectDay(nil, in: trip)
+                }
+                ForEach(trip.days.compactMap(\.first?.dayIndex), id: \.self) { dayIndex in
+                    dayChip(title: "\(dayIndex + 1). Gün", isSelected: selection.dayIndex == dayIndex) {
+                        selectDay(dayIndex, in: trip)
+                    }
+                }
+            }
+        }
+    }
+
+    private func dayChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.easeOut(duration: 0.15)) { action() }
+        } label: {
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(isSelected ? AppColors.onAccent : AppColors.textSecondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(isSelected ? AppColors.accent : AppColors.surface2)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(PressableButtonStyle())
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
+
+    // MARK: - Uygulanan itinerary göstergesi (Req 8 "apply-state awareness")
+
+    /// Backend bu alanları zaten gönderiyordu (`TripDetail.appliedItineraryId`),
+    /// yalnızca hiç YÜZEYE ÇIKARILMIYORDU — yeni bir API/mutasyon YOK, salt
+    /// mevcut state'in sunumu. "Uygulama Geçmişi"ne, toolbar'daki AYNI
+    /// hedefe (`ItineraryApplyHistoryView`) götürür — yeni bir ekran İCAT
+    /// EDİLMEDİ.
+    private func appliedItineraryBanner(_ trip: TripDetail) -> some View {
+        NavigationLink(destination: ItineraryApplyHistoryView(
+            tripID: trip.id, onChanged: { Task { await vm.load(tripID: tripID, auth: auth) } }
+        )) {
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.seal.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(AppColors.route)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Bir optimizer itinerary'si uygulandı")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(AppColors.text)
+                    if !trip.formattedItineraryAppliedAt.isEmpty {
+                        Text(trip.formattedItineraryAppliedAt)
+                            .font(.system(size: 12))
+                            .foregroundStyle(AppColors.textSecondary)
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(AppColors.textTertiary)
+            }
+            .padding(12)
+            .background(AppColors.route.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.route.opacity(0.2), lineWidth: 1))
+        }
+        .buttonStyle(PressableButtonStyle())
     }
 
     private var emptyStopsState: some View {

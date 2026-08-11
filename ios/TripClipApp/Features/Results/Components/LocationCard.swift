@@ -9,6 +9,11 @@ struct LocationCard: View {
     let pin: LocationPin
     /// Düzenleme modu kontrolleri. nil ise kart normal görünümde.
     var edit: EditActions? = nil
+    /// Şu an haritada/itinerary'de odaklanılan durak mı — bkz.
+    /// `TripDetailView`'ın `OptimizerSelection` kullanımı. Varsayılan
+    /// `false`: `ResultsView`'ın kendi kullanımı bu parametreyi hiç
+    /// GEÇMİYOR, geriye dönük UYUMLU.
+    var isSelected: Bool = false
 
     struct EditActions {
         let canMoveUp:   Bool
@@ -45,17 +50,22 @@ struct LocationCard: View {
             if let edit {
                 editControls(edit)
             } else {
-                Image(systemName: "mappin.circle")
+                // Seçili durumda dolu ikon + accent renk — yalnızca renkle
+                // değil, ŞEKİLLE de iletilir (dolu/boş daire), `ItineraryStopRow`
+                // ile AYNI ilke (bkz. docs/web-trip-optimizer.md'nin web
+                // karşılığı, "selected state is not communicated only through
+                // color").
+                Image(systemName: isSelected ? "mappin.circle.fill" : "mappin.circle")
                     .font(.system(size: 16))
-                    .foregroundStyle(AppColors.route.opacity(0.6))
+                    .foregroundStyle(isSelected ? AppColors.accentText : AppColors.route.opacity(0.6))
             }
         }
         .padding(12)
-        .background(AppColors.surface)
+        .background(isSelected ? AppColors.accent.opacity(0.12) : AppColors.surface)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
             RoundedRectangle(cornerRadius: 14)
-                .stroke(AppColors.border, lineWidth: 1)
+                .stroke(isSelected ? AppColors.accent : AppColors.border, lineWidth: isSelected ? 2 : 1)
         )
     }
 
