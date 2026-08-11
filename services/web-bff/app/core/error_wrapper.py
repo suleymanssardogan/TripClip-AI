@@ -39,6 +39,8 @@ _WEB_MESSAGES: dict[str, str] = {
     "ITINERARY_NOT_FOUND":       "Aradığınız itinerary bulunamadı.",
     "APPLY_HISTORY_NOT_FOUND":   "Aradığınız uygulama geçmişi kaydı bulunamadı.",
     "STALE_UNDO":                "Yalnızca en son uygulama geri alınabilir. Bu kayıt artık en son değil.",
+    "INVALID_ASSISTANT_REQUEST": "Lütfen asistana bir soru yazın.",
+    "ASSISTANT_UNAVAILABLE":     "AI asistanı şu anda kullanılamıyor. Lütfen daha sonra tekrar deneyin.",
 }
 
 _DEFAULT_MESSAGE = "Bir hata oluştu. Lütfen sayfayı yenileyip tekrar deneyin."
@@ -62,7 +64,7 @@ def _parse_core_error(data: dict) -> tuple[str, str, int]:
         # istek KENDİSİ geçersiz değil, DURUM değişmiş (Apply History &
         # Undo milestone'u).
         status = 409
-    elif code in {"DATABASE_ERROR", "ML_SERVICE_UNAVAILABLE", "SERVICE_UNAVAILABLE", "INTERNAL_SERVER_ERROR"}:
+    elif code in {"DATABASE_ERROR", "ML_SERVICE_UNAVAILABLE", "SERVICE_UNAVAILABLE", "INTERNAL_SERVER_ERROR", "ASSISTANT_UNAVAILABLE"}:
         status = 503
     else:
         status = 400

@@ -47,6 +47,8 @@ _MOBILE_MESSAGES: dict[str, str] = {
     "DATABASE_ERROR":            "Sunucu geçici olarak kullanılamıyor.",
     "SERVICE_UNAVAILABLE":       "Servis şu an kullanılamıyor. Lütfen daha sonra deneyin.",
     "INTERNAL_SERVER_ERROR":     "Beklenmeyen bir hata oluştu.",
+    "INVALID_ASSISTANT_REQUEST": "Lütfen asistana bir soru yazın.",
+    "ASSISTANT_UNAVAILABLE":     "AI asistanı şu anda kullanılamıyor. Lütfen daha sonra tekrar deneyin.",
 }
 
 _DEFAULT_MESSAGE = "Bir şeyler ters gitti. Lütfen tekrar deneyin."
@@ -60,7 +62,7 @@ def _parse_core_error(data: dict) -> tuple[str, str, int]:
     err      = data.get("error", {})
     code     = err.get("code", "INTERNAL_SERVER_ERROR")
     message  = _MOBILE_MESSAGES.get(code, _DEFAULT_MESSAGE)
-    status   = 500 if code in {"INTERNAL_SERVER_ERROR", "DATABASE_ERROR", "ML_SERVICE_UNAVAILABLE"} else 400
+    status   = 500 if code in {"INTERNAL_SERVER_ERROR", "DATABASE_ERROR", "ML_SERVICE_UNAVAILABLE", "ASSISTANT_UNAVAILABLE"} else 400
     if code in {"UNAUTHORIZED", "AUTH_ERROR"}:
         status = 401
     if code in {"VIDEO_NOT_FOUND", "TRIP_NOT_FOUND", "SHARE_NOT_FOUND", "SHARE_TOKEN_INVALID", "ITINERARY_NOT_FOUND", "APPLY_HISTORY_NOT_FOUND"}:
