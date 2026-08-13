@@ -34,6 +34,7 @@ function trip(overrides: Partial<api.TripDetail> = {}): api.TripDetail {
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.setItem("token", "test-token");
+  sessionStorage.clear();
 });
 
 describe("TripAssistantPage", () => {
@@ -143,9 +144,71 @@ describe("TripAssistantPage", () => {
     expect(lastCall?.[1].history?.length).toBeLessThanOrEqual(6);
   });
 
+  it("follow-up questions carry prior turns as history, and all messages stay visible", async () => {
+    vi.mocked(api.getTrip).mockResolvedValue(trip());
+    vi.mocked(api.askTripAssistant).mockResolvedValueOnce({ answer: "Bugün 4 durağın var.", references: [] });
+    render(<TripAssistantPage />);
+    await waitFor(() => expect(screen.getByLabelText("Asistana mesaj yaz")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("Asistana mesaj yaz"), { target: { value: "Bugün hangi yerleri gezeceğim?" } });
+    fireEvent.click(screen.getByLabelText("Gönder"));
+    await waitFor(() => expect(screen.getByText("Bugün 4 durağın var.")).toBeInTheDocument());
+
+    vi.mocked(api.askTripAssistant).mockResolvedValueOnce({ answer: "Zeugma Mozaik Müzesi.", references: [] });
+    fireEvent.change(screen.getByLabelText("Asistana mesaj yaz"), { target: { value: "Peki bunlardan hangisi müze?" } });
+    fireEvent.click(screen.getByLabelText("Gönder"));
+    await waitFor(() => expect(screen.getByText("Zeugma Mozaik Müzesi.")).toBeInTheDocument());
+
+    // Önceki tur hâlâ görünür — takip sorusu sohbeti SİLMEDİ.
+    expect(screen.getByText("Bugün hangi yerleri gezeceğim?")).toBeInTheDocument();
+    expect(screen.getByText("Bugün 4 durağın var.")).toBeInTheDocument();
+    expect(screen.getByText("Peki bunlardan hangisi müze?")).toBeInTheDocument();
+
+    const secondCall = vi.mocked(api.askTripAssistant).mock.calls[1];
+    expect(secondCall[1]).toEqual({
+      message: "Peki bunlardan hangisi müze?",
+      history: [
+        { role: "user", content: "Bugün hangi yerleri gezeceğim?" },
+        { role: "assistant", content: "Bugün 4 durağın var." },
+      ],
+    });
+  });
+
   it("shows an error state with retry when the trip itself fails to load", async () => {
     vi.mocked(api.getTrip).mockRejectedValue(new Error("Bu geziye erişimin yok."));
     render(<TripAssistantPage />);
     await waitFor(() => expect(screen.getByText("Bu geziye erişimin yok.")).toBeInTheDocument());
+  });
+
+  // M38 regression: bir referans çipine dokunmak `focusStop()` üzerinden
+  // TAMAMEN FARKLI bir route'a (`/trips/[id]`) yönlendirir — bu, bu sayfa
+  // bileşenini unmount eder. "AI Asistan"a geri dönmek YENİ bir
+  // `TripAssistantPage` mount eder. Önceden `messages` sıfırdan `[]`e
+  // başlıyor, TÜM sohbet geçmişi kayboluyordu (iOS'un M35'te bulup
+  // düzeltmiş olduğu AYNI hata sınıfı, Web'e hiç taşınmamıştı). Gerçek
+  // navigasyonu tekrarlamanın en yakın deterministik yolu: unmount edip
+  // YENİDEN render etmek (React Testing Library'nin kendi `unmount()`'u).
+  it("preserves the conversation across an unmount/remount cycle (reference-chip navigation away and back)", async () => {
+    vi.mocked(api.getTrip).mockResolvedValue(trip());
+    vi.mocked(api.askTripAssistant).mockResolvedValue({
+      answer: "İlk durağın Ayasofya.",
+      references: [{ type: "stop", day_index: 0, place_id: 1 }],
+    });
+
+    const { unmount } = render(<TripAssistantPage />);
+    await waitFor(() => expect(screen.getByText("Bugünü özetle")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Bugünü özetle"));
+    await waitFor(() => expect(screen.getByText("İlk durağın Ayasofya.")).toBeInTheDocument());
+
+    // Referans çipine dokunup Trip Detail'e giden kullanıcıyı simüle eder —
+    // bu sayfa unmount edilir (gerçek navigasyonda olduğu gibi).
+    unmount();
+
+    // "AI Asistan"a geri dönmek — YENİ bir TripAssistantPage mount edilir.
+    render(<TripAssistantPage />);
+    await waitFor(() => expect(screen.getByText("İlk durağın Ayasofya.")).toBeInTheDocument());
+    expect(screen.getByText("Bugünü özetle", { selector: "div" })).toBeInTheDocument();
+    // Boş-sohbet "önerilen sorular" ekranı bir daha GÖRÜNMEMELİ — geçmiş var.
+    expect(screen.queryByText("Bu gezi hakkında bana soru sorabilirsin")).not.toBeInTheDocument();
   });
 });

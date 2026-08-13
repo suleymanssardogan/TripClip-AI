@@ -31,6 +31,28 @@ interface ChatMessage extends AssistantMessage {
   references?: AssistantReference[];
 }
 
+// `messages` bu sayfanın kendi `useState`'iydi — bir referans çipine
+// dokunmak `focusStop()` ile TAMAMEN FARKLI bir route'a (`/trips/[id]`)
+// yönlendiriyor, bu da bu sayfa bileşenini unmount ediyor. Kullanıcı "AI
+// Asistan"a geri döndüğünde YENİ bir `TripAssistantPage` mount edilip
+// `messages` sıfırdan `[]`e başlıyordu — TÜM sohbet geçmişi kayboluyordu
+// (M38 audit bulgusu: iOS'un M35'te bulup düzeltmiş olduğu AYNI hata
+// sınıfı, Web'e hiç taşınmamıştı — bkz. TripDetailView.swift'in
+// `assistantVM`'i). `sessionStorage`, bu projede ZATEN var olan bir desen
+// (bkz. googleAuth.ts'in OAuth state'i) — trip'e göre anahtarlanmış, tek
+// sekme ömrü boyunca yaşayan bir önbellek, yeni bir mimari İCAT EDİLMEDİ.
+const STORAGE_KEY_PREFIX = "tripclip_assistant_messages_";
+
+function loadStoredMessages(tripId: number): ChatMessage[] {
+  if (typeof window === "undefined" || !tripId || isNaN(tripId)) return [];
+  try {
+    const raw = sessionStorage.getItem(`${STORAGE_KEY_PREFIX}${tripId}`);
+    return raw ? (JSON.parse(raw) as ChatMessage[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function TripAssistantPage() {
   const params = useParams();
   const router = useRouter();
@@ -40,7 +62,7 @@ export default function TripAssistantPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => loadStoredMessages(tripId));
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState("");
@@ -70,6 +92,16 @@ export default function TripAssistantPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages, sending]);
+
+  useEffect(() => {
+    if (!tripId || isNaN(tripId)) return;
+    try {
+      sessionStorage.setItem(`${STORAGE_KEY_PREFIX}${tripId}`, JSON.stringify(messages));
+    } catch {
+      // sessionStorage kullanılamıyor olabilir (gizli sekme vb.) — sessizce vazgeç,
+      // konuşma yalnızca bellek-içi kalır (mevcut davranışa düşer).
+    }
+  }, [messages, tripId]);
 
   function placeNameFor(ref: AssistantReference): string {
     const stop = trip?.days.flat().find((s) => s.place_id === ref.place_id);
