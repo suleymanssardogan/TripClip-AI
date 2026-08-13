@@ -158,3 +158,76 @@ def test_generate_travel_tips_raises_on_network_error(service):
          mock.patch.object(service, "_cache_get", return_value=None):
         with pytest.raises(ConnectionError):
             service.generate_travel_tips(["Gaziantep"], video_id=1)
+
+
+# ─── answer_question (Trip Assistant, M26/M27) ──────────────────────────────
+# Gerçek bir istek YOK — `_call` her zaman mock'lanır. Sağlayıcı-seviyesi
+# davranış: malformed/parse-edilemez çıktı burada bir istisna olarak
+# yükselir; TripAssistantService (bkz. test_trip_assistant_service.py) bunu
+# temiz bir AssistantUnavailableException'a çevirir — ham hata istemciye
+# ASLA sızmaz.
+
+def test_answer_question_parses_answer_and_references(service):
+    raw = '{"answer": "Bugün 4 durağın var.", "references": [{"day_index": 0, "place_id": 25}]}'
+    with mock.patch.object(service, "_call", return_value=raw) as mock_call:
+        result = service.answer_question("system prompt", "Bugün nereye gideceğim?")
+
+    assert result == {"answer": "Bugün 4 durağın var.", "references": [{"day_index": 0, "place_id": 25}],
+                       "tool_call": None}
+    # system_prompt Gemini'nin KENDİ ayrı systemInstruction mekanizmasından
+    # gider — kullanıcı mesajıyla aynı `contents` bloğuna KARIŞTIRILMAZ.
+    _, kwargs = mock_call.call_args
+    assert kwargs["system_instruction"] == "system prompt"
+
+
+def test_answer_question_defaults_references_to_empty_list_when_absent(service):
+    raw = '{"answer": "Cevap"}'
+    with mock.patch.object(service, "_call", return_value=raw):
+        result = service.answer_question("system prompt", "soru")
+    assert result == {"answer": "Cevap", "references": [], "tool_call": None}
+
+
+def test_answer_question_parses_tool_call_when_present(service):
+    # M32 — model bir araç istediğinde "answer" boş, "tool_call" dolu döner.
+    raw = '{"answer": "", "references": [], "tool_call": {"name": "get_trip_day", "day_index": 1, "place_id": null}}'
+    with mock.patch.object(service, "_call", return_value=raw):
+        result = service.answer_question("system prompt", "İkinci günümü göster")
+    assert result == {
+        "answer": "", "references": [],
+        "tool_call": {"name": "get_trip_day", "day_index": 1, "place_id": None},
+    }
+
+
+def test_answer_question_raises_on_malformed_provider_output():
+    service = GeminiService()
+    with mock.patch.object(service, "_call", return_value="this is not JSON at all, no braces here"):
+        with pytest.raises(Exception):
+            service.answer_question("system prompt", "soru")
+
+
+def test_answer_question_raises_on_network_error(service):
+    with mock.patch.object(service, "_call", side_effect=ConnectionError("DNS çözümlenemedi")):
+        with pytest.raises(ConnectionError):
+            service.answer_question("system prompt", "soru")
+
+
+def test_answer_question_raises_on_timeout(service):
+    # M33 — extract_locations/travel-tips'ten AYRI olarak, `answer_question`
+    # SENKRON kullanıcı isteği içinde çalışır; Timeout da diğer bağlantı
+    # hataları gibi TripAssistantService tarafından temiz bir
+    # AssistantUnavailableException'a çevrilir (bkz. test_trip_assistant_service.py).
+    import requests
+    with mock.patch.object(service, "_call", side_effect=requests.exceptions.Timeout("read timed out")):
+        with pytest.raises(requests.exceptions.Timeout):
+            service.answer_question("system prompt", "soru")
+
+
+def test_answer_question_uses_a_tighter_retry_budget_than_the_shared_default(service):
+    # M33 — SENKRON kullanıcı isteği + M32'nin en fazla 4 sağlayıcı çağrısı
+    # yapabilen araç döngüsü göz önüne alındığında, `_call()`'ın paylaşılan
+    # varsayılanı (3, Celery/asenkron çağıranlar için uygun) burada BİLİNÇLİ
+    # OLARAK 2'ye düşürülür (bkz. docs/trip-assistant.md "Timeouts").
+    with mock.patch.object(service, "_call", return_value='{"answer": "Cevap"}') as mock_call:
+        service.answer_question("system prompt", "soru")
+    _, kwargs = mock_call.call_args
+    assert kwargs["max_retries"] == 2

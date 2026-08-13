@@ -103,6 +103,23 @@ _ASSISTANT_SCHEMA = {
                 "required": ["day_index", "place_id"],
             },
         },
+        # M32 — salt-okunur araç çağrısı isteği (bkz. app/domain/assistant/tools.py).
+        # `oneOf`/union türü Gemini'nin responseSchema alt kümesinde
+        # GÜVENİLİR desteklenmiyor; bunun yerine `answer`/`tool_call` HER
+        # İKİSİ de şemada durur, model bir araç istediğinde "answer"ı boş
+        # bırakıp yalnızca "tool_call"ı doldurur (bkz. system prompt'taki
+        # araç talimatı) — `TripAssistantService` hangisinin dolu olduğuna
+        # bakarak karar verir, bu dosya sadece İKİSİNİ de TAŞIR.
+        "tool_call": {
+            "type": "OBJECT",
+            "nullable": True,
+            "properties": {
+                "name":       {"type": "STRING"},
+                "day_index":  {"type": "INTEGER", "nullable": True},
+                "place_id":   {"type": "INTEGER", "nullable": True},
+            },
+            "required": ["name"],
+        },
     },
     "required": ["answer"],
 }
@@ -623,19 +640,35 @@ class GeminiService:
 
     def answer_question(self, system_prompt: str, user_message: str) -> Dict:
         """
-        Döner: `{"answer": str, "references": [{"day_index": int, "place_id": int}, ...]}`.
+        Döner: `{"answer": str, "references": [...], "tool_call": {...}|None}`
+        (M32 — `tool_call` yeni; her zaman anahtar olarak MEVCUT, boşsa
+        `None`, `TripAssistantService`'in `.get("tool_call")` çağrısı
+        eskisi gibi çalışır).
 
         Ne cache'lenir ne retry-idempotency anahtarı taşır — travel
         tips/location extraction'ın aksine her kullanıcı sorusu GERÇEKTEN
         FARKLI (aynı trip için bile), video_id gibi tekrar-eden bir
         anahtar yok.
+
+        M33: `max_retries=2` (paylaşılan `_call()`'ın varsayılanı 3'ün
+        AKSİNE) — extract_locations/generate_travel_tips ASENKRON bir
+        Celery task'i İÇİNDE çalışır (kimse spinner izlemiyor, uzun
+        backoff'un maliyeti yok); bu metod ise SENKRON, kullanıcının
+        HTTP isteği boyunca beklediği bir çağrı, ÜSTELİK Milestone 32'nin
+        araç döngüsü bunu TEK istekte 4 kere çağırabilir. 3→2 retry,
+        worst-case toplam gecikmeyi (bkz. docs/trip-assistant.md
+        "Timeouts") kullanıcı için makul tutarken hâlâ TEK bir geçici
+        hataya (429/503) tolerans tanır — sıfıra indirmek "hiç yeniden
+        deneme yok" olurdu, bu da normal bir geçici 429'u bile gereksiz
+        yere ASSISTANT_UNAVAILABLE'a çevirirdi.
         """
         raw = self._call(
-            [{"text": user_message}], timeout=30,
+            [{"text": user_message}], timeout=30, max_retries=2,
             response_schema=_ASSISTANT_SCHEMA, system_instruction=system_prompt,
         )
         data = self._parse_json(raw)
         return {
             "answer": (data.get("answer") or "").strip(),
             "references": data.get("references") or [],
+            "tool_call": data.get("tool_call") or None,
         }
