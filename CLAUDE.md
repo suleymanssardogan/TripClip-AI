@@ -151,5 +151,10 @@ Core-API uses `TripClipException` → `tripclip_exception_handler` for structure
 | `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_BUNDLE_ID` / `APNS_AUTH_KEY` | celery-worker | Optional; push (processing complete/failed) only activates when all four are set |
 | `APNS_USE_SANDBOX` | celery-worker | `true` for TestFlight/dev builds, `false` for App Store. Default: `true` |
 | `ANALYTICS_ENABLED` | core-api | Kill switch for shared-trip event writes. Default: `true` |
+| `AI_ASSISTANT_PROVIDER` | core-api | Trip Assistant LLM provider: `gemini` (default) or `ollama`. See `docs/trip-assistant.md` |
+| `OLLAMA_URL` / `OLLAMA_MODEL` | celery-worker (travel tips), core-api (Trip Assistant, when `AI_ASSISTANT_PROVIDER=ollama`) | Ollama not part of Docker stack; both features degrade gracefully when unset. Default model: `mistral` |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM_EMAIL` | core-api | Optional; password-reset emails only send when all are set. See `docs/auth.md` |
+| `PASSWORD_RESET_URL_BASE` / `PASSWORD_RESET_TOKEN_EXPIRE_MINUTES` | core-api | Reset-link base URL and token TTL. Defaults: `http://localhost:3000/reset-password`, `30` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_ALLOWED_REDIRECT_URIS` | core-api | Optional; Google Sign-In only activates when set. `GOOGLE_CLIENT_ID` is also needed client-side (`NEXT_PUBLIC_GOOGLE_CLIENT_ID` for web, `GOOGLE_CLIENT_ID` build setting for iOS) — `GOOGLE_CLIENT_SECRET` never leaves core-api. See `docs/auth.md` |
 
 All vars in `docker-compose.yml`. Copy `.env.example` → `.env` and set `GEMINI_API_KEY`.

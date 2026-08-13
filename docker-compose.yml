@@ -93,6 +93,21 @@ services:
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
       - GEMINI_SEND_FRAMES=${GEMINI_SEND_FRAMES:-true}
       - ANALYTICS_ENABLED=${ANALYTICS_ENABLED:-true}
+      - AI_ASSISTANT_PROVIDER=${AI_ASSISTANT_PROVIDER:-gemini}
+      - OLLAMA_URL=${OLLAMA_URL:-}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-mistral}
+      # M34 — şifre sıfırlama e-postası (SMTP, opsiyonel) ve Google Sign-In
+      # (OAuth, opsiyonel). Bkz. docs/auth.md.
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL:-no-reply@tripclip.app}
+      - PASSWORD_RESET_URL_BASE=${PASSWORD_RESET_URL_BASE:-http://localhost:3000/reset-password}
+      - PASSWORD_RESET_TOKEN_EXPIRE_MINUTES=${PASSWORD_RESET_TOKEN_EXPIRE_MINUTES:-30}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GOOGLE_ALLOWED_REDIRECT_URIS=${GOOGLE_ALLOWED_REDIRECT_URIS:-}
     volumes:
       - uploads_data:/app/uploads
       - ./services/core-api/app:/app/app
