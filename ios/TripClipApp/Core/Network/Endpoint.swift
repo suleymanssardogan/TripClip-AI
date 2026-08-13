@@ -14,6 +14,9 @@ enum Endpoint {
     case login(email: String, password: String)
     case register(email: String, password: String, username: String?)
     case appleSignIn(identityToken: String, fullName: String?)
+    case googleSignIn(code: String, redirectUri: String)
+    case forgotPassword(email: String)
+    case resetPassword(token: String, newPassword: String)
     case refresh(refreshToken: String)
     case logout(refreshToken: String)
     case registerDeviceToken(token: String)
@@ -91,6 +94,9 @@ extension Endpoint {
         case .login:                        return "/api/mobile/auth/login"
         case .register:                     return "/api/mobile/auth/register"
         case .appleSignIn:                  return "/api/mobile/auth/apple"
+        case .googleSignIn:                 return "/api/mobile/auth/google"
+        case .forgotPassword:               return "/api/mobile/auth/forgot-password"
+        case .resetPassword:                return "/api/mobile/auth/reset-password"
         case .refresh:                      return "/api/mobile/auth/refresh"
         case .logout:                       return "/api/mobile/auth/logout"
         case .registerDeviceToken:          return "/api/mobile/auth/device-token"
@@ -124,7 +130,7 @@ extension Endpoint {
 
     var method: HTTPMethod {
         switch self {
-        case .login, .register, .appleSignIn, .refresh, .logout, .queueUrl, .createTrip, .optimizeTrip, .applyItinerary, .undoApplyHistory, .assistant, .trackAnalyticsEvent: return .post
+        case .login, .register, .appleSignIn, .googleSignIn, .forgotPassword, .resetPassword, .refresh, .logout, .queueUrl, .createTrip, .optimizeTrip, .applyItinerary, .undoApplyHistory, .assistant, .trackAnalyticsEvent: return .post
         case .registerDeviceToken: return .put
         case .updateStopOrder, .updateTripStopOrder: return .patch
         case .deletePlan, .deleteTrip, .deleteItinerary: return .delete
@@ -146,6 +152,15 @@ extension Endpoint {
             var b: [String: Any] = ["identity_token": token]
             if let name { b["full_name"] = name }
             return b
+
+        case .googleSignIn(let code, let redirectUri):
+            return ["code": code, "redirect_uri": redirectUri]
+
+        case .forgotPassword(let email):
+            return ["email": email]
+
+        case .resetPassword(let token, let newPassword):
+            return ["token": token, "new_password": newPassword]
 
         case .queueUrl(let url):
             return ["url": url, "source": "ios_app"]

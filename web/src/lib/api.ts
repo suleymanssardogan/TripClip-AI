@@ -57,12 +57,40 @@ export function logout(): void {
 }
 
 /**
+ * Aynı anda devam eden TEK bir refresh çağrısı — `refreshAccessToken()`'ın
+ * birden fazla eşzamanlı çağırıcısı (ör. bir sayfanın `Promise.all` ile
+ * paralel ateşlediği iki authenticated istek, ikisi de aynı anda 401
+ * alırsa — bkz. `app/trips/[id]/optimize/page.tsx`'in `Promise.all([...])`'ı)
+ * AYNI Task'ı paylaşır, HER BİRİ KENDİ `/auth/refresh` isteğini ateşlemez.
+ * Bu olmadan: iki eşzamanlı çağrı aynı (henüz rotate edilmemiş) refresh
+ * token'ı okur, biri başarıyla yeni bir çift kalıcı hale getirir, diğeri
+ * ise artık geçersiz olan AYNI eski token'ı kullanmaya çalışıp reddedilir
+ * — ve o reddedilme koşulsuzca `clearAuthStorage()` çağırıp BİRAZ ÖNCE
+ * başarıyla yenilenmiş GEÇERLİ oturumu siler, kullanıcıyı gereksiz yere
+ * `/login`'e yönlendirir (M38 audit bulgusu — iOS'un `AuthEnvironment.
+ * inFlightRefresh`'iyle AYNI kök neden/düzeltme, core-api'nin
+ * `REFRESH_TOKEN_RACE_LOST` kodu tam da bu senaryoyu öngörüyor).
+ */
+let inFlightRefresh: Promise<string | null> | null = null;
+
+/**
  * Access token süresi dolduğunda (401) çağrılır. Başarılıysa yeni token
  * çiftini kaydeder ve yeni access token'ı döner; başarısızsa storage'ı
  * temizler ve null döner. Recursive 401 handling'e girmemek için ham
  * `fetch` kullanır (request() üzerinden gitmez).
  */
 async function refreshAccessToken(): Promise<string | null> {
+  if (inFlightRefresh) return inFlightRefresh;
+
+  inFlightRefresh = performRefresh();
+  try {
+    return await inFlightRefresh;
+  } finally {
+    inFlightRefresh = null;
+  }
+}
+
+async function performRefresh(): Promise<string | null> {
   const refreshToken = getRefreshToken();
   if (!refreshToken) return null;
 
@@ -176,7 +204,12 @@ async function request<T>(path: string, options: RequestInit = {}, _retried = fa
         return request<T>(path, options, true);
       }
       if (typeof window !== "undefined") {
-        window.location.href = "/login";
+        // Geçerli sayfayı `next` olarak taşı — aksi halde oturum süresi
+        // dolan bir kullanıcı /login'e düşer ve giriş yaptıktan sonra
+        // /dashboard'a atılır, bulunduğu sayfaya DEĞİL (M34 audit bulgusu).
+        const current = window.location.pathname + window.location.search;
+        const target = current && current !== "/" ? `/login?next=${encodeURIComponent(current)}` : "/login";
+        window.location.href = target;
       }
     }
 
@@ -203,6 +236,46 @@ export async function register(email: string, password: string, username?: strin
   );
   trackReferralJoinIfPresent();
   return result;
+}
+
+/**
+ * Şifre sıfırlama e-postası ister. Backend, hesap var/yok fark etmeksizin
+ * AYNI genel yanıtı döner (kullanıcı numaralandırmayı önlemek için) — bu
+ * yüzden burada da başarı/hata ayrımı YAPILMAZ, çağıran her zaman aynı
+ * genel mesajı gösterir.
+ */
+export async function forgotPassword(email: string): Promise<void> {
+  await request<{ status: string }>(
+    "/auth/forgot-password",
+    { method: "POST", body: JSON.stringify({ email }) }
+  );
+}
+
+/**
+ * Sıfırlama token'ını yeni şifreyle değiştirir. Başarısızsa (geçersiz/
+ * süresi dolmuş/kullanılmış token) ApiError fırlatır — çağıran `code`
+ * alanına göre değil, `message`i doğrudan gösterir (backend zaten Türkçe
+ * kullanıcı-dostu mesaj döner).
+ */
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  await request<{ status: string }>(
+    "/auth/reset-password",
+    { method: "POST", body: JSON.stringify({ token, new_password: newPassword }) }
+  );
+}
+
+/**
+ * Google OAuth Authorization Code'unu (callback sayfasında alınan `code`)
+ * core-api'ye ileterek giriş/hesap oluşturma/hesap bağlama işlemini
+ * tamamlar. `redirectUri`, Google'a başlangıçta gönderilenle BİREBİR aynı
+ * olmalı (OAuth spec gereği) — core-api ayrıca kendi allowlist'ine göre
+ * ayrıca doğrular.
+ */
+export async function googleSignIn(code: string, redirectUri: string): Promise<AuthTokens> {
+  return request<AuthTokens>(
+    "/auth/google",
+    { method: "POST", body: JSON.stringify({ code, redirect_uri: redirectUri }) }
+  );
 }
 
 // ─── Analytics ─────────────────────────────────────────────────────────────

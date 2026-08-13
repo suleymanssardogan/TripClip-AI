@@ -149,3 +149,89 @@ def test_device_token_core_api_error_passthrough(client, mock_core_api, make_res
 
     assert resp.status_code == 401
     assert resp.json()["code"] == "UNAUTHORIZED"
+
+
+# ─── Refresh — REFRESH_TOKEN_* status-code regression (M34) ─────────────────
+# Bu kodlar daha önce _MOBILE_MESSAGES'ta hiç kayıtlı DEĞİLDİ ve varsayılan
+# 400'e düşüyordu; core-api hepsini 401 döndürür. iOS `apiError.isUnauthorized`
+# kontrolü YALNIZCA gerçek 401'de doğru tetiklenir — bu yüzden bu regresyon
+# testleri kalıcı olarak buraya eklendi (bkz. Milestone 26'nın aynı sınıf
+# hataya karşı uyarısı).
+import pytest
+
+
+@pytest.mark.parametrize("code", [
+    "REFRESH_TOKEN_INVALID", "REFRESH_TOKEN_EXPIRED", "REFRESH_TOKEN_REUSED", "REFRESH_TOKEN_RACE_LOST",
+])
+def test_refresh_token_error_codes_map_to_401(client, mock_core_api, make_response, code):
+    mock_core_api.post.return_value = make_response(401, {
+        "error": {"code": code, "message": "invalid"},
+    })
+
+    resp = client.post("/api/mobile/auth/refresh", json={"refresh_token": "sometoken"})
+
+    assert resp.status_code == 401
+    assert resp.json()["code"] == code
+
+
+# ─── SERVICE_UNAVAILABLE status-code regression (M38) ───────────────────────
+# web-bff bu kodu zaten 503'e eşliyordu; mobile-bff'de hiç kayıtlı değildi
+# ve varsayılan 400'e düşüyordu — aynı core-api durumu iOS kullanıcıları
+# için "geçersiz istek" gibi görünüyordu, web kullanıcıları için ise doğru
+# "servis kullanılamıyor" mesajı (cross-platform contract asimetrisi).
+
+def test_service_unavailable_error_code_maps_to_500(client, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(503, {
+        "error": {"code": "SERVICE_UNAVAILABLE", "message": "unavailable"},
+    })
+
+    resp = client.post("/api/mobile/auth/refresh", json={"refresh_token": "sometoken"})
+
+    assert resp.status_code == 500
+    assert resp.json()["code"] == "SERVICE_UNAVAILABLE"
+
+
+# ─── Google Sign-In proxy ─────────────────────────────────────────────────────
+
+def test_google_sign_in_happy_path_passthrough(client, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(200, {
+        "access_token": "fake-token", "token_type": "bearer", "user_id": 9, "email": "g@test.com",
+    })
+
+    resp = client.post("/api/mobile/auth/google", json={"code": "authcode", "redirect_uri": "com.sardogan.TripClipAI:/oauth2redirect"})
+
+    assert resp.status_code == 200
+    assert resp.json()["user_id"] == 9
+
+
+def test_google_sign_in_unverified_email_passthrough(client, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(401, {
+        "error": {"code": "GOOGLE_EMAIL_NOT_VERIFIED", "message": "unverified"},
+    })
+
+    resp = client.post("/api/mobile/auth/google", json={"code": "authcode", "redirect_uri": "com.sardogan.TripClipAI:/oauth2redirect"})
+
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "GOOGLE_EMAIL_NOT_VERIFIED"
+
+
+# ─── Forgot / Reset Password proxy ────────────────────────────────────────────
+
+def test_forgot_password_always_returns_generic_status(client, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(200, {"status": "ok"})
+
+    resp = client.post("/api/mobile/auth/forgot-password", json={"email": "anything@test.com"})
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
+
+def test_reset_password_expired_token_passthrough(client, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(401, {
+        "error": {"code": "PASSWORD_RESET_TOKEN_EXPIRED", "message": "expired"},
+    })
+
+    resp = client.post("/api/mobile/auth/reset-password", json={"token": "abc", "new_password": "NewSecure123!"})
+
+    assert resp.status_code == 401
+    assert resp.json()["code"] == "PASSWORD_RESET_TOKEN_EXPIRED"

@@ -47,7 +47,7 @@ struct RegisterView: View {
                         .onSubmit { focused = .password }
 
                         AuthTextField(
-                            title: "Şifre (min. 6 karakter)",
+                            title: "Şifre (min. 8 karakter)",
                             text: $vm.password,
                             isSecure: true,
                             contentType: .newPassword
@@ -86,6 +86,7 @@ struct RegisterView: View {
                     }
                     .buttonStyle(PressableButtonStyle())
                     .disabled(!vm.canSubmit)
+                    .accessibilityLabel(vm.isLoading ? "Kayıt olunuyor" : "Kayıt Ol")
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 48)

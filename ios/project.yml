@@ -18,6 +18,12 @@ settings:
     DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
     DEVELOPMENT_TEAM: JN85S9B6B8
     CODE_SIGN_STYLE: Automatic
+    # Google Sign-In (OAuth 2.0, opsiyonel) — yalnızca GENEL client_id, gizli
+    # DEĞİL (bkz. GOOGLE_CLIENT_SECRET, yalnızca core-api'de). Boş bırakılırsa
+    # WelcomeView'daki Google butonu hiç görünmez (bkz. Config.swift'in
+    # googleClientID'si, web'in NEXT_PUBLIC_GOOGLE_CLIENT_ID'iyle AYNI
+    # "optional infra degrades gracefully" deseni).
+    GOOGLE_CLIENT_ID: ""
   configs:
     Debug:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
@@ -66,6 +72,7 @@ targets:
         NSPhotoLibraryUsageDescription: "TripClip, gezi videolarını yüklemek için fotoğraf kitaplığınıza erişir."
         ITSAppUsesNonExemptEncryption: false
         DEV_API_HOST: "$(DEV_API_HOST)"
+        GOOGLE_CLIENT_ID: "$(GOOGLE_CLIENT_ID)"
 
     entitlements:
       path: TripClipApp/Resources/TripClipApp.entitlements

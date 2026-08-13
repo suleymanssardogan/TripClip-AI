@@ -23,6 +23,9 @@ class SqlUserRepository(AbstractUserRepository):
     def get_by_apple_id(self, apple_id: str) -> Optional[User]:
         return self._db.query(User).filter(User.apple_id == apple_id).first()
 
+    def get_by_google_id(self, google_id: str) -> Optional[User]:
+        return self._db.query(User).filter(User.google_id == google_id).first()
+
     def get_by_id(self, user_id: int) -> Optional[User]:
         return self._db.query(User).filter(User.id == user_id).first()
 
@@ -32,12 +35,14 @@ class SqlUserRepository(AbstractUserRepository):
         username: str,
         hashed_password: Optional[str] = None,
         apple_id: Optional[str] = None,
+        google_id: Optional[str] = None,
     ) -> User:
         user = User(
             email=email,
             username=username,
             hashed_password=hashed_password,
             apple_id=apple_id,
+            google_id=google_id,
         )
         try:
             self._db.add(user)
@@ -52,6 +57,18 @@ class SqlUserRepository(AbstractUserRepository):
         user = self.get_by_id(user_id)
         if user:
             user.apple_id = apple_id
+            self._db.commit()
+
+    def update_google_id(self, user_id: int, google_id: str) -> None:
+        user = self.get_by_id(user_id)
+        if user:
+            user.google_id = google_id
+            self._db.commit()
+
+    def update_password(self, user_id: int, hashed_password: str) -> None:
+        user = self.get_by_id(user_id)
+        if user:
+            user.hashed_password = hashed_password
             self._db.commit()
 
     def update_apns_token(self, user_id: int, token: str) -> None:

@@ -14,14 +14,20 @@ from app.application.dto.auth_dto import (
     RegisterRequest,
     LoginRequest,
     AppleSignInRequest,
+    GoogleSignInRequest,
     RefreshRequest,
     LogoutRequest,
     DeviceTokenRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
     AuthResponse,
+    StatusResponse,
 )
 from app.application.services.auth_service import AuthService
 from app.infrastructure.repositories.sql_user_repository import SqlUserRepository
 from app.infrastructure.repositories.sql_refresh_token_repository import SqlRefreshTokenRepository
+from app.infrastructure.repositories.sql_password_reset_token_repository import SqlPasswordResetTokenRepository
+from app.infrastructure.email.email_service import EmailService
 
 
 def _rate_limit_key(request: Request) -> str:
@@ -50,7 +56,8 @@ limiter = Limiter(key_func=_rate_limit_key)
 def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
     user_repo = SqlUserRepository(db)
     refresh_token_repo = SqlRefreshTokenRepository(db)
-    return AuthService(user_repo, refresh_token_repo)
+    reset_token_repo = SqlPasswordResetTokenRepository(db)
+    return AuthService(user_repo, refresh_token_repo, reset_token_repo, EmailService())
 
 
 # ── Route Handler'lar ─────────────────────────────────────────────────────────
@@ -90,6 +97,45 @@ def apple_sign_in(
         identity_token=body.identity_token,
         full_name=body.full_name,
     )
+
+
+@router.post("/forgot-password", response_model=StatusResponse)
+@limiter.limit("5/minute")
+def forgot_password(
+    request: Request,
+    body: ForgotPasswordRequest,
+    service: AuthService = Depends(get_auth_service),
+):
+    """DAİMA `{"status": "ok"}` döner — hesap var olsun ya da olmasın (bkz.
+    AuthService.request_password_reset'in kendi enumeration-direnci
+    doc yorumu). Yalnızca ÇOK BASİT bir biçim kontrolü (boş string) burada
+    yapılır; "geçerli e-posta formatı mı" gibi daha ayrıntılı bir doğrulama
+    BİLEREK YAPILMAZ — böyle bir hata mesajı bile dolaylı bir enumeration
+    sinyali OLABİLİRDİ, bu yüzden format ne olursa olsun aynı genel yanıt
+    döner."""
+    service.request_password_reset(body.email)
+    return StatusResponse()
+
+
+@router.post("/reset-password", response_model=StatusResponse)
+@limiter.limit("5/minute")
+def reset_password(
+    request: Request,
+    body: ResetPasswordRequest,
+    service: AuthService = Depends(get_auth_service),
+):
+    service.reset_password(raw_token=body.token, new_password=body.new_password)
+    return StatusResponse()
+
+
+@router.post("/google", response_model=AuthResponse)
+@limiter.limit("5/minute")
+def google_sign_in(
+    request: Request,
+    body: GoogleSignInRequest,
+    service: AuthService = Depends(get_auth_service),
+):
+    return service.google_sign_in(code=body.code, redirect_uri=body.redirect_uri)
 
 
 @router.post("/refresh", response_model=AuthResponse)

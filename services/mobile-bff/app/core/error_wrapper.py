@@ -49,6 +49,23 @@ _MOBILE_MESSAGES: dict[str, str] = {
     "INTERNAL_SERVER_ERROR":     "Beklenmeyen bir hata oluştu.",
     "INVALID_ASSISTANT_REQUEST": "Lütfen asistana bir soru yazın.",
     "ASSISTANT_UNAVAILABLE":     "AI asistanı şu anda kullanılamıyor. Lütfen daha sonra tekrar deneyin.",
+    # M34 — refresh-token kodları ÖNCEDEN burada YOKTU, bu yüzden hepsi
+    # aşağıdaki varsayılan 400'e düşüyordu — core-api'nin AslI 401'i
+    # kayboluyordu (bkz. _parse_core_error, ve Milestone 26'nın "unregistered
+    # error codes silently degrade" uyarısı — burada REFRESH_TOKEN ailesi
+    # için AYNI hata tekrar bulundu ve düzeltildi). iOS `apiError.isUnauthorized`
+    # kontrolü YALNIZCA gerçek 401'de doğru tetiklenir (bkz.
+    # AuthEnvironment.refreshTokens/handleUnauthorized) — 400 dönerse çalıntı/
+    # yeniden kullanılmış bir refresh token client'ı ZORLA çıkış YAPTIRMAZDI.
+    "REFRESH_TOKEN_INVALID":     "Oturumunuz geçersiz. Lütfen tekrar giriş yapın.",
+    "REFRESH_TOKEN_EXPIRED":     "Oturumunuzun süresi doldu. Lütfen tekrar giriş yapın.",
+    "REFRESH_TOKEN_REUSED":      "Güvenlik nedeniyle oturumunuz sonlandırıldı. Lütfen tekrar giriş yapın.",
+    "REFRESH_TOKEN_RACE_LOST":   "Oturum yenilenemedi. Lütfen tekrar deneyin.",
+    "PASSWORD_RESET_TOKEN_INVALID": "Bu şifre sıfırlama linki geçersiz.",
+    "PASSWORD_RESET_TOKEN_EXPIRED": "Bu şifre sıfırlama linkinin süresi doldu. Yeni bir istek gönderin.",
+    "PASSWORD_RESET_TOKEN_USED":    "Bu şifre sıfırlama linki zaten kullanılmış.",
+    "GOOGLE_AUTH_UNAVAILABLE":      "Google ile giriş şu anda kullanılamıyor.",
+    "GOOGLE_EMAIL_NOT_VERIFIED":    "Bu e-posta adresiyle zaten bir hesap var. Lütfen normal giriş yapın.",
 }
 
 _DEFAULT_MESSAGE = "Bir şeyler ters gitti. Lütfen tekrar deneyin."
@@ -62,8 +79,24 @@ def _parse_core_error(data: dict) -> tuple[str, str, int]:
     err      = data.get("error", {})
     code     = err.get("code", "INTERNAL_SERVER_ERROR")
     message  = _MOBILE_MESSAGES.get(code, _DEFAULT_MESSAGE)
-    status   = 500 if code in {"INTERNAL_SERVER_ERROR", "DATABASE_ERROR", "ML_SERVICE_UNAVAILABLE", "ASSISTANT_UNAVAILABLE"} else 400
-    if code in {"UNAUTHORIZED", "AUTH_ERROR"}:
+    # M38 — `SERVICE_UNAVAILABLE` burada hiç kayıtlı değildi (yalnızca bu
+    # dosyanın KENDİ ürettiği 503'ler, ör. ConnectError yakalayan
+    # `mobile_error_wrapper`, bu koddan bağımsız olarak zaten 503 dönüyordu)
+    # — ama core-api'nin YANITININ KENDİSİ bu kodu taşırsa (bkz. mesaj
+    # sözlüğündeki mevcut "SERVICE_UNAVAILABLE" girdisi — beklenen bir kod)
+    # varsayılan 400'e düşüyordu. web-bff bu kodu zaten 503'e eşliyor
+    # (cross-platform contract asimetrisi, M38 audit bulgusu).
+    status   = 500 if code in {"INTERNAL_SERVER_ERROR", "DATABASE_ERROR", "ML_SERVICE_UNAVAILABLE", "ASSISTANT_UNAVAILABLE", "SERVICE_UNAVAILABLE"} else 400
+    # M34 — REFRESH_TOKEN_* kodları burada hiç kayıtlı değildi ve varsayılan
+    # 400'e düşüyordu (core-api hepsini 401 döndürüyor). Bu, çalıntı/yeniden
+    # kullanılmış bir refresh token'ın iOS'ta `apiError.isUnauthorized`
+    # tetiklemesini engelliyordu → client zorla çıkış YAPMIYORDU.
+    if code in {
+        "UNAUTHORIZED", "AUTH_ERROR",
+        "REFRESH_TOKEN_INVALID", "REFRESH_TOKEN_EXPIRED", "REFRESH_TOKEN_REUSED", "REFRESH_TOKEN_RACE_LOST",
+        "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "PASSWORD_RESET_TOKEN_USED",
+        "GOOGLE_AUTH_UNAVAILABLE", "GOOGLE_EMAIL_NOT_VERIFIED",
+    }:
         status = 401
     if code in {"VIDEO_NOT_FOUND", "TRIP_NOT_FOUND", "SHARE_NOT_FOUND", "SHARE_TOKEN_INVALID", "ITINERARY_NOT_FOUND", "APPLY_HISTORY_NOT_FOUND"}:
         status = 404

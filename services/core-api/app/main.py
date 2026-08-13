@@ -42,12 +42,22 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)  # ← Docker log'a yaz!
     ]
 )
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup: Alembic migration'larını otomatik uygula (bkz. app.core.migrations)."""
     from app.core.migrations import run_migrations
     run_migrations()
+
+    # Aktif Trip Assistant sağlayıcısını BİR KEZ logla (M29) — ağ çağrısı
+    # YAPMAZ (`get_provider_metadata()` yalnızca env okur), secret İÇERMEZ.
+    from app.ml.ai_provider import get_provider_metadata
+    _provider_meta = get_provider_metadata()
+    logger.info(
+        "Trip Assistant provider: %s (model=%s)",
+        _provider_meta["provider"] or "yapılandırılmamış", _provider_meta["model"],
+    )
 
     # ── Queue-depth metriği — 15s'de bir Redis'ten oku, Prometheus gauge'unu güncelle ──
     import asyncio
@@ -173,6 +183,20 @@ def health_ready():
     except Exception as exc:
         checks["redis"] = f"error: {type(exc).__name__}"
 
+    # AI provider (M29) — BİLGİ AMAÇLI, `checks`/`all_ok` GATE'İNE DAHİL
+    # DEĞİL: Ollama'nın geçici olarak çökmesi core-api'nin GENEL
+    # readiness'ını 503 YAPMAMALI — Trip Assistant zaten kendi başına
+    # 503 ASSISTANT_UNAVAILABLE döner (bkz. docs/trip-assistant.md
+    # "Failure handling"), core-api'nin geri kalanı bundan ETKİLENMEZ.
+    # postgres/redis'in AKSİNE (gerçekten readiness-kritik altyapı), AI
+    # sağlayıcısı opsiyonel bir üst-katman özelliği.
+    from app.ml.ai_provider import check_provider_health
+    try:
+        ai_provider_health = check_provider_health()
+    except Exception as exc:
+        logger.warning("AI provider health check beklenmedik şekilde başarısız: %s", type(exc).__name__)
+        ai_provider_health = {"provider": None, "status": "unavailable", "model": None, "detail": f"error: {type(exc).__name__}"}
+
     all_ok = all(v == "ok" for v in checks.values())
     return JSONResponse(
         status_code=200 if all_ok else 503,
@@ -180,6 +204,7 @@ def health_ready():
             "status": "ready" if all_ok else "degraded",
             "service": "core-api",
             "checks": checks,
+            "ai_provider": ai_provider_health,
         },
     )
 

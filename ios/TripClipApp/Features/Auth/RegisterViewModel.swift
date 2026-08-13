@@ -13,7 +13,13 @@ final class RegisterViewModel {
 
     var canSubmit: Bool {
         !email.trimmingCharacters(in: .whitespaces).isEmpty &&
-        password.count >= 6 &&
+        // Sunucunun TEK paylaşılan kuralı (kayıt VE şifre sıfırlama) 8
+        // karakter (bkz. core-api _validate_password_strength,
+        // ResetPasswordViewModel'in AYNI eşiği). Burası önceden 6'ydı —
+        // 6-7 karakterlik bir şifre istemci tarafında GEÇERLİ görünüp
+        // sunucuda deterministik olarak 422/VALIDATION_ERROR ile
+        // reddediliyordu (M36 audit bulgusu).
+        password.count >= 8 &&
         !isLoading
     }
 

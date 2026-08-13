@@ -25,6 +25,24 @@ enum TripClipConfig {
     static var apiBaseAsURL: URL {
         URL(string: apiBaseURL)!
     }
+
+    /// Google OAuth client_id — YALNIZCA genel, gizli DEĞİL (bkz.
+    /// GOOGLE_CLIENT_SECRET, yalnızca core-api'de). Boş/tanımsızsa Google
+    /// Sign-In devre dışı kalır (bkz. WelcomeView, isGoogleSignInConfigured).
+    static var googleClientID: String? {
+        guard
+            let value = Bundle.main.infoDictionary?["GOOGLE_CLIENT_ID"] as? String,
+            !value.isEmpty, value != "$(GOOGLE_CLIENT_ID)"
+        else { return nil }
+        return value
+    }
+
+    /// Google'ın rıza ekranından sonra geri döneceği custom URL scheme —
+    /// bundle identifier'ın KENDİSİ (bkz. GOOGLE_ALLOWED_REDIRECT_URIS,
+    /// core-api'nin kendi allowlist'i). `ASWebAuthenticationSession` bu
+    /// şemayı Info.plist'te KAYITLI bir URL Type olmadan da yakalayabilir —
+    /// callback'i kendi ephemeral oturumu içinde intercept eder.
+    static let googleRedirectURI = "\(Bundle.main.bundleIdentifier ?? "com.sardogan.TripClipAI"):/oauth2redirect"
 }
 
 /// Module-level alias so `APIClient` can use `Config.apiBaseURL` naturally.

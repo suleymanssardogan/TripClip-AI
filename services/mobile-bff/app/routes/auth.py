@@ -36,6 +36,20 @@ class AppleSignInRequest(BaseModel):
     full_name: str | None = None
 
 
+class GoogleSignInRequest(BaseModel):
+    code: str
+    redirect_uri: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str
 
@@ -79,6 +93,27 @@ async def login(request: Request, body: LoginRequest):
 async def apple_sign_in(request: Request, body: AppleSignInRequest):
     rid = str(uuid.uuid4())[:8]
     return await _forward("/internal/auth/apple", body.model_dump(), rid, get_remote_address(request))
+
+
+@router.post("/google")
+@limiter.limit("5/minute")
+async def google_sign_in(request: Request, body: GoogleSignInRequest):
+    rid = str(uuid.uuid4())[:8]
+    return await _forward("/internal/auth/google", body.model_dump(), rid, get_remote_address(request))
+
+
+@router.post("/forgot-password")
+@limiter.limit("5/minute")
+async def forgot_password(request: Request, body: ForgotPasswordRequest):
+    rid = str(uuid.uuid4())[:8]
+    return await _forward("/internal/auth/forgot-password", body.model_dump(), rid, get_remote_address(request))
+
+
+@router.post("/reset-password")
+@limiter.limit("5/minute")
+async def reset_password(request: Request, body: ResetPasswordRequest):
+    rid = str(uuid.uuid4())[:8]
+    return await _forward("/internal/auth/reset-password", body.model_dump(), rid, get_remote_address(request))
 
 
 @router.post("/refresh")

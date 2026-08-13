@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { login, saveAuthTokens } from "@/lib/api";
 import PasswordInput from "@/components/PasswordInput";
+import GoogleSignInButton from "@/components/GoogleSignInButton";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 
@@ -25,6 +26,7 @@ function LoginForm() {
 
   const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (loading) return; // çift-tıklama/yeniden-giriş koruması
     setLoading(true); setError("");
     const fd = new FormData(e.currentTarget);
     try {
@@ -80,19 +82,25 @@ function LoginForm() {
 
           <form onSubmit={handleLogin} className="space-y-5">
             <div>
-              <label className="font-mono text-xs text-text-tertiary uppercase tracking-widest block mb-2">
+              <label htmlFor="email" className="font-mono text-xs text-text-tertiary uppercase tracking-widest block mb-2">
                 E-posta
               </label>
               <Input
-                name="email" type="email" placeholder="sen@ornek.com"
+                id="email" name="email" type="email" placeholder="sen@ornek.com"
                 required disabled={loading || success}
               />
             </div>
             <div>
-              <label className="font-mono text-xs text-text-tertiary uppercase tracking-widest block mb-2">
-                Şifre
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label htmlFor="password" className="font-mono text-xs text-text-tertiary uppercase tracking-widest">
+                  Şifre
+                </label>
+                <Link href="/forgot-password" className="text-xs text-accent-text hover:opacity-80 font-semibold transition-opacity">
+                  Şifremi unuttum
+                </Link>
+              </div>
               <PasswordInput
+                id="password"
                 name="password"
                 placeholder="••••••••"
                 required
@@ -112,6 +120,8 @@ function LoginForm() {
               )}
             </Button>
           </form>
+
+          <GoogleSignInButton next={redirectTo} disabled={loading || success} />
 
           <div className="border-t border-border my-7" />
 

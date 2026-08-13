@@ -22,6 +22,8 @@
 	<string>1</string>
 	<key>DEV_API_HOST</key>
 	<string>$(DEV_API_HOST)</string>
+	<key>GOOGLE_CLIENT_ID</key>
+	<string>$(GOOGLE_CLIENT_ID)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>

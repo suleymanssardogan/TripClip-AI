@@ -46,6 +46,21 @@ final class AuthEnvironment {
         let userID = AppGroupStore.loadUserID() ?? 0
         user = AuthUser(id: userID, email: "", token: token)
         Logger.auth.info("Session restored: userID=\(userID)")
+
+        // `validAccessToken()` zaten süre dolumunu PROAKTİF kontrol ediyor —
+        // burası (init/restore) kontrol ETMİYORDU, bu yüzden uygulama arka
+        // plandan uzun süre sonra öne geldiğinde kullanıcı kısa bir an
+        // `HomeView`'i görüp sonra geri sıçrayabiliyordu (M35 audit bulgusu).
+        // Senkron init içinden `await` edilemez — bu yüzden en kötü ihtimalle
+        // ilk API çağrısının kendi 401→refresh yoluyla düzelteceği durumu,
+        // arka planda PROAKTİF bir refresh başlatarak hızlandırıyoruz. Bu,
+        // `refreshTokens()`'ın kendi tekilleştirilmiş (serialized) yolundan
+        // geçer — ilk ekranın eşzamanlı istekleriyle YARIŞMAZ, aynı devam eden
+        // refresh'i paylaşır.
+        if JWT.isExpired(token) {
+            Logger.auth.info("Restored access token already expired — refreshing proactively")
+            Task { await refreshTokens() }
+        }
     }
 
     // MARK: - Login
@@ -110,10 +125,39 @@ final class AuthEnvironment {
         return await refreshTokens()
     }
 
+    /// Aynı anda devam eden TEK bir refresh çağrısı — `refreshTokens()`'ın
+    /// birden fazla eşzamanlı çağırıcısı (ör. TripDetailView'ın üç paralel
+    /// `.task`'ı, hepsi aynı anda 401 alırsa) AYNI Task'ı paylaşır, HER BİRİ
+    /// KENDİ `/auth/refresh` isteğini ateşlemez. Bu olmadan: iki eşzamanlı
+    /// çağrı aynı (henüz rotate edilmemiş) refresh token'ı okur, biri
+    /// başarıyla yeni bir çift kalıcı hale getirir, diğeri ise artık geçersiz
+    /// olan AYNI eski token'ı kullanmaya çalışıp reddedilir — ve o reddedilme
+    /// koşulsuz `handleUnauthorized()`/logout tetikleyip, BİRAZ ÖNCE başarıyla
+    /// yenilenmiş GEÇERLİ oturumu siler (M35 audit bulgusu — core-api'nin
+    /// `REFRESH_TOKEN_RACE_LOST` kodu tam da bu senaryoyu öngörüyor, bkz.
+    /// mobile-bff error_wrapper.py). Tekilleştirme bu yarışı YAPISAL olarak
+    /// ortadan kaldırır — bu istemciden ASLA iki eşzamanlı refresh isteği
+    /// çıkmaz.
+    private var inFlightRefresh: Task<String?, Never>?
+
     /// 401 alındığında APIClient tarafından çağrılır — refresh token ile yeni
     /// bir access token almayı dener. Başarısızsa oturumu tamamen kapatır.
     @MainActor
     private func refreshTokens() async -> String? {
+        if let inFlightRefresh {
+            return await inFlightRefresh.value
+        }
+        let task = Task<String?, Never> { [weak self] in
+            await self?.performRefresh()
+        }
+        inFlightRefresh = task
+        let result = await task.value
+        inFlightRefresh = nil
+        return result
+    }
+
+    @MainActor
+    private func performRefresh() async -> String? {
         guard let refreshToken = KeychainStore.loadRefresh() else {
             handleUnauthorized()
             return nil
@@ -137,6 +181,20 @@ final class AuthEnvironment {
 
     @MainActor
     func appleSignIn(result: Result<ASAuthorization, Error>) async throws {
+        // Kullanıcı sistem sayfasını iptal ederse `result` `.failure(ASAuthorizationError.canceled)`
+        // olur — bu BAŞARISIZLIK değil, normal/beklenen bir kullanıcı eylemi.
+        // Düzeltme öncesi bu, `guard`in `else` dalına düşüp "Apple ile giriş
+        // başarısız." gösteriyordu — Google'ın kendi `GoogleSignInCoordinator.
+        // CoordinatorError.cancelled`ının AYNI ekranda ürettiği "Google girişi
+        // iptal edildi." ile tutarsız (M36 audit bulgusu): aynı kullanıcı
+        // eylemi (iptal), iki OAuth düğmesi arasında farklı, biri yanıltıcı
+        // şekilde alarm verici davranıyordu.
+        if case .failure(let error) = result,
+           let authError = error as? ASAuthorizationError,
+           authError.code == .canceled {
+            throw APIError.server(code: "APPLE_AUTH_CANCELLED", message: "Apple girişi iptal edildi.")
+        }
+
         guard
             case .success(let auth) = result,
             let credential = auth.credential as? ASAuthorizationAppleIDCredential,
@@ -162,6 +220,43 @@ final class AuthEnvironment {
             token: nil
         )
         persist(response: response)
+    }
+
+    // MARK: - Google Sign In
+
+    /// `ASWebAuthenticationSession`'ın döndürdüğü callback URL'sinden çıkarılan
+    /// `code`/`redirectUri` çiftini core-api'ye iletir — `appleSignIn`'le AYNI
+    /// akış (kod→token değişimi, client_secret DAHİL, yalnızca core-api'de
+    /// yapılır; bu istemci yalnızca tek kullanımlık authorization code'u taşır).
+    @MainActor
+    func googleSignIn(code: String, redirectUri: String) async throws {
+        isLoading = true
+        defer { isLoading = false }
+
+        let response: AuthResponse = try await apiClient.send(
+            .googleSignIn(code: code, redirectUri: redirectUri),
+            token: nil
+        )
+        persist(response: response)
+    }
+
+    // MARK: - Forgot / Reset Password
+
+    /// Sunucu hesap var/yok fark etmeksizin her zaman aynı genel yanıtı
+    /// döner (kullanıcı numaralandırmayı önlemek için) — bu yüzden burada
+    /// başarı/başarısızlık ayrımı YAPILMAZ, çağıran (ViewModel) her zaman
+    /// aynı genel mesajı gösterir.
+    @MainActor
+    func forgotPassword(email: String) async throws {
+        let _: StatusResponse = try await apiClient.send(.forgotPassword(email: email), token: nil)
+    }
+
+    @MainActor
+    func resetPassword(token: String, newPassword: String) async throws {
+        let _: StatusResponse = try await apiClient.send(
+            .resetPassword(token: token, newPassword: newPassword),
+            token: nil
+        )
     }
 
     // MARK: - Handle 401

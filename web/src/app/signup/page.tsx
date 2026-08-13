@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { register, saveAuthTokens } from "@/lib/api";
 import PasswordInput from "@/components/PasswordInput";
+import GoogleSignInButton from "@/components/GoogleSignInButton";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 
@@ -25,6 +26,7 @@ function SignupForm() {
 
   const handleSignup = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (loading) return; // çift-tıklama/yeniden-giriş koruması
     setLoading(true); setError("");
     const fd = new FormData(e.currentTarget);
     try {
@@ -88,23 +90,24 @@ function SignupForm() {
               { name: "email",    label: "E-posta",        type: "email", ph: "sen@ornek.com" },
             ].map(field => (
               <div key={field.name}>
-                <label className="font-mono text-xs text-text-tertiary uppercase tracking-widest block mb-2">
+                <label htmlFor={field.name} className="font-mono text-xs text-text-tertiary uppercase tracking-widest block mb-2">
                   {field.label}
                 </label>
                 <Input
-                  name={field.name} type={field.type} placeholder={field.ph}
+                  id={field.name} name={field.name} type={field.type} placeholder={field.ph}
                   required disabled={loading || success}
                 />
               </div>
             ))}
 
             <div>
-              <label className="font-mono text-xs text-text-tertiary uppercase tracking-widest block mb-2">
+              <label htmlFor="password" className="font-mono text-xs text-text-tertiary uppercase tracking-widest block mb-2">
                 Şifre
               </label>
               <PasswordInput
+                id="password"
                 name="password"
-                placeholder="••••••••"
+                placeholder="En az 8 karakter"
                 required
                 disabled={loading || success}
                 autoComplete="new-password"
@@ -122,6 +125,8 @@ function SignupForm() {
               )}
             </Button>
           </form>
+
+          <GoogleSignInButton next={redirectTo} disabled={loading || success} />
 
           <div className="border-t border-border my-7" />
 

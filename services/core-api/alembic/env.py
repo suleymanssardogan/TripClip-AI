@@ -12,8 +12,25 @@ load_dotenv()
 config = context.config
 
 # Logging
+#
+# M33: `disable_existing_loggers=False` EKLENDİ — kritik bir prod hatası.
+# `fileConfig()`'in Python varsayılanı `disable_existing_loggers=True`'dur:
+# alembic.ini'nin `[loggers]` bölümünde adı GEÇMEYEN (yani root/sqlalchemy/
+# alembic DIŞINDAKİ) her `logging.getLogger(...)` nesnesini `.disabled = True`
+# yapar. Bu dosya (`env.py`), core-api'nin KENDİ `run_migrations()`'ı
+# (app/core/migrations.py) tarafından HER startup'ta çağrılır — o ana kadar
+# import edilmiş TÜM modüllerin (video_processor, gemini_service,
+# rag_service, trip_assistant_service, vb. — pratikte HEPSİ, çünkü FastAPI
+# router'ları startup'tan ÖNCE eager import edilir) logger'ları BU ANDA
+# ZATEN var. Sonuç: ilk migration'dan SONRA `logger.info()`/`logger.warning()`
+# çağrıları UYGULAMANIN HER YERİNDE sessizce hiçbir şey YAPMAZ (istisna
+# fırlatmaz, sadece log ASLA görünmez) — bkz. docs/trip-assistant.md
+# "Observability" (M33'ün kendi yeni yapılandırılmış logu da dahil, bu
+# olmadan PROD'da HİÇ görünmezdi). Gerçek bir Python sürecinde doğrulandı:
+# `logger.disabled` bu satır olmadan `run_migrations()`'tan SONRA `True`
+# oluyordu.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # DATABASE_URL'yi ortam değişkeninden al —
 # alembic.ini içindeki placeholder'ı override eder
@@ -27,6 +44,7 @@ import app.models.user           # noqa: E402, F401  ← tabloları kayıt et
 import app.models.video          # noqa: E402, F401
 import app.models.plan           # noqa: E402, F401
 import app.models.refresh_token  # noqa: E402, F401
+import app.models.password_reset_token  # noqa: E402, F401
 import app.models.place          # noqa: E402, F401
 import app.models.place_save     # noqa: E402, F401
 import app.models.trip           # noqa: E402, F401

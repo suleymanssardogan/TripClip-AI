@@ -18,7 +18,14 @@ enum APIError: LocalizedError {
         case .notFound:                       return "İçerik bulunamadı."
         case .server(_, let message):         return message
         case .decoding:                       return "Sunucu yanıtı işlenemedi."
-        case .unknown(let code):              return "Beklenmeyen hata (HTTP \(code))."
+        // `statusCode: 0`, ViewModel'lerin genel `catch { .unknown(statusCode: 0) }`
+        // dalından gelir (gerçek bir HTTP yanıtı YOK, örn. beklenmeyen bir
+        // Swift hatası) — "Beklenmeyen hata (HTTP 0)." göstermek anlamsız/
+        // teknik bir sızıntıydı (M36 audit bulgusu). Yalnızca `APIClient.
+        // performSend`'in kendi `default:` dalından (gerçek, tanımlanamayan
+        // bir HTTP durum kodu) gelen `code > 0` durumunda gerçek kodu göster.
+        case .unknown(let code):
+            return code > 0 ? "Beklenmeyen hata (HTTP \(code))." : "Beklenmeyen bir hata oluştu."
         }
     }
 

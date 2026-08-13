@@ -57,6 +57,14 @@ struct LoginView: View {
                             .padding(.horizontal)
                     }
 
+                    // ── Şifremi Unuttum ─────────────────────────────────────
+                    NavigationLink("Şifremi unuttum") {
+                        ForgotPasswordView()
+                    }
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(AppColors.accentText)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+
                     // ── Submit ───────────────────────────────────────────────
                     Button {
                         Task { await vm.login(auth: auth) }
@@ -77,6 +85,11 @@ struct LoginView: View {
                     }
                     .buttonStyle(PressableButtonStyle())
                     .disabled(!vm.canSubmit)
+                    // Yüklenirken `Text` içeriği bir `ProgressView`e dönüşüyordu
+                    // ve VoiceOver'a hiçbir okunabilir etiket kalmıyordu (M36
+                    // audit bulgusu — Register/ForgotPassword/Reset/Optimizer
+                    // Uygula düğmelerinde AYNI desen düzeltildi).
+                    .accessibilityLabel(vm.isLoading ? "Giriş yapılıyor" : "Giriş Yap")
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 48)

@@ -25,6 +25,15 @@ _WEB_MESSAGES: dict[str, str] = {
     "AUTH_ERROR":                "E-posta adresi veya şifre hatalı. Lütfen bilgilerinizi kontrol edin.",
     "UNAUTHORIZED":              "Bu sayfayı görüntülemek için giriş yapmalısınız.",
     "PERMISSION_DENIED":         "Bu içeriğe erişim izniniz bulunmuyor.",
+    # M38 — `FORBIDDEN`/`SHARE_NOT_FOUND` burada hiç kayıtlı değildi
+    # (mobile-bff'de ikisi de vardı — cross-platform contract asimetrisi,
+    # M38 audit bulgusu). `FORBIDDEN`, core-api'nin `HTTPBearer`
+    # bağımlılığının Authorization header'ı HİÇ yokken (geçersiz/süresi
+    # dolmuş DEĞİL) fırlattığı FastAPI yerleşik 403'ünden gelir — bu ayrı
+    # bir davranış olduğundan `PERMISSION_DENIED`'ın mesajını YENİDEN
+    # kullanmak yerine ayrı bir girdi.
+    "FORBIDDEN":                 "Bu işlem için giriş yapmanız gerekiyor.",
+    "SHARE_NOT_FOUND":           "Bu davet artık mevcut değil.",
     "RATE_LIMIT_EXCEEDED":       "Çok fazla istek gönderildi. Lütfen bir süre bekleyip tekrar deneyin.",
     "DAILY_QUOTA_EXCEEDED":      "Günlük video işleme limitine ulaştınız. Lütfen yarın tekrar deneyin.",
     "VALIDATION_ERROR":          "Lütfen formdaki hataları düzeltin ve tekrar gönderin.",
@@ -41,6 +50,18 @@ _WEB_MESSAGES: dict[str, str] = {
     "STALE_UNDO":                "Yalnızca en son uygulama geri alınabilir. Bu kayıt artık en son değil.",
     "INVALID_ASSISTANT_REQUEST": "Lütfen asistana bir soru yazın.",
     "ASSISTANT_UNAVAILABLE":     "AI asistanı şu anda kullanılamıyor. Lütfen daha sonra tekrar deneyin.",
+    # M34 — REFRESH_TOKEN_* kodları burada da hiç kayıtlı değildi (mobile-bff
+    # ile aynı boşluk) ve varsayılan 400'e düşüyordu; core-api hepsini 401
+    # döndürür. Bkz. mobile-bff/app/core/error_wrapper.py'deki aynı düzeltme.
+    "REFRESH_TOKEN_INVALID":     "Oturumunuz geçersiz. Lütfen tekrar giriş yapın.",
+    "REFRESH_TOKEN_EXPIRED":     "Oturumunuzun süresi doldu. Lütfen tekrar giriş yapın.",
+    "REFRESH_TOKEN_REUSED":      "Güvenlik nedeniyle oturumunuz sonlandırıldı. Lütfen tekrar giriş yapın.",
+    "REFRESH_TOKEN_RACE_LOST":   "Oturum yenilenemedi. Lütfen tekrar deneyin.",
+    "PASSWORD_RESET_TOKEN_INVALID": "Bu şifre sıfırlama linki geçersiz.",
+    "PASSWORD_RESET_TOKEN_EXPIRED": "Bu şifre sıfırlama linkinin süresi doldu. Yeni bir şifre sıfırlama isteği gönderin.",
+    "PASSWORD_RESET_TOKEN_USED":    "Bu şifre sıfırlama linki daha önce kullanılmış.",
+    "GOOGLE_AUTH_UNAVAILABLE":      "Google ile giriş şu anda kullanılamıyor. Lütfen e-posta ile giriş yapın.",
+    "GOOGLE_EMAIL_NOT_VERIFIED":    "Bu e-posta adresiyle zaten bir hesap mevcut. Lütfen e-posta/şifre ile giriş yapın.",
 }
 
 _DEFAULT_MESSAGE = "Bir hata oluştu. Lütfen sayfayı yenileyip tekrar deneyin."
@@ -51,11 +72,16 @@ def _parse_core_error(data: dict) -> tuple[str, str, int]:
     code    = err.get("code", "INTERNAL_SERVER_ERROR")
     message = _WEB_MESSAGES.get(code, _DEFAULT_MESSAGE)
 
-    if code in {"UNAUTHORIZED", "AUTH_ERROR"}:
+    if code in {
+        "UNAUTHORIZED", "AUTH_ERROR",
+        "REFRESH_TOKEN_INVALID", "REFRESH_TOKEN_EXPIRED", "REFRESH_TOKEN_REUSED", "REFRESH_TOKEN_RACE_LOST",
+        "PASSWORD_RESET_TOKEN_INVALID", "PASSWORD_RESET_TOKEN_EXPIRED", "PASSWORD_RESET_TOKEN_USED",
+        "GOOGLE_AUTH_UNAVAILABLE", "GOOGLE_EMAIL_NOT_VERIFIED",
+    }:
         status = 401
-    elif code == "PERMISSION_DENIED":
+    elif code in {"PERMISSION_DENIED", "FORBIDDEN"}:
         status = 403
-    elif code in {"VIDEO_NOT_FOUND", "SHARE_TOKEN_INVALID", "TRIP_NOT_FOUND", "ITINERARY_NOT_FOUND", "APPLY_HISTORY_NOT_FOUND"}:
+    elif code in {"VIDEO_NOT_FOUND", "SHARE_TOKEN_INVALID", "SHARE_NOT_FOUND", "TRIP_NOT_FOUND", "ITINERARY_NOT_FOUND", "APPLY_HISTORY_NOT_FOUND"}:
         status = 404
     elif code in {"RATE_LIMIT_EXCEEDED", "DAILY_QUOTA_EXCEEDED"}:
         status = 429

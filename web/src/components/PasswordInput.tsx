@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 
 interface Props {
+  id?: string;
   name?: string;
   placeholder?: string;
   required?: boolean;
@@ -19,6 +20,7 @@ interface Props {
  * `name` ile form-data desteği var (login/signup'ta uncontrolled kullanım).
  */
 export default function PasswordInput({
+  id,
   name = "password",
   placeholder = "••••••••",
   required = false,
@@ -33,6 +35,7 @@ export default function PasswordInput({
   return (
     <div className="relative">
       <input
+        id={id}
         name={name}
         type={visible ? "text" : "password"}
         placeholder={placeholder}

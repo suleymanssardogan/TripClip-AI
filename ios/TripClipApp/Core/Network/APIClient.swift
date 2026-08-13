@@ -43,15 +43,21 @@ final class APIClient: APIClientProtocol, @unchecked Sendable {
         do {
             return try await performSend(endpoint, token: token)
         } catch APIError.unauthorized(let message) {
-            // Refresh endpoint'inin kendisi 401 dönerse tekrar refresh denemeye
-            // kalkışma — sonsuz döngüyü önler, refresh token da geçersizdir.
-            if case .refresh = endpoint {
+            // token: nil ile çağrılan (henüz oturum açılmamış) uç noktalar
+            // ASLA refresh denemesine girmemeli — 401'leri süresi dolmuş bir
+            // oturumla değil, kendi alan-özgü nedenleriyle ilgilidir (ör.
+            // Google girişinde GOOGLE_EMAIL_NOT_VERIFIED, şifre sıfırlamada
+            // PASSWORD_RESET_TOKEN_EXPIRED — mobile-bff error_wrapper.py'nin
+            // tamamı 401'e eşliyor). Buraya girip gereksiz bir refresh
+            // denemesi (ve varsa GERÇEKTEN giriş yapılmış, alakasız bir
+            // oturumun yan etki olarak yenilenmesi/logout edilmesi) ASLA
+            // olmamalı (M35 audit bulgusu). `.refresh`'in kendisi ayrıca
+            // sonsuz döngüyü önlemek için hariç tutulur.
+            switch endpoint {
+            case .refresh, .login, .register, .appleSignIn, .googleSignIn, .forgotPassword, .resetPassword:
                 throw APIError.unauthorized(message: message)
-            }
-            // Giriş/kayıt 401'i "yanlış şifre" demektir, süresi dolmuş oturum
-            // değil — refresh denemenin anlamı yok, sunucu mesajını geçir.
-            if case .login = endpoint {
-                throw APIError.unauthorized(message: message)
+            default:
+                break
             }
             guard let refreshHandler, let newToken = await refreshHandler() else {
                 throw APIError.unauthorized(message: message)
