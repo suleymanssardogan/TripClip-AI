@@ -15,6 +15,13 @@ import Foundation
 final class FakeAPIClient: APIClientProtocol, @unchecked Sendable {
 
     var result: Result<Any, Error> = .failure(APIError.unknown(statusCode: 0))
+    /// Ard arda gelen ÇAĞRILARA FARKLI sonuçlar vermek gerektiğinde (ör.
+    /// "ilk istek başarısız, ardından tetiklenen bir yeniden-çekme farklı
+    /// bir gövdeyle başarılı" — M39 `restoreAfterFailedStopEdit` testi)
+    /// doldurulur; her `send()` çağrısı burada bir eleman varsa onu POP'lar
+    /// (sırayla tüketir), boşsa tek/statik `result`'a düşer. Var olan tüm
+    /// testler `results`'ı hiç ayarlamadığı için davranışları DEĞİŞMEZ.
+    var results: [Result<Any, Error>] = []
     var gate: AsyncGate?
     var startedGate: AsyncGate?
 
@@ -30,6 +37,7 @@ final class FakeAPIClient: APIClientProtocol, @unchecked Sendable {
         if let startedGate { await startedGate.open() }
         if let gate { await gate.wait() }
 
+        let result = results.isEmpty ? self.result : results.removeFirst()
         switch result {
         case .success(let value):
             guard let typed = value as? T else {

@@ -181,6 +181,19 @@ final class ProcessingViewModel: ObservableObject {
             stage = .failed(message: "Oturum süresi doldu. Lütfen tekrar giriş yapın.")
             pollingTask?.cancel()
             elapsedTask?.cancel()
+        } catch APIError.notFound {
+            // 404 KALICIDIR, geçici bir ağ hatası değil — video artık yok
+            // (bu hesabın başka bir cihazından/ekranından silinmiş olabilir,
+            // JWT'li oturumlar birden fazla cihazda aynı anda geçerlidir).
+            // Önceden bu, aşağıdaki generic `catch`e düşüp polling'in
+            // sürmesine izin veriyordu; kullanıcı 300s'lik istemci zaman
+            // aşımına kadar "işleniyor, biraz daha bekleyin" görüyordu,
+            // ardından "Beklemeye Devam Et" ile YENİDEN 5 dakika daha
+            // var-olmayan bir videoyu poll'lamaya devam edebiliyordu
+            // (M39 audit bulgusu). Artık hemen, doğru mesajla sonlanıyor.
+            stage = .failed(message: "Bu video artık mevcut değil.")
+            pollingTask?.cancel()
+            elapsedTask?.cancel()
         } catch {
             // Diğer ağ hataları — kalıcı değil, polling sürer.
         }

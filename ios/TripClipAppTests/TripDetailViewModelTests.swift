@@ -25,6 +25,76 @@ final class TripDetailViewModelTests: XCTestCase {
         XCTAssertNil(vm.deleteError)
     }
 
+    // MARK: - load() stale-trip handling on 404 (M39)
+
+    /// M39 audit bulgusu: trip başka bir ekrandan/cihazdan silinmişse (aynı
+    /// hesap birden fazla cihazda oturum açabilir), `load()` başarısız
+    /// olduğunda eski `trip` değerini SESSİZCE tutmaya devam ediyordu — harita/
+    /// durak listesi/toolbar aksiyonları hiçbir hata görünmeden artık var
+    /// olmayan bir gezi üzerinde etkileşimli kalıyordu. 404'te artık `trip`
+    /// temizleniyor, `TripDetailView`in kendi `vm.trip == nil` hata dalı devreye girer.
+    func test_load_notFound_clearsStaleTrip() async {
+        let fake = FakeAPIClient()
+        let auth = makeAuth(fake: fake)
+        let vm = TripDetailViewModel()
+        await vm.load(tripID: 1, auth: auth, preloaded: TripDetail(id: 1, title: "Test Gezisi", totalDistanceKm: nil, createdAt: nil, stopsCount: 0, days: [], appliedItineraryId: nil, itineraryAppliedAt: nil))
+        XCTAssertNotNil(vm.trip)
+
+        fake.result = .failure(APIError.notFound)
+        await vm.load(tripID: 1, auth: auth)
+
+        XCTAssertNil(vm.trip, "Trip başka bir yerden silinmişse eski/hayalet veri EKRANDA KALMAMALI")
+        XCTAssertNotNil(vm.error)
+    }
+
+    /// AYNI değişikliğin ters yönü: GEÇİCİ (404 olmayan) bir hata eski
+    /// `trip`i SİLMEMELİ — aksi halde bir ağ blip'i, tıpkı düzeltme öncesi
+    /// gerçek silinme senaryosu gibi ekranı gereksiz yere boşaltırdı.
+    func test_load_transientError_preservesStaleTrip() async {
+        let fake = FakeAPIClient()
+        let auth = makeAuth(fake: fake)
+        let vm = TripDetailViewModel()
+        await vm.load(tripID: 1, auth: auth, preloaded: TripDetail(id: 1, title: "Test Gezisi", totalDistanceKm: nil, createdAt: nil, stopsCount: 0, days: [], appliedItineraryId: nil, itineraryAppliedAt: nil))
+        XCTAssertNotNil(vm.trip)
+
+        fake.result = .failure(APIError.server(code: "DATABASE_ERROR", message: "Sunucu geçici olarak kullanılamıyor."))
+        await vm.load(tripID: 1, auth: auth)
+
+        XCTAssertNotNil(vm.trip, "Geçici bir hata eski veriyi KORUMALI — yalnızca 404'te temizlenir")
+        XCTAssertNotNil(vm.error)
+    }
+
+    // MARK: - deleteStop/moveStops failure recovery (M39)
+
+    /// M39 audit bulgusu: `persistDay` beklerken paralel bir mutasyon
+    /// (optimizer apply, pull-to-refresh, vb.) sunucu durumunu zaten
+    /// değiştirmiş olabilir. Düzenleme başarısız olduğunda eski (düzenleme
+    /// ÖNCESİ) yerel `snapshot`'a körü körüne dönmek, o GÜNCEL sunucu
+    /// durumunu sessizce EZERdi. Artık başarısızlıkta sunucudan TAZE veri
+    /// çekiliyor — bu test, o taze veriyi (eski snapshot'ı DEĞİL) yansıttığını doğrular.
+    func test_deleteStop_failure_refetchesFromServer_insteadOfRestoringStaleSnapshot() async {
+        let fake = FakeAPIClient()
+        let auth = makeAuth(fake: fake)
+        let vm = TripDetailViewModel()
+        let stop = TripStop(placeId: 1, name: "Yer 1", latitude: 0, longitude: 0, city: nil, category: nil, dayIndex: 0, orderIndex: 0)
+        let originalTrip = TripDetail(id: 1, title: "Eski Başlık", totalDistanceKm: nil, createdAt: nil, stopsCount: 1, days: [[stop]], appliedItineraryId: nil, itineraryAppliedAt: nil)
+        await vm.load(tripID: 1, auth: auth, preloaded: originalTrip)
+
+        // Sanki bu istek beklerken paralel bir mutasyon zaten sunucudaki
+        // trip'i değiştirmiş gibi — başlık FARKLI, bu "taze çekilen" veriyi
+        // eski snapshot'tan ayırt etmek için kasıtlı.
+        let serverTruthAfterConcurrentChange = TripDetail(id: 1, title: "Sunucudaki Güncel Başlık", totalDistanceKm: nil, createdAt: nil, stopsCount: 1, days: [[stop]], appliedItineraryId: nil, itineraryAppliedAt: nil)
+        fake.results = [
+            .failure(APIError.server(code: "DATABASE_ERROR", message: "Sunucu geçici olarak kullanılamıyor.")),
+            .success(serverTruthAfterConcurrentChange),
+        ]
+
+        await vm.deleteStop(stop, auth: auth)
+
+        XCTAssertEqual(vm.trip?.title, "Sunucudaki Güncel Başlık", "Başarısızlık sonrası eski snapshot'a DEĞİL, sunucudan TAZE çekilen veriye dönülmeli")
+        XCTAssertNotNil(vm.stopEditError)
+    }
+
     // MARK: - refreshItineraryHistoryFlag / refreshApplyHistoryFlag unauthorized handling (M37)
 
     /// M37 regression: `preloaded:` ile açılan bir `TripDetailView`de

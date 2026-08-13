@@ -188,6 +188,16 @@ class SqlTripRepository(AbstractTripRepository):
         if access not in ("owner", "editor"):
             return "forbidden"
 
+        # Trip satırını kilitleyerek eşzamanlı iki `PATCH .../order` çağrısını
+        # (ör. sahip + editor collaborator, ya da aynı kullanıcının iki
+        # cihazı) SERİLEŞTİRİYORUZ (M39 audit bulgusu): kilit olmadan ikisi
+        # de aynı "eski" durumu okuyup delete+insert'lerini keyfi bir sırada
+        # iç içe geçirebiliyordu. Kilit, ikinci çağrının birincisi commit
+        # edene kadar burada BEKLEMESİNİ sağlar — sonuç hâlâ "son yazan
+        # kazanır" ama artık DETERMİNİSTİK ve torn olmayan bir last-write,
+        # rastgele iç içe geçme değil.
+        self._db.query(Trip).filter(Trip.id == trip_id).with_for_update().first()
+
         self._db.query(TripStop).filter(TripStop.trip_id == trip_id).delete()
 
         for day_index, day in enumerate(order):

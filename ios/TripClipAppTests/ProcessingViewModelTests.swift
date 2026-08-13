@@ -46,4 +46,29 @@ final class ProcessingViewModelTests: XCTestCase {
             return
         }
     }
+
+    /// M39 audit bulgusu: bir 404 (video başka bir cihazdan/ekrandan
+    /// silinmiş — aynı hesap birden fazla cihazda oturum açabilir) önceden
+    /// genel/kalıcı-olmayan bir ağ hatası gibi yutuluyor ve polling
+    /// SÜRDÜRÜLÜYORDU; kullanıcı 300s'lik istemci zaman aşımına kadar
+    /// "işleniyor, biraz bekleyin" görüyor, ardından "Beklemeye Devam Et"
+    /// ile var olmayan bir videoyu YENİDEN 5 dakika daha poll'layabiliyordu.
+    /// 404 KALICIDIR — artık polling'i hemen durdurup net bir mesajla
+    /// terminal `.failed` durumuna geçiyor.
+    func test_fetchProgress_notFound_stopsPollingImmediatelyWithClearMessage() async {
+        let fake = FakeAPIClient()
+        fake.result = .failure(APIError.notFound)
+        let vm = ProcessingViewModel(videoID: 1, apiClient: fake, token: "token")
+
+        vm.startMonitoring()
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        vm.stopMonitoring()
+
+        XCTAssertEqual(fake.callCount, 1, "404 sonrası polling HEMEN durmalı, tekrar tekrar denenmemeli")
+        guard case .failed(let message) = vm.stage else {
+            XCTFail("404 sonrası `stage` terminal bir `.failed` olmalı — gerçek: \(vm.stage)")
+            return
+        }
+        XCTAssertEqual(message, "Bu video artık mevcut değil.")
+    }
 }

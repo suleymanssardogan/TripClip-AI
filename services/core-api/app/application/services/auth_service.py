@@ -265,12 +265,20 @@ class AuthService:
                 code="PASSWORD_RESET_TOKEN_USED",
             )
 
+        # BİLEREK önce oturumları iptal edip SONRA şifreyi güncelliyoruz
+        # (M39 audit bulgusu): `update_password`/`revoke_all_for_user` aynı
+        # DB session'ı paylaşsa da her biri kendi `commit()`'ini yapan iki
+        # AYRI işlemdir — aralarında çökme/bağlantı kaybı olursa bu sıra,
+        # sonucun "şifre değişti ama eski oturumlar hâlâ geçerli" (bu
+        # metodun asıl güvenlik amacını baltalar) yerine "oturumlar iptal
+        # edildi ama şifre değişmedi, kullanıcı tekrar dener" tarafında
+        # hata vermesini garantiler — her zaman güvenli tarafta başarısız olur.
+        self._refresh_repo.revoke_all_for_user(user.id)
+
         try:
             self._repo.update_password(user.id, hash_password(new_password))
         except Exception as exc:
             raise DatabaseException("reset_password", str(exc))
-
-        self._refresh_repo.revoke_all_for_user(user.id)
 
     # ── Apple Sign In ─────────────────────────────────────────────────────────
     #

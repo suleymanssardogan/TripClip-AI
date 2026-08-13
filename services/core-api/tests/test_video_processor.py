@@ -5,12 +5,19 @@ Gerçek ML kütüphanelerini (YOLO ağırlığı indirme, Whisper/BERT model yü
 tetiklemeden, pipeline'ın hata izolasyon mekanizmalarını (_safe_run, _try_init,
 tek servis init hatasının diğerlerini etkilememesi) doğrular.
 """
+import threading
+import time
 from concurrent.futures import Future
 from unittest import mock
 
 import pytest
 
-from app.core.services.video_processor import VideoProcessingService, _safe_run
+from app.core.services.video_processor import (
+    VideoProcessingService,
+    _safe_run,
+    _FFmpegTimeout,
+    _FFmpegTimeoutGuard,
+)
 
 
 # ─── _safe_run ────────────────────────────────────────────────────────────────
@@ -94,3 +101,44 @@ def test_init_sets_ml_unavailable_on_import_error():
         service = VideoProcessingService()
 
     assert service._ml_available is False
+
+
+# ─── _FFmpegTimeoutGuard (M39 audit bulgusu) ─────────────────────────────────
+#
+# `--pool=solo` Celery'nin kendi task_soft_time_limit/task_time_limit'ini
+# uygulamıyor; ffmpeg-python'ın kendisi de subprocess çağrılarına bir
+# timeout parametresi sunmuyor. Bu testler, o boşluğu kapatan SIGALRM
+# tabanlı korumanın kendisini (gerçek ffmpeg'e hiç dokunmadan) doğrular.
+
+def test_ffmpeg_timeout_guard_raises_when_work_exceeds_timeout():
+    with pytest.raises(_FFmpegTimeout):
+        with _FFmpegTimeoutGuard(1, "test"):
+            time.sleep(2)
+
+
+def test_ffmpeg_timeout_guard_does_not_raise_when_work_finishes_in_time():
+    with _FFmpegTimeoutGuard(5, "test"):
+        time.sleep(0)  # anında biter — alarm hiç tetiklenmemeli
+
+
+def test_ffmpeg_timeout_guard_is_a_noop_off_the_main_thread():
+    """Sinyal işleyicileri yalnızca ANA thread'de kurulabilir — ana thread
+    dışında bu koruma sessizce devre dışı kalmalı (hata FIRLATMAMALI),
+    eski (korumasız) davranışa düşülür. Bu, koruma eklenmeden önce zaten var
+    olan davranıştır — regresyon değil, bilinçli bir sınır."""
+    result: dict = {}
+
+    def _worker():
+        try:
+            with _FFmpegTimeoutGuard(1, "test"):
+                time.sleep(0)
+            result["ok"] = True
+        except Exception as exc:  # pragma: no cover - başarısız olursa teşhis için
+            result["error"] = exc
+
+    t = threading.Thread(target=_worker)
+    t.start()
+    t.join(timeout=5)
+
+    assert result.get("ok") is True
+    assert "error" not in result

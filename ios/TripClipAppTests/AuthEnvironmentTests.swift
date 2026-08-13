@@ -240,6 +240,55 @@ final class AuthEnvironmentTests: XCTestCase {
         AppGroupStore.clearAll()
     }
 
+    // MARK: - Logout during an in-flight refresh (M39)
+
+    /// M39 audit bulgusu: bir refresh isteği DEVAM EDERKEN kullanıcı logout
+    /// olursa, sunucudan BAŞARILI bir yanıt gelse bile bu sonuç artık
+    /// GEÇERSİZ sayılmalı — aksi halde `persist()` logout'u sessizce geri
+    /// alır (Keychain'e YENİ bir geçerli token çifti yazarak, oturumu
+    /// "diriltir"). `sessionEpoch`, `logout()`'un kendi ağ çağrısıyla (fake'in
+    /// tek `result`'ıyla tip çakışmasını önlemek için burada refresh token'ı
+    /// gate açılmadan ÖNCE Keychain'den siliyoruz — `logout()` böylece kendi
+    /// best-effort bildirimini ATLAR, ama zaten YAKALANMIŞ olan in-flight
+    /// refresh'in kendi yerel `refreshToken` değişkenini ETKİLEMEZ; test
+    /// ettiğimiz yarış tam olarak aynı kalır) bu geç gelen yanıtın SESSİZCE
+    /// uygulanmasını yapısal olarak engeller.
+    func test_refreshCompletingAfterLogout_doesNotResurrectSession() async {
+        let fake = FakeAPIClient()
+        let started = AsyncGate()
+        let proceed = AsyncGate()
+        fake.startedGate = started
+        fake.gate = proceed
+        fake.result = .success(AuthResponse(
+            accessToken: "new-at", refreshToken: "new-rt", userId: 1, email: "u@test.com", tokenType: "bearer"
+        ))
+        let auth = AuthEnvironment(apiClient: fake)
+        auth.setUserForTesting(AuthUser(id: 1, email: "u@test.com", token: "not-a-real-jwt"))
+        KeychainStore.saveRefresh("old-refresh-token")
+
+        let refreshTask = Task { await auth.validAccessToken() }
+        await started.wait()  // refresh isteği başladı (kendi refreshToken'ını zaten yakaladı), henüz sonuçlanmadı
+
+        // logout()'un KENDİ best-effort ağ çağrısını atlaması için — aksi
+        // halde fake'in tek `result`'ı (bir AuthResponse) logout'un beklediği
+        // StatusResponse tipine dönüştürülemeyip test'i çökertirdi. Zaten
+        // devam eden refresh isteği bundan ETKİLENMEZ (yukarıdaki yorum).
+        KeychainStore.deleteRefresh()
+        auth.logout()
+        XCTAssertFalse(auth.isAuthenticated, "logout() hemen etkili olmalı")
+
+        await proceed.open()  // gecikmiş refresh yanıtı ŞİMDİ, logout SONRASI döner
+        let result = await refreshTask.value
+
+        XCTAssertNil(result, "Logout sonrası tamamlanan bir refresh, yeni bir token DÖNDÜRMEMELİ")
+        XCTAssertFalse(auth.isAuthenticated, "Gecikmiş refresh yanıtı logout'u SESSİZCE GERİ ALMAMALI")
+        XCTAssertNil(auth.user)
+
+        KeychainStore.delete()
+        KeychainStore.deleteRefresh()
+        AppGroupStore.clearAll()
+    }
+
     // MARK: - Logout
 
     func test_logout_clearsUser() {

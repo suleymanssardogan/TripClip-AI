@@ -258,7 +258,19 @@ class SqlOptimizationRepository(AbstractOptimizationRepository):
         if access not in ("owner", "editor"):
             return {"status": "forbidden"}
 
-        trip = self._db.query(Trip).filter(Trip.id == itinerary.trip_id).first()
+        # Trip satırını kilitleyerek bu apply'ı, AYNI trip üzerindeki
+        # eşzamanlı apply/undo/delete çağrılarıyla SERİLEŞTİRİYORUZ (M39
+        # audit bulgusu): kilit olmadan iki eşzamanlı apply, "önceki
+        # durum"u (previous_stops_snapshot/previous_itinerary_id) AYNI, artık
+        # bayat okumadan alabiliyor, ve hangisi son commit ederse audit
+        # trail'de öbürünün hiç olmamış gibi görünmesine, sonraki bir
+        # undo'nun da yanlış bir "önceki" duruma dönmesine yol açabiliyordu.
+        # `SELECT ... FOR UPDATE` ikinci çağrının birincisi commit edene
+        # kadar burada BEKLEMESİNİ sağlar — "önceki durum" okuması artık
+        # her zaman GERÇEKTEN en güncel commit'lenmiş durumdur. Aynı kilit,
+        # bu itinerary'yi eşzamanlı silen bir `delete_itinerary` çağrısıyla
+        # yarışı da kapatır (bkz. o metodun kendi kilidi).
+        trip = self._db.query(Trip).filter(Trip.id == itinerary.trip_id).with_for_update().first()
         if trip is None:
             # Pratikte olamaz (trip_itineraries.trip_id ON DELETE CASCADE ile
             # trips'e bağlı — trip silinirse itinerary de gider) ama
@@ -361,6 +373,17 @@ class SqlOptimizationRepository(AbstractOptimizationRepository):
         if access not in ("owner", "editor"):
             return "forbidden"
 
+        # Trip satırını `apply_itinerary`/`undo_apply_history` ile AYNI kilit
+        # deseniyle, mümkün olduğunca ERKEN (herhangi bir alt kayıt
+        # silinmeden ÖNCE) kilitliyoruz (M39 audit bulgusu): kilit olmadan,
+        # bu itinerary'yi eşzamanlı UYGULAMAKTA olan bir `apply_itinerary`
+        # çağrısı, bu silme commit olduktan SONRA `trip_itinerary_apply_history`
+        # satırını artık var olmayan bu `itinerary_id`'ye referansla eklemeye
+        # çalışıp beklenmedik bir FK hatası/500 üretebiliyordu. Kilit bu iki
+        # çağrıyı serileştirir; hangisi önce commit ederse etsin, diğeri kendi
+        # (zaten var olan, temiz) hata yoluna düşer.
+        trip = self._db.query(Trip).filter(Trip.id == itinerary.trip_id).with_for_update().first()
+
         # SQLite test ortamında FK ondelete=CASCADE/SET NULL pragma
         # (`PRAGMA foreign_keys=ON`) olmadan uygulanmaz — bu yüzden alt
         # kayıtları ve Trip.applied_itinerary_id referansını burada elle
@@ -371,7 +394,6 @@ class SqlOptimizationRepository(AbstractOptimizationRepository):
             TripItineraryStop.itinerary_id == itinerary_id
         ).delete()
 
-        trip = self._db.query(Trip).filter(Trip.id == itinerary.trip_id).first()
         if trip is not None and trip.applied_itinerary_id == itinerary_id:
             # Dangling FK bırakma — bu itinerary "son uygulanan" olarak
             # işaretliyse referansı temizle (bkz. Trip.applied_itinerary_id
@@ -445,7 +467,14 @@ class SqlOptimizationRepository(AbstractOptimizationRepository):
         if access not in ("owner", "editor"):
             return {"status": "forbidden"}
 
-        trip = self._db.query(Trip).filter(Trip.id == trip_id).first()
+        # `apply_itinerary`/`delete_itinerary` ile AYNI kilit ve gerekçe (M39
+        # audit bulgusu): kilit olmadan, aşağıdaki "en son kayıt bu mu?"
+        # taze-değil kontrolü bir TOCTOU'ydu — bu kontrol GEÇTİKTEN sonra ama
+        # bu transaction commit OLMADAN önce eşzamanlı bir apply/undo yeni,
+        # daha büyük id'li bir history kaydı commit edip bu undo'yu bayat bir
+        # duruma göre uygulayabiliyordu. Kilit, "en son" kontrolünün
+        # gerçekten GÜNCEL veriye karşı yapılmasını garantiler.
+        trip = self._db.query(Trip).filter(Trip.id == trip_id).with_for_update().first()
         if trip is None:
             return {"status": "trip_not_found"}
 

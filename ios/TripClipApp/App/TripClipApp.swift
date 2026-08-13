@@ -5,7 +5,13 @@ struct TripClipApp: App {
 
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
-    @State private var auth = AuthEnvironment()
+    /// Tek bir somut `APIClient` örneği — `AuthEnvironment.init` bunun
+    /// `refreshHandler`'ını bağlar. `AppDelegate`'e de AYNI örnek verilir
+    /// (bkz. `init()`) ki arka planda atılan APNs token kaydı isteği de
+    /// 401→refresh→tekrar akışından geçsin (M39 audit bulgusu).
+    private let apiClient = APIClient()
+
+    @State private var auth: AuthEnvironment
     /// Uygulama oturumu boyunca yaşayan, ekran ömrünü aşan paylaşılan
     /// optimizer rota önbelleği — `AuthEnvironment` ile AYNI DI deseni
     /// (burada bir kez oluşturulup `.environment()` ile enjekte edilir,
@@ -23,6 +29,11 @@ struct TripClipApp: App {
     /// docs/ios-trip-optimizer.md "Persistent Optimizer Configuration".
     @State private var optimizerConfigurationStore = OptimizerConfigurationStore()
     private let persistence = PersistenceController.shared
+
+    init() {
+        _auth = State(initialValue: AuthEnvironment(apiClient: apiClient))
+        appDelegate.apiClient = apiClient
+    }
 
     var body: some Scene {
         WindowGroup {

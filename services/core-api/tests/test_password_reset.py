@@ -222,6 +222,44 @@ def test_reset_password_revokes_existing_refresh_tokens(client):
     assert refresh_resp.status_code == 401
 
 
+def test_reset_password_revokes_sessions_even_if_password_update_fails(client, monkeypatch):
+    """M39 audit bulgusu: `AuthService.reset_password` artık
+    `revoke_all_for_user`'ı `update_password`'DAN ÖNCE çağırıyor — ikisi
+    ayrı commit'ler olduğu için aralarında bir hata/çökme olursa sonucun
+    "şifre değişti ama eski oturumlar hâlâ geçerli" (bu metodun asıl
+    güvenlik amacını baltalayan bir durum) yerine "oturumlar iptal edildi
+    ama şifre değişmedi, kullanıcı tekrar dener" tarafında kalmasını
+    garantiler. Burada `update_password`'ın KENDİSİ hata fırlatacak şekilde
+    monkeypatch'lenir; eski refresh token'ın YİNE DE artık geçersiz olduğu
+    doğrulanır."""
+    user = _register(client, password="OldPassword123!")
+    old_refresh_token = user["refresh_token"]
+    token = _request_reset_and_capture_token(client, user["email"])
+
+    def _boom(self, user_id, hashed_password):
+        raise RuntimeError("simulated DB failure")
+
+    monkeypatch.setattr(
+        "app.infrastructure.repositories.sql_user_repository.SqlUserRepository.update_password",
+        _boom,
+    )
+
+    resp = client.post("/internal/auth/reset-password", json={
+        "token": token, "new_password": "NewPassword456!",
+    })
+    assert resp.status_code >= 500
+
+    # Şifre GÜNCELLENMEDİ — eski şifreyle giriş hâlâ çalışır.
+    login_resp = client.post("/internal/auth/login", json={
+        "email": user["email"], "password": "OldPassword123!",
+    })
+    assert login_resp.status_code == 200
+
+    # ...ama eski oturum YİNE DE iptal edildi — çökme güvenli tarafta oldu.
+    refresh_resp = client.post("/internal/auth/refresh", json={"refresh_token": old_refresh_token})
+    assert refresh_resp.status_code == 401
+
+
 # ─── Rate limiting (existing convention: sensitive auth ops) ────────────────
 
 def test_forgot_password_is_rate_limited(client):

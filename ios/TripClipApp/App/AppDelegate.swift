@@ -4,6 +4,16 @@ import UserNotifications
 
 final class AppDelegate: NSObject, UIApplicationDelegate {
 
+    /// `TripClipApp.init()` bunu, `AuthEnvironment`'ın `refreshHandler`'ını
+    /// bağladığı AYNI paylaşılan örnekle değiştirir — böylece burada atılan
+    /// istekler de 401→refresh→tekrar akışından geçer (M39 audit bulgusu:
+    /// önceden burada refreshHandler'sız taze bir `APIClient()` oluşturuluyordu,
+    /// süresi dolmuş bir access token'la APNs kaydı sessizce hiç
+    /// tamamlanmıyordu — bkz. `sendDeviceTokenToBackend`). Varsayılan değer
+    /// yalnızca `TripClipApp.init()` çalışmadan bu noktaya ulaşılan
+    /// (pratikte imkânsız) bir durum için zararsız bir yedek.
+    var apiClient = APIClient()
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
@@ -46,7 +56,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         guard let accessToken = KeychainStore.load() else { return }
         Task {
             do {
-                let _: StatusResponse = try await APIClient().send(
+                let _: StatusResponse = try await apiClient.send(
                     .registerDeviceToken(token: token),
                     token: accessToken
                 )

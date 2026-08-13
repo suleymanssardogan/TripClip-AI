@@ -26,6 +26,16 @@ final class TripDetailViewModel {
             trip = try await auth.apiClient.send(.tripDetail(tripID: tripID), token: token)
         } catch let apiError as APIError {
             if apiError.isUnauthorized { auth.handleUnauthorized(); return }
+            if case .notFound = apiError {
+                // Trip başka bir ekrandan/cihazdan silinmiş olabilir (aynı
+                // hesap birden fazla cihazda oturum açabilir) — eski `trip`
+                // değerini SESSİZCE tutmaya devam etmek, artık var olmayan
+                // bir gezi üzerinde harita/durak listesi/toolbar aksiyonlarının
+                // hiçbir hata görünmeden etkileşimli kalmasına yol açıyordu
+                // (M39 audit bulgusu). Diğer (geçici ağ) hatalarında `trip`
+                // KORUNUR — yalnızca sunucunun "artık yok" dediği durumda temizlenir.
+                trip = nil
+            }
             error = apiError
             Logger.network.warning("Trip load failed: \(apiError.localizedDescription ?? "")")
         } catch {
@@ -132,12 +142,29 @@ final class TripDetailViewModel {
             )
         } catch let apiError as APIError {
             if apiError.isUnauthorized { auth.handleUnauthorized(); return }
-            trip = snapshot
+            await restoreAfterFailedStopEdit(snapshot: snapshot, auth: auth)
             stopEditError = apiError.localizedDescription
             Logger.network.warning("Trip stop order save failed: \(apiError.localizedDescription ?? "")")
         } catch {
-            trip = snapshot
+            await restoreAfterFailedStopEdit(snapshot: snapshot, auth: auth)
             stopEditError = "Değişiklik kaydedilemedi."
+        }
+    }
+
+    /// Başarısız bir durak düzenlemesinden sonra `snapshot`'a (düzenleme
+    /// ÖNCESİ yerel durum) körü körüne DÖNMEK yerine sunucudan TAZE veriyi
+    /// çeker (M39 audit bulgusu): `persistDay` beklerken paralel bir
+    /// pull-to-refresh/mutasyon-callback'i (`onApplied`/`onDeleted`/`onChanged`,
+    /// hepsi `load()` çağırır) sunucu durumunu zaten güncellemiş olabilir —
+    /// eski `snapshot`'a dönmek o GÜNCEL veriyi sessizce EZERdi. Sunucu her
+    /// zaman tek doğruluk kaynağıdır; taze çekme de başarısız olursa (ör. ağ
+    /// tamamen kopuk) en azından tutarlı bir durum için `snapshot`'a düşülür.
+    private func restoreAfterFailedStopEdit(snapshot: TripDetail, auth: AuthEnvironment) async {
+        guard let token = auth.user?.token else { trip = snapshot; return }
+        do {
+            trip = try await auth.apiClient.send(.tripDetail(tripID: snapshot.id), token: token)
+        } catch {
+            trip = snapshot
         }
     }
 

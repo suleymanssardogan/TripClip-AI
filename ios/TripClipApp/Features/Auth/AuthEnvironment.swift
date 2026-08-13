@@ -95,6 +95,11 @@ final class AuthEnvironment {
 
     @MainActor
     func logout() {
+        // `performRefresh()`'in bu epoch'u yakaladığı andan sonra logout
+        // çağrılırsa, refresh sunucudan BAŞARIYLA dönse bile artık geçersiz
+        // sayılır (M39 audit bulgusu) — bkz. performRefresh().
+        sessionEpoch += 1
+
         // Sunucu tarafında da refresh token'ı iptal et — best-effort, UI'ı bloklamaz.
         if let refreshToken = KeychainStore.loadRefresh() {
             Task {
@@ -140,6 +145,10 @@ final class AuthEnvironment {
     /// çıkmaz.
     private var inFlightRefresh: Task<String?, Never>?
 
+    /// `logout()` tarafından artırılır — `performRefresh()`'in başladığı andaki
+    /// değeri yakalayıp sonunda karşılaştırması için (bkz. aşağısı).
+    private var sessionEpoch = 0
+
     /// 401 alındığında APIClient tarafından çağrılır — refresh token ile yeni
     /// bir access token almayı dener. Başarısızsa oturumu tamamen kapatır.
     @MainActor
@@ -158,6 +167,15 @@ final class AuthEnvironment {
 
     @MainActor
     private func performRefresh() async -> String? {
+        // Bu refresh'in SONUCU, kullanıcı bu await sırasında logout olduysa
+        // artık geçerli değildir — sunucu tarafında yeni bir token çifti
+        // gerçekten oluşmuş olsa bile, bunu yerel oturuma UYGULAMAK
+        // logout'u sessizce geri alır (M39 audit bulgusu: az önce
+        // `KeychainStore.delete()` ile temizlenen oturum, gecikmiş bir
+        // refresh yanıtıyla yeniden dirilirdi). `sessionEpoch` bunu YAPISAL
+        // olarak imkânsız kılar — `inFlightRefresh` ile AYNI tekilleştirme
+        // ilkesi, farklı bir yarış koşulu için.
+        let epochAtStart = sessionEpoch
         guard let refreshToken = KeychainStore.loadRefresh() else {
             handleUnauthorized()
             return nil
@@ -167,10 +185,15 @@ final class AuthEnvironment {
                 .refresh(refreshToken: refreshToken),
                 token: nil
             )
+            guard sessionEpoch == epochAtStart else {
+                Logger.auth.info("Refresh completed after logout — discarding result")
+                return nil
+            }
             persist(response: response)
             Logger.auth.info("Access token refreshed")
             return response.accessToken
         } catch {
+            guard sessionEpoch == epochAtStart else { return nil }
             Logger.auth.error("Token refresh failed: \(error.localizedDescription)")
             handleUnauthorized()
             return nil
