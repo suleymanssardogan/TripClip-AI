@@ -24,6 +24,7 @@ struct ItineraryApplyHistoryView: View {
 
             if vm.isLoading && vm.entries.isEmpty {
                 ProgressView().tint(AppColors.accentText)
+                    .accessibilityLabel("Yükleniyor")
             } else if let error = vm.error, vm.entries.isEmpty {
                 errorState(error)
             } else if vm.entries.isEmpty {

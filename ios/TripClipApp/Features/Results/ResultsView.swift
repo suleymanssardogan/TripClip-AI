@@ -13,6 +13,10 @@ struct ResultsView: View {
     @State private var focusedPin: LocationPin?
     /// Durak düzenleme modu — kartlar sil/taşı kontrollerine dönüşür.
     @State private var isEditing = false
+    /// Silme onayı bekleyen durak — `TripDetailView`'ın kendi `stopPendingDeletion`
+    /// deseniyle AYNI (M34 audit bulgusu: bu ekranda da silme tek dokunuşla
+    /// ANINDA gerçekleşiyordu).
+    @State private var pinPendingDeletion: LocationPin?
 
     /// Karta basınca haritaya geri kaydırmak için ScrollView çapası.
     private static let mapAnchor = "trip-map"
@@ -35,6 +39,7 @@ struct ResultsView: View {
             if vm.isLoading {
                 ProgressView()
                     .tint(AppColors.accentText)
+                    .accessibilityLabel("Yükleniyor")
             } else if let error = vm.error {
                 errorView(error)
             } else if let plan = vm.plan {
@@ -82,6 +87,24 @@ struct ResultsView: View {
             Button("Tamam", role: .cancel) { vm.stopEditError = nil }
         } message: {
             Text(vm.stopEditError ?? "")
+        }
+        .confirmationDialog(
+            "Bu durağı silmek istiyor musun?",
+            isPresented: Binding(
+                get: { pinPendingDeletion != nil },
+                set: { if !$0 { pinPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Sil", role: .destructive) {
+                guard let pin = pinPendingDeletion else { return }
+                pinPendingDeletion = nil
+                if focusedPin?.index == pin.index { focusedPin = nil }
+                Task { await vm.deleteStop(pin, auth: auth) }
+            }
+            Button("Vazgeç", role: .cancel) { pinPendingDeletion = nil }
+        } message: {
+            Text("Bu işlem geri alınamaz.")
         }
         .task { await vm.load(planID: planID, auth: auth, preloaded: preloadedPlan) }
         .onDisappear { vm.stopTipsPolling() }
@@ -148,6 +171,13 @@ struct ResultsView: View {
                     }
                     .padding(.horizontal, 16)
                     .disabled(vm.isSavingStops)
+                } else {
+                    // Kullanıcı düzenleme modunda TÜM mekanları silerse (ya da
+                    // analiz sıfır mekan bulmuşsa) ekranın bu bölümü daha önce
+                    // BOMBOŞ kalıyordu — hiçbir açıklama, hiçbir ikon (M36 audit
+                    // bulgusu). `TripDetailView.emptyStopsState`'in AYNI görsel
+                    // dili, ikinci bir desen İCAT EDİLMEDİ.
+                    emptyLocationsState.padding(.horizontal, 16)
                 }
 
                 if !plan.travelTips.isEmpty {
@@ -217,6 +247,23 @@ struct ResultsView: View {
 
     // MARK: - Durak Düzenleme
 
+    /// `TripDetailView.emptyStopsState`'in AYNI görsel dili (ikon +
+    /// açıklayıcı tek satır, dikey ortalı) — bu ekranın da aynı "tüm
+    /// duraklar silindi" senaryosu var (`editActions`'daki `onDelete`),
+    /// ama daha önce hiçbir karşılığı yoktu.
+    private var emptyLocationsState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "mappin.slash")
+                .font(.system(size: 32))
+                .foregroundStyle(AppColors.textTertiary)
+            Text("Tüm mekanlar silindi")
+                .font(.system(size: 14))
+                .foregroundStyle(AppColors.textSecondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+    }
+
     private func locationsHeader(_ plan: PlanDetail) -> some View {
         HStack {
             Text("Keşfedilen Mekanlar (\(plan.locations.count))")
@@ -253,10 +300,7 @@ struct ResultsView: View {
                 Task { await vm.moveStops(from: [offset], to: offset + 2, auth: auth) }
             },
             onDelete: {
-                // Silinen durak haritada odaktaysa odağı bırak, yoksa harita
-                // artık var olmayan bir pine zoom yapmayı sürdürür.
-                if focusedPin?.index == pin.index { focusedPin = nil }
-                Task { await vm.deleteStop(pin, auth: auth) }
+                pinPendingDeletion = pin
             }
         )
     }

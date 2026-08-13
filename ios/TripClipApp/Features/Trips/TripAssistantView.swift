@@ -17,6 +17,14 @@ struct TripAssistantView: View {
 
     let tripID: Int
     let trip: TripDetail
+    /// `TripDetailView`'ın kendi `@State`'i olarak sahiplenilir (bu view
+    /// KENDİ `@State`'i olarak DEĞİL) — bir referans durağa dokunmak bu
+    /// ekranı `dismiss()` eder ve `TripDetailView`'daki `NavigationLink`
+    /// hedefi bir sonraki girişte YENİDEN değerlendirilir; `vm` burada
+    /// `@State` olsaydı her seferinde sıfırdan bir `TripAssistantViewModel`
+    /// oluşturulup TÜM sohbet geçmişi kaybolurdu (M35 audit bulgusu — bkz.
+    /// TripDetailView'daki `assistantVM`).
+    let vm: TripAssistantViewModel
     /// Bir referans durağa dokunulduğunda çağrılır — `TripDetailView`
     /// kendi paylaşılan seçimini (`OptimizerSelection`) bununla günceller
     /// ve bu ekranı kapatır (Req 8 "the UI should be capable of
@@ -27,7 +35,6 @@ struct TripAssistantView: View {
 
     @Environment(AuthEnvironment.self) private var auth
     @Environment(\.dismiss) private var dismiss
-    @State private var vm = TripAssistantViewModel()
     @State private var inputText = ""
     @FocusState private var inputFocused: Bool
 
@@ -48,7 +55,7 @@ struct TripAssistantView: View {
                             }
                             if vm.sending {
                                 HStack(spacing: 8) {
-                                    ProgressView().controlSize(.small)
+                                    ProgressView().controlSize(.small).tint(AppColors.accentText)
                                     Text("Düşünüyor…")
                                         .font(.system(size: 13))
                                         .foregroundStyle(AppColors.textSecondary)

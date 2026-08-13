@@ -52,6 +52,15 @@ final class TripDetailViewModel {
                 .itineraries(tripID: tripID), token: token
             )
             hasItineraryHistory = !response.itineraries.isEmpty
+        } catch let apiError as APIError where apiError.isUnauthorized {
+            // `preloaded:` ile açılan bir TripDetailView'da (bkz. LibraryView
+            // "Gezi Oluştur" sonrası) `load()` HİÇ ağa gitmez — bu iki
+            // best-effort çağrı o durumda ekrandaki TEK gerçek istek olabilir.
+            // Sessizce yutulan bir 401, oturum GERÇEKTEN sona ermişken
+            // kullanıcının süresiz biçimde "giriş yapmış" görünmesine yol
+            // açıyordu (M37 audit bulgusu — diğer TÜM authenticated
+            // çağrıların zaten yaptığı kontrol burada eksikti).
+            auth.handleUnauthorized()
         } catch {
             // best-effort — gösterge sessizce false kalır
         }
@@ -74,6 +83,10 @@ final class TripDetailViewModel {
                 .applyHistory(tripID: tripID), token: token
             )
             hasApplyHistory = !response.entries.isEmpty
+        } catch let apiError as APIError where apiError.isUnauthorized {
+            // Bkz. `refreshItineraryHistoryFlag`'in AYNI gerekçesi (M37 audit
+            // bulgusu).
+            auth.handleUnauthorized()
         } catch {
             // best-effort — gösterge sessizce false kalır
         }

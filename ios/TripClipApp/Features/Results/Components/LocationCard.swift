@@ -80,6 +80,11 @@ struct LocationCard: View {
             }
             .disabled(!edit.canMoveUp)
             .foregroundStyle(edit.canMoveUp ? AppColors.textSecondary : AppColors.textTertiary)
+            // Sembol-yalnızca düğmeler VoiceOver'a yalnızca genel SF Symbol
+            // adını ("chevron up") anons eder, EYLEMİ değil (M35 audit
+            // bulgusu) — bu, VoiceOver kullanıcısının bir durağı yeniden
+            // sıralayabileceği/silebileceği TEK yol olduğu için önemli.
+            .accessibilityLabel("Yukarı taşı")
 
             Button(action: edit.onMoveDown) {
                 Image(systemName: "chevron.down")
@@ -88,6 +93,7 @@ struct LocationCard: View {
             }
             .disabled(!edit.canMoveDown)
             .foregroundStyle(edit.canMoveDown ? AppColors.textSecondary : AppColors.textTertiary)
+            .accessibilityLabel("Aşağı taşı")
 
             Button(action: edit.onDelete) {
                 Image(systemName: "trash")
@@ -95,6 +101,7 @@ struct LocationCard: View {
                     .frame(width: 30, height: 30)
             }
             .foregroundStyle(AppColors.destructive)
+            .accessibilityLabel("Durağı sil")
         }
         .buttonStyle(.plain)
     }

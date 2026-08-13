@@ -4,6 +4,16 @@ struct TripsListView: View {
 
     @Environment(AuthEnvironment.self) private var auth
     @State private var vm = TripsListViewModel()
+    /// `.task` yalnızca BİR KEZ çalışır (view kimliği boyunca) — bu liste bir
+    /// trip'e girip (silme/durak düzenleme yapıp) geri dönüldüğünde YENİDEN
+    /// tetiklenmez, bu yüzden silinen bir trip'in satırı listede KALIR ve
+    /// durak sayısı bayatlar. `HomeView`'in KENDİ AYNI sorunu için kullandığı
+    /// `.onChange(of: navPath.count)` çözümü burada uygulanamaz (bu ekran
+    /// kendi `NavigationStack`'ini sahiplenmiyor, `LibraryView`'ın stack'ine
+    /// bir `NavigationLink` hedefi olarak push ediliyor) — bunun yerine
+    /// `.onAppear`, pushed bir child'dan geri dönüldüğünde de güvenilir
+    /// biçimde tetiklenen daha genel sinyal (M35 audit bulgusu).
+    @State private var hasAppearedOnce = false
 
     var body: some View {
         ZStack {
@@ -11,6 +21,7 @@ struct TripsListView: View {
 
             if vm.isLoading && vm.trips.isEmpty {
                 ProgressView().tint(AppColors.accentText)
+                    .accessibilityLabel("Yükleniyor")
             } else if let error = vm.error, vm.trips.isEmpty {
                 errorState(error)
             } else if vm.trips.isEmpty {
@@ -22,6 +33,12 @@ struct TripsListView: View {
         .navigationTitle("Gezilerim")
         .navigationBarTitleDisplayMode(.inline)
         .task { await vm.load(auth: auth) }
+        .onAppear {
+            if hasAppearedOnce {
+                Task { await vm.load(auth: auth) }
+            }
+            hasAppearedOnce = true
+        }
         .refreshable { await vm.load(auth: auth) }
     }
 

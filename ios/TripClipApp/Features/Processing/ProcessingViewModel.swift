@@ -153,8 +153,36 @@ final class ProcessingViewModel: ObservableObject {
                 token: token
             )
             apply(response: response)
+        } catch let apiError as APIError where apiError.isUnauthorized {
+            // Diğer TÜM ViewModel'ler 401'de polling/isteği hemen durdurur
+            // (bkz. HomeViewModel, TripDetailViewModel vb. — hepsi
+            // `isUnauthorized` kontrol edip `auth.handleUnauthorized()`
+            // çağırır); burası bunu YAPMIYORDU, bu yüzden oturum sona
+            // erdikten sonra bile 300s'e kadar 2 saniyede bir gereksiz
+            // yere denemeye devam ediyordu (M35 audit bulgusu). Global
+            // logout zaten `APIClient`'ın kendi refresh sarmalayıcısı
+            // üzerinden tetiklenir (bu ViewModel'in bir `AuthEnvironment`
+            // referansı yok, yalnızca çağırdığı `apiClient`) — burada
+            // yalnızca artık anlamsız hale gelen döngüyü ERKEN durduruyoruz.
+            //
+            // M37 audit bulgusu: `APIClient.send`'in kendisi bir refresh
+            // deneyip BAŞARILI olursa (yeni token alınır) ama tekrarlanan
+            // istek YİNE 401 dönerse — nadir ama mümkün bir uç durum —
+            // `AuthEnvironment.handleUnauthorized()` o ikinci 401 için HİÇ
+            // çağrılmaz (yalnızca refresh'in KENDİSİ başarısız olursa
+            // çağrılır). Bu durumda `RootView` henüz WelcomeView'a
+            // geçmemiş olabilir ve bu ekran, önceden, sonsuza dek donmuş
+            // (görevler iptal ama `stage` hiç terminal olmayan) bir halde
+            // kalıyordu — ne hata, ne geri dönüş CTA'sı. Artık her zaman
+            // kendi terminal `.failed` durumuna geçiyor, hangi senaryo
+            // olursa olsun (RootView zaten geçiş yapmışsa bu görünmez
+            // bile olur; yapmamışsa kullanıcı donmuş bir ekranda
+            // KALMAZ).
+            stage = .failed(message: "Oturum süresi doldu. Lütfen tekrar giriş yapın.")
+            pollingTask?.cancel()
+            elapsedTask?.cancel()
         } catch {
-            // Network error — not terminal, polling continues
+            // Diğer ağ hataları — kalıcı değil, polling sürer.
         }
     }
 

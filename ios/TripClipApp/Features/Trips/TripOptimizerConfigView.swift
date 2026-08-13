@@ -106,7 +106,7 @@ struct TripOptimizerConfigView: View {
                 .padding(.horizontal, 16)
 
             HStack(spacing: 16) {
-                durationStepButton(systemImage: "minus", action: vm.decrementDuration)
+                durationStepButton(systemImage: "minus", accessibilityLabel: "Gün sayısını azalt", action: vm.decrementDuration)
 
                 VStack(spacing: 2) {
                     Text(durationDisplayText)
@@ -118,7 +118,7 @@ struct TripOptimizerConfigView: View {
                 }
                 .frame(maxWidth: .infinity)
 
-                durationStepButton(systemImage: "plus", action: vm.incrementDuration)
+                durationStepButton(systemImage: "plus", accessibilityLabel: "Gün sayısını artır", action: vm.incrementDuration)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
@@ -134,7 +134,7 @@ struct TripOptimizerConfigView: View {
         return "\(days)"
     }
 
-    private func durationStepButton(systemImage: String, action: @escaping () -> Void) -> some View {
+    private func durationStepButton(systemImage: String, accessibilityLabel: String, action: @escaping () -> Void) -> some View {
         Button(action: {
             withAnimation(.easeOut(duration: 0.15)) { action() }
         }) {
@@ -146,6 +146,10 @@ struct TripOptimizerConfigView: View {
                 .clipShape(Circle())
         }
         .buttonStyle(PressableButtonStyle())
+        // Sembol-yalnızca +/− düğmeleri VoiceOver'a yalnızca "eksi"/"artı"
+        // anons ediyordu, EYLEMİ değil — `LocationCard`'ın M35'teki AYNI
+        // sınıf düzeltmesiyle tutarlı (M36 audit bulgusu).
+        .accessibilityLabel(accessibilityLabel)
     }
 
     // MARK: - Preferred start date
@@ -355,7 +359,20 @@ struct TripOptimizerConfigView: View {
                         preferredEndTime: vm.preferredEndTime,
                         startDate: vm.preferredStartDate
                     ),
-                    onApplied: onApplied
+                    // `TripOptimizerView`'ın kendi "Tamam" işleyicisi
+                    // `onApplied?()` çağırıp KENDİ `dismiss()`ini çağırıyor
+                    // (yalnızca TripOptimizerView'ı kapatıp bu Config
+                    // ekranına döner) — bu ekran (Config) kendi `dismiss`'ini
+                    // ASLA çağırmıyordu, bu yüzden başarılı bir "Trip'e
+                    // Uygula" sonrası kullanıcı TripDetailView'a DEĞİL,
+                    // "yeni bir optimizasyon yapılandır" ekranına dönüyordu
+                    // (M35 audit bulgusu). Burada `onApplied`'ı sarmalayıp
+                    // KENDİ `dismiss()`'imizi de tetikleyerek Config→Result
+                    // zincirinin TAMAMI TripDetailView'a kadar kapanıyor.
+                    onApplied: {
+                        onApplied?()
+                        dismiss()
+                    }
                 )
             ) {
                 Text("Optimize Et")

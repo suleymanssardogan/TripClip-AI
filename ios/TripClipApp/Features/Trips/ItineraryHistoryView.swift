@@ -11,6 +11,14 @@ struct ItineraryHistoryView: View {
     /// TripOptimizerView'a taşınır — başarılı bir "Trip'e Uygula" sonrası
     /// TripDetailView'i yeniden yükler (bkz. TripDetailView).
     var onApplied: (() -> Void)? = nil
+    /// Başarılı bir silme sonrası çağrılır — `onApplied` ile AYNI gerekçe:
+    /// `TripDetailView`, geçmişteki bir itinerary silindiğinde kendi
+    /// `hasItineraryHistory` toolbar ikonunu VE (silinen itinerary o an
+    /// uygulanmış olansa) "uygulandı" banner'ını YENİDEN YÜKLEMELİ. Bu
+    /// callback eklenmeden önce bu ekrandaki silme yalnızca KENDİ yerel
+    /// listesini güncelliyordu, `TripDetailView`'a hiçbir sinyal
+    /// göndermiyordu (M35 audit bulgusu).
+    var onDeleted: (() -> Void)? = nil
 
     @Environment(AuthEnvironment.self) private var auth
     @State private var vm = ItineraryHistoryViewModel()
@@ -27,6 +35,7 @@ struct ItineraryHistoryView: View {
 
             if vm.isLoading && vm.itineraries.isEmpty {
                 ProgressView().tint(AppColors.accentText)
+                    .accessibilityLabel("Yükleniyor")
             } else if let error = vm.error, vm.itineraries.isEmpty {
                 errorState(error)
             } else if vm.itineraries.isEmpty {
@@ -52,7 +61,11 @@ struct ItineraryHistoryView: View {
         ) {
             Button("Sil", role: .destructive) {
                 if let summary = itineraryPendingDeletion {
-                    Task { await vm.deleteItinerary(id: summary.id, auth: auth) }
+                    Task {
+                        if await vm.deleteItinerary(id: summary.id, auth: auth) {
+                            onDeleted?()
+                        }
+                    }
                 }
                 itineraryPendingDeletion = nil
             }
@@ -90,7 +103,16 @@ struct ItineraryHistoryView: View {
                             .opacity(vm.deletingID == summary.id ? 0.5 : 1)
                     }
                     .buttonStyle(PressableButtonStyle())
-                    .disabled(vm.deletingID == summary.id)
+                    // TÜM satırlar (yalnızca silinen DEĞİL) devre dışı —
+                    // `ItineraryApplyHistoryView`in `.disabled(vm.undoingID
+                    // != nil)` deseniyle AYNI. `deletingID` zaten VM
+                    // seviyesinde global bir re-entrancy koruması (bkz.
+                    // deleteItinerary), ama önceden yalnızca dokunulan satır
+                    // görsel olarak devre dışı bırakılıyordu — kullanıcı BİR
+                    // satırı silerken BAŞKA bir satırı silmeye çalışırsa
+                    // hiçbir geri bildirim olmadan sessizce hiçbir şey
+                    // olmuyordu (M35 audit bulgusu).
+                    .disabled(vm.deletingID != nil)
                     // HistoryView.swift'teki (Core Data geçmişi) AYNI
                     // ScrollView+LazyVStack içi `.swipeActions` deseni —
                     // `List`e geçmeye gerek yok, bu proje zaten bu tam

@@ -93,5 +93,12 @@ private struct ItineraryStopRow: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(isSelected ? AppColors.accent : AppColors.border, lineWidth: isSelected ? 2 : 1)
         )
+        // Seçili durum dolu/boş renk+kenarlıkla GÖRSEL olarak iletiliyordu
+        // (bkz. yukarıdaki doc yorumu — "not just color") ama VoiceOver'a
+        // hiç aktarılmıyordu (M35 audit bulgusu). `TripAssistantView`'ın
+        // mesaj baloncuklarındaki combine+label deseniyle AYNI.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(stop.arrivalTime ?? ""), \(stop.name), \(stop.visitDurationMinutes) dakika ziyaret")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }

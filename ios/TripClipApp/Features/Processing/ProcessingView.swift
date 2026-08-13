@@ -188,6 +188,13 @@ private struct CircularProgressView: View {
                     .foregroundColor(AppColors.text)
             }
         }
+        // İkon + yüzde metni ayrı parçalar halinde okunuyordu, tamamlanma
+        // yüzdesi VoiceOver'a hiçbir zaman anlaşılır biçimde aktarılmıyordu
+        // (M36 audit bulgusu — `HomeView`in yükleme halkasındaki AYNI
+        // düzeltme).
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(stage.displayTitle)
+        .accessibilityValue("Yüzde \(percent)")
     }
 
     private var stageIcon: String {

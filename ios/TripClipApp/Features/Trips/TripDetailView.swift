@@ -22,6 +22,15 @@ struct TripDetailView: View {
     @State private var selection = OptimizerSelection()
     @State private var isEditing = false
     @State private var showDeleteConfirm = false
+    /// Silme onayı bekleyen durak — trip-seviyesi silme (showDeleteConfirm)
+    /// ile AYNI desen: geri alınamayan bir işlem tek dokunuşla DEĞİL, onaydan
+    /// sonra gerçekleşmeli (M34 audit bulgusu).
+    @State private var stopPendingDeletion: TripStop?
+    /// Trip Assistant'ın sohbet durumu — burada, `TripDetailView` seviyesinde
+    /// sahiplenilir (assistant ekranının KENDİ `@State`'i olarak DEĞİL), böylece
+    /// referans durağa dokunup assistant'tan çıkıp geri dönmek sohbeti
+    /// SIFIRLAMAZ (M35 audit bulgusu — bkz. TripAssistantView'daki doc yorumu).
+    @State private var assistantVM = TripAssistantViewModel()
 
     private static let mapAnchor = "trip-detail-map"
     private static func stopRowID(_ placeId: Int) -> String { "trip-detail-stop-\(placeId)" }
@@ -30,9 +39,18 @@ struct TripDetailView: View {
         ZStack {
             AppColors.background.ignoresSafeArea()
 
-            if vm.isLoading {
+            // Yalnızca İLK yüklemede tam ekran spinner/hata göster — bu ekran,
+            // zaten görüntülenen bir trip'i (harita+durak listesi) apply/undo/
+            // itinerary-silme gibi HER arka plan yeniden yüklemesinde tamamen
+            // söküp yeniden kuruyordu (M37 audit bulgusu: "Trip'e Uygula" →
+            // onay → başarı sonrası kullanıcı bir an tam ekran spinner görüp
+            // içerik yeniden çiziliyordu). `TripsListView`/`LibraryView`/
+            // `HomeView`'in KENDİ AYNI "isLoading && collection.isEmpty" deseni
+            // — burada `vm.trip == nil` karşılığı.
+            if vm.isLoading, vm.trip == nil {
                 ProgressView().tint(AppColors.accentText)
-            } else if let error = vm.error {
+                    .accessibilityLabel("Yükleniyor")
+            } else if let error = vm.error, vm.trip == nil {
                 errorView(error)
             } else if let trip = vm.trip {
                 tripContent(trip)
@@ -45,19 +63,29 @@ struct TripDetailView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     NavigationLink(
                         destination: TripAssistantView(
-                            tripID: trip.id, trip: trip,
+                            tripID: trip.id, trip: trip, vm: assistantVM,
                             onFocusStop: { dayIndex, placeId in
-                                // `selectStop`'un AYNI (day_index, place_id)
-                                // kimlik formülü — bkz. `OptimizerSelection.focusing`.
-                                // Tam bir `TripStop` gerekmez, yalnızca bu iki
-                                // alan kullanılır.
-                                selection = .focusing(dayIndex: dayIndex, stopID: String(placeId))
+                                // Asistanın referans çipindeki `dayIndex` BAYAT
+                                // olabilir — sohbet açıkken (assistantVM kalıcı
+                                // olduğundan sohbet uzun yaşayabilir) bir apply/
+                                // undo trip'in gün yapısını değiştirmiş olabilir.
+                                // Ham `dayIndex`e KÖRÜ KÖRÜNE güvenmek yerine,
+                                // durağı GÜNCEL `trip`te KENDİ gerçek `dayIndex`iyle
+                                // yeniden buluyoruz — `selectStop`'un AYNI ilkesi
+                                // (bkz. az aşağısı). Bulunamazsa (durak silinmiş)
+                                // yalnızca stopID taşınır ve `dayIndex` `nil`e
+                                // düşer ("Tümü") — ASLA artık var olmayan bir
+                                // güne göre filtrelenip durak listesini görünürde
+                                // BOŞALTMAZ (M37 audit bulgusu).
+                                let currentStop = trip.allStops.first { $0.placeId == placeId }
+                                selection = OptimizerSelection(dayIndex: currentStop?.dayIndex, stopID: String(placeId))
                             }
                         )
                     ) {
                         Image(systemName: "message")
                             .foregroundStyle(AppColors.accentText)
                     }
+                    .accessibilityLabel("AI Asistan")
                 }
             }
             if let trip = vm.trip, !trip.allStops.isEmpty {
@@ -73,6 +101,7 @@ struct TripDetailView: View {
                         Image(systemName: "sparkles")
                             .foregroundStyle(AppColors.accentText)
                     }
+                    .accessibilityLabel("Geziyi Optimize Et")
                 }
             }
             if let trip = vm.trip, vm.hasItineraryHistory {
@@ -80,12 +109,27 @@ struct TripDetailView: View {
                     NavigationLink(
                         destination: ItineraryHistoryView(
                             tripID: trip.id,
-                            onApplied: { Task { await vm.load(tripID: tripID, auth: auth) } }
+                            onApplied: { Task { await vm.load(tripID: tripID, auth: auth) } },
+                            // Silinen itinerary o an UYGULANMIŞ olabilir (trip'in
+                            // appliedItineraryId'si buna işaret ediyor olabilir —
+                            // core-api silme sırasında bunu sunucu tarafında
+                            // temizler) veya geçmişteki SON itinerary olabilir
+                            // (toolbar ikonu artık gizlenmeli) — her iki durumda
+                            // da hem trip'i hem de geçmiş bayrağını YENİDEN
+                            // yüklemek gerekir (M35 audit bulgusu: bu callback
+                            // eklenmeden önce hiçbiri tetiklenmiyordu).
+                            onDeleted: {
+                                Task {
+                                    await vm.load(tripID: tripID, auth: auth)
+                                    await vm.refreshItineraryHistoryFlag(tripID: tripID, auth: auth)
+                                }
+                            }
                         )
                     ) {
                         Image(systemName: "clock.arrow.circlepath")
                             .foregroundStyle(AppColors.accentText)
                     }
+                    .accessibilityLabel("Optimizasyon Geçmişi")
                 }
             }
             if let trip = vm.trip, vm.hasApplyHistory {
@@ -99,6 +143,7 @@ struct TripDetailView: View {
                         Image(systemName: "arrow.uturn.backward.circle")
                             .foregroundStyle(AppColors.accentText)
                     }
+                    .accessibilityLabel("Uygulama Geçmişi")
                 }
             }
             if vm.trip != nil {
@@ -106,9 +151,15 @@ struct TripDetailView: View {
                     Button(role: .destructive) {
                         showDeleteConfirm = true
                     } label: {
-                        Image(systemName: "trash")
-                            .foregroundStyle(AppColors.destructive)
+                        if vm.isDeleting {
+                            ProgressView().tint(AppColors.destructive)
+                        } else {
+                            Image(systemName: "trash")
+                                .foregroundStyle(AppColors.destructive)
+                        }
                     }
+                    .disabled(vm.isDeleting)
+                    .accessibilityLabel("Geziyi sil")
                 }
             }
         }
@@ -126,6 +177,24 @@ struct TripDetailView: View {
         } message: {
             Text("Bu işlem geri alınamaz.")
         }
+        .confirmationDialog(
+            "Bu durağı silmek istiyor musun?",
+            isPresented: Binding(
+                get: { stopPendingDeletion != nil },
+                set: { if !$0 { stopPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Sil", role: .destructive) {
+                guard let stop = stopPendingDeletion else { return }
+                stopPendingDeletion = nil
+                if selection.stopID == String(stop.placeId) { selection = OptimizerSelection() }
+                Task { await vm.deleteStop(stop, auth: auth) }
+            }
+            Button("Vazgeç", role: .cancel) { stopPendingDeletion = nil }
+        } message: {
+            Text("Bu işlem geri alınamaz.")
+        }
         .alert(
             "Değişiklik kaydedilemedi",
             isPresented: Binding(
@@ -137,9 +206,68 @@ struct TripDetailView: View {
         } message: {
             Text(vm.stopEditError ?? "")
         }
+        // `vm.deleteError` daha önce hiçbir yere BAĞLANMAMIŞTI — bir gezi
+        // silme isteği başarısız olduğunda (ağ hatası, sunucu hatası) HİÇBİR
+        // geri bildirim yoktu: ne bir alert, ne de çöp kutusu düğmesi devre
+        // dışı kalıyordu. `stopEditError`in az yukarıdaki AYNI alert
+        // deseniyle, ve `ItineraryHistoryView`/`ItineraryApplyHistoryView`'in
+        // kendi silme/undo hata alert'leriyle TUTARLI (M36 audit bulgusu).
+        .alert(
+            "Gezi silinemedi",
+            isPresented: Binding(
+                get: { vm.deleteError != nil },
+                set: { if !$0 { vm.deleteError = nil } }
+            )
+        ) {
+            Button("Tamam", role: .cancel) { vm.deleteError = nil }
+        } message: {
+            Text(vm.deleteError ?? "")
+        }
         .task { await vm.load(tripID: tripID, auth: auth, preloaded: preloaded) }
         .task { await vm.refreshItineraryHistoryFlag(tripID: tripID, auth: auth) }
         .task { await vm.refreshApplyHistoryFlag(tripID: tripID, auth: auth) }
+        // `TripsListView`/`LibraryView`/`HomeView`'in AYNI `.refreshable`
+        // deseni — bu ekran daha önce hiç manuel yenileme jesti sunmuyordu,
+        // oysa optimizer/apply-history/itinerary-geçmişi mutasyonlarının
+        // hepsinin dokunduğu, muhtemelen en çok bayatlayabilecek ekran
+        // (M37 audit bulgusu).
+        .refreshable {
+            await vm.load(tripID: tripID, auth: auth)
+            await vm.refreshItineraryHistoryFlag(tripID: tripID, auth: auth)
+            await vm.refreshApplyHistoryFlag(tripID: tripID, auth: auth)
+        }
+        // M36 audit bulgusu (VERİ KAYBI riski): `isEditing` yalnızca "Düzenle"
+        // düğmesiyle açılıyordu ve BAŞKA HİÇBİR YERDE kapatılmıyordu. Kullanıcı
+        // tek günlü bir trip'te düzenleme modunu AÇIP (o an `canEditStops` true'ydu)
+        // ekrandan ayrılmadan (Optimizer/Apply History gibi araç çubuğu
+        // bağlantıları düzenleme sırasında da erişilebilir kalıyor) çok günlü bir
+        // duruma geçen bir apply/undo tetiklerse, `hasMultipleDays` true olur ve
+        // "Düzenle/Bitti" düğmesi GİZLENİR (kullanıcı artık kapatamaz) — ama
+        // `isEditing` hâlâ true kalır, bu yüzden TÜM günlerin durakları hâlâ
+        // sil/taşı kontrolleriyle render edilir. `TripDetailViewModel.persistDay`
+        // yalnızca `trip.days.first`i okuyup YAZAR (`current.days = [day]`) —
+        // başka bir güne ait bir durağı silmek/taşımak o günü YEREL olarak
+        // sessizce değiştirmez ama `persistDay` trip'in TÜM `days`'ini TEK güne
+        // indirger ve sunucuya YALNIZCA o tek günü gönderir, diğer günleri hem
+        // yerel state'te hem sunucuda SİLER. Trip'in gün yapısı değiştiğinde
+        // (apply/undo sonrası) düzenleme modunu ZORLA kapatarak bu senaryo
+        // yapısal olarak imkansız hale getiriliyor.
+        //
+        // Aynı yerde, `selection.dayIndex` de artık var olmayan bir güne işaret
+        // edebilir (ör. 2. Gün seçiliyken bir undo trip'i tek güne indirger) —
+        // `visibleDays` bu durumda BOŞ bir dizi üretip durak listesini görünürde
+        // KAYBOLDURUR ("Duraklar (N)" başlığı hâlâ doğru sayıyı gösterirken).
+        // `dayIndex`i yalnızca artık geçersizse "Tümü"ne (nil) düşürmek bunu
+        // kendiliğinden düzeltir.
+        .onChange(of: vm.trip?.days.count) { _, _ in
+            guard let trip = vm.trip else { return }
+            if trip.days.count > 1 {
+                isEditing = false
+            }
+            if let dayIndex = selection.dayIndex, !trip.days.contains(where: { $0.first?.dayIndex == dayIndex }) {
+                selection = OptimizerSelection(dayIndex: nil, stopID: selection.stopID)
+            }
+        }
     }
 
     @ViewBuilder
@@ -288,8 +416,7 @@ struct TripDetailView: View {
                 Task { await vm.moveStops(from: [offset], to: offset + 2, auth: auth) }
             },
             onDelete: {
-                if selection.stopID == String(stop.placeId) { selection = OptimizerSelection() }
-                Task { await vm.deleteStop(stop, auth: auth) }
+                stopPendingDeletion = stop
             }
         )
     }

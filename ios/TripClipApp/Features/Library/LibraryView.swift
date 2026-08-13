@@ -60,6 +60,7 @@ struct LibraryView: View {
                 if vm.isLoading && vm.places.isEmpty {
                     Spacer()
                     ProgressView().tint(AppColors.accentText)
+                        .accessibilityLabel("Yükleniyor")
                     Spacer()
                 } else if let error = vm.error, vm.places.isEmpty {
                     errorState(error)
@@ -206,6 +207,7 @@ struct LibraryView: View {
             Spacer()
             if vm.isCreatingTrip {
                 ProgressView().tint(AppColors.accentText)
+                    .accessibilityLabel("Rota oluşturuluyor")
             } else {
                 Button("Rota Oluştur") { showTitlePrompt = true }
                     .font(.system(size: 14, weight: .bold))

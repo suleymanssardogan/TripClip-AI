@@ -58,5 +58,10 @@ struct TripStopSelectionRow: View {
             RoundedRectangle(cornerRadius: 18)
                 .stroke(isSelected ? AppColors.accentText.opacity(0.5) : AppColors.border, lineWidth: 1)
         )
+        // Seçili durum daireyi doldurup renk değiştirerek GÖRSEL olarak
+        // iletiliyordu ama VoiceOver'a hiç aktarılmıyordu (M35 audit
+        // bulgusu) — `LibraryRowView`'ın kendi AYNI düzeltmesiyle tutarlı.
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }

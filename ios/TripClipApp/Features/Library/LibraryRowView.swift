@@ -70,5 +70,13 @@ struct LibraryRowView: View {
             RoundedRectangle(cornerRadius: 18)
                 .stroke(isSelected == true ? AppColors.accentText.opacity(0.5) : AppColors.border, lineWidth: 1)
         )
+        // Seçim modu açıkken (isSelected != nil), seçili durum daireyi
+        // doldurup renk değiştirerek GÖRSEL olarak iletiliyordu ama
+        // VoiceOver'a hiç aktarılmıyordu — kullanıcı hangi mekanların
+        // seçili olduğunu duyamıyordu (M35 audit bulgusu). `TripDetailView`'ın
+        // gün çipi/`OptimizerRouteMapSection`'ın kendi `.isSelected` trait
+        // deseniyle AYNI.
+        .accessibilityElement(children: isSelected != nil ? .combine : .contain)
+        .accessibilityAddTraits(isSelected == true ? [.isSelected] : [])
     }
 }

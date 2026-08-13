@@ -363,5 +363,11 @@ struct TripOptimizerView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .disabled(vm.isApplying)
+        // "Trip'e Uygula" metni ve gizli `ProgressView` AYNI ZStack'te
+        // üst üste durduğundan (opacity ile geçiş, koşullu DEĞİŞTİRME
+        // değil), açık bir etiket olmadan VoiceOver ikisini de anons
+        // edebilirdi — diğer auth düğmeleriyle AYNI netlik (M36 audit
+        // bulgusu).
+        .accessibilityLabel(vm.isApplying ? "Uygulanıyor" : "Trip'e Uygula")
     }
 }

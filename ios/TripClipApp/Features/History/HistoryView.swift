@@ -13,6 +13,12 @@ struct HistoryView: View {
 
     @State private var selectedPlan: PlanDetail?
     @State private var showPlan      = false
+    /// Silme onayı bekleyen kayıt — bu ekranda daha önce swipe-to-delete
+    /// ANINDA (onaysız) siliyordu, uygulamadaki DİĞER tüm geri-alınamaz
+    /// silme akışlarıyla (ör. `HomeView`'in plan silmesi, `ItineraryHistoryView`'in
+    /// itinerary silmesi) TUTARSIZDI (M35 audit bulgusu). AYNI
+    /// `confirmationDialog` deseni burada da uygulanıyor.
+    @State private var recordPendingDeletion: SavedVideo?
 
     var body: some View {
         ZStack {
@@ -31,6 +37,24 @@ struct HistoryView: View {
                 ResultsView(planID: plan.id, preloadedPlan: plan)
             }
         }
+        .confirmationDialog(
+            "Bu geziyi geçmişten silmek istiyor musun?",
+            isPresented: Binding(
+                get: { recordPendingDeletion != nil },
+                set: { if !$0 { recordPendingDeletion = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Sil", role: .destructive) {
+                if let record = recordPendingDeletion {
+                    PersistenceController.shared.delete(record)
+                }
+                recordPendingDeletion = nil
+            }
+            Button("Vazgeç", role: .cancel) { recordPendingDeletion = nil }
+        } message: {
+            Text("Bu işlem geri alınamaz.")
+        }
     }
 
     private var list: some View {
@@ -48,7 +72,7 @@ struct HistoryView: View {
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {
-                            PersistenceController.shared.delete(record)
+                            recordPendingDeletion = record
                         } label: {
                             Label("Sil", systemImage: "trash")
                         }

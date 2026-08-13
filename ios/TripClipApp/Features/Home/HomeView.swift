@@ -20,6 +20,11 @@ struct HomeView: View {
     /// değil onaydan sonra gidiyor.
     @State private var planPendingDeletion: PlanSummary?
 
+    /// Çıkış onayı bekleniyor mu — plan silme/undo geri alma ile AYNI desen
+    /// (M34 audit bulgusu: çıkış tek dokunuşla ANINDA gerçekleşiyordu, bu
+    /// ekrandaki diğer geri-alınamaz işlemlerle tutarsızdı).
+    @State private var showLogoutConfirmation = false
+
     private enum UploadState {
         case idle
         case loading         // loading from Photos library
@@ -56,6 +61,7 @@ struct HomeView: View {
                     } else if vm.isLoading && vm.plans.isEmpty {
                         Spacer()
                         ProgressView().tint(AppColors.accentText)
+                            .accessibilityLabel("Yükleniyor")
                         Spacer()
                     } else if let error = vm.error {
                         errorState(error)
@@ -105,6 +111,29 @@ struct HomeView: View {
             Button("Vazgeç", role: .cancel) { planPendingDeletion = nil }
         } message: {
             Text("Plan ve yüklenen video kalıcı olarak silinir. Bu işlem geri alınamaz.")
+        }
+        .confirmationDialog(
+            "Çıkış yapmak istiyor musun?",
+            isPresented: $showLogoutConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Çıkış Yap", role: .destructive) { auth.logout() }
+            Button("Vazgeç", role: .cancel) {}
+        }
+        // `TripDetailViewModel.stopEditError`/`ItineraryHistoryView`'in kendi
+        // silme hatası alert'iyle AYNI desen — bir silme başarısız olduğunda
+        // liste TAM EKRAN bir hatayla DEĞİL, yerinde kalıp bir alert gösterir
+        // (M36 audit bulgusu — bkz. HomeViewModel.deleteError'ın doc yorumu).
+        .alert(
+            "Silinemedi",
+            isPresented: Binding(
+                get: { vm.deleteError != nil },
+                set: { if !$0 { vm.deleteError = nil } }
+            )
+        ) {
+            Button("Tamam", role: .cancel) { vm.deleteError = nil }
+        } message: {
+            Text(vm.deleteError ?? "")
         }
         .onChange(of: pickerItem) { _, item in
             guard let item else { return }
@@ -190,6 +219,17 @@ struct HomeView: View {
             navPath.append(stub)
             await vm.load(auth: auth)
 
+        } catch let apiError as APIError where apiError.isUnauthorized {
+            // Yükleme başlamadan ÖNCE token tazelenir (yukarıdaki
+            // `validAccessToken()`), ama `uploadVideoFile` `APIClient.send`'in
+            // 401-yenile-tekrarla sarmalayıcısından GEÇMEDİĞİ için, oturum
+            // yükleme SIRASINDA (600sn'ye kadar sürebilir) sona ererse bunu
+            // KENDİSİ hiç ele almıyordu — diğer TÜM authenticated çağrıların
+            // aksine (M37 audit bulgusu). Kullanıcı "logged in" GÖRÜNMEYE
+            // devam edip, bir sonraki AYRI eylemi 401 alana kadar farkına
+            // varmıyordu.
+            auth.handleUnauthorized()
+            pickerItem = nil
         } catch {
             uploadState = .failed(error.localizedDescription)
             pickerItem  = nil
@@ -242,12 +282,13 @@ struct HomeView: View {
             .padding(.trailing, 12)
 
             Button {
-                auth.logout()
+                showLogoutConfirmation = true
             } label: {
                 Image(systemName: "rectangle.portrait.and.arrow.right")
                     .font(.system(size: 18))
                     .foregroundStyle(AppColors.textSecondary)
             }
+            .accessibilityLabel("Çıkış yap")
         }
     }
 
@@ -268,6 +309,15 @@ struct HomeView: View {
                     .font(.title2)
                     .foregroundStyle(AppColors.accentText)
             }
+            // Daha önce yüzde HİÇBİR YERDE gösterilmiyordu — ne görsel
+            // olarak (yalnızca dairenin dolma animasyonu) ne de VoiceOver'a
+            // (M36 audit bulgusu). `accessibilityValue`, bu projede daha
+            // önce hiç kullanılmamış olsa da tam olarak bu senaryo için var:
+            // "ne kadar tamamlandı" bilgisini içeriğin KENDİSİNDEN ayrı
+            // taşır.
+            Text("%\(Int((percent * 100).rounded()))")
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(AppColors.accentText)
             Text(label)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(AppColors.text)
@@ -276,6 +326,9 @@ struct HomeView: View {
                 .foregroundStyle(AppColors.textSecondary)
             Spacer()
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(label)
+        .accessibilityValue("Yüzde \(Int((percent * 100).rounded()))")
     }
 
     private func uploadErrorBanner(_ message: String) -> some View {

@@ -174,9 +174,22 @@ final class ResultsViewModel {
                 if Task.isCancelled { return }
                 guard let self, let token = auth.user?.token else { return }
 
-                let detail: PlanDetail? = try? await auth.apiClient.send(
-                    .videoDetail(videoID: planID), token: token
-                )
+                let detail: PlanDetail?
+                do {
+                    detail = try await auth.apiClient.send(.videoDetail(videoID: planID), token: token)
+                } catch let apiError as APIError where apiError.isUnauthorized {
+                    // `preloaded:` ile açılan bir ResultsView'da (bkz. HistoryView)
+                    // `load()` hiç ağa gitmez — bu yoklama o durumda TEK gerçek
+                    // istek olabilir. Önceden `try?` her hatayı (401 dahil)
+                    // sessizce yutup döngüye devam ediyordu — oturum GERÇEKTEN
+                    // sona ermişken bile (M37 audit bulgusu, diğer tüm
+                    // authenticated çağrıların zaten yaptığı kontrol eksikti).
+                    // `defer` zaten `tipsPollingTask`ı temizleyecek.
+                    auth.handleUnauthorized()
+                    return
+                } catch {
+                    detail = nil
+                }
                 guard let detail else { continue }
 
                 if !detail.travelTips.isEmpty {
