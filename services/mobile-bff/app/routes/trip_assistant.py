@@ -11,13 +11,24 @@ import os
 import uuid
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.core.internal_client import internal_client
 from app.core.auth import get_current_user_id
 from app.core.error_wrapper import mobile_error_wrapper, raise_from_response
 
+# M33 — `videos.py`/`auth.py`'nin AYNI, ZATEN VAR OLAN deseni (yeni bir
+# rate-limit altyapısı İCAT EDİLMEDİ): her LLM çağrısı gerçek bir maliyet/
+# gecikme taşır ve bu route'u ÖNCEDEN hiçbir per-route limit korumuyordu —
+# yalnızca core-api'nin BLANKET, TÜM kullanıcılar arasında PAYLAŞILAN
+# 200/dakika varsayılanına (bkz. docs/trip-assistant.md "Rate limiting")
+# güveniliyordu. video yükleme (10/dakika) kadar sık olmasa da bir sohbet
+# akışında normal kullanım birden fazla mesaj/dakika gerektirebilir — video
+# upload'dan daha gevşek, ama sınırsız DEĞİL bir değer seçildi.
+limiter      = Limiter(key_func=get_remote_address)
 router       = APIRouter(tags=["trip_assistant"])
 CORE_API_URL = os.getenv("CORE_API_URL", "http://core-api:8000")
 
@@ -33,7 +44,9 @@ class AssistantRequest(BaseModel):
 
 
 @router.post("/trips/{trip_id}/assistant")
+@limiter.limit("20/minute")
 async def ask_trip_assistant(
+    request: Request,
     trip_id: int,
     body: AssistantRequest,
     user_id: int = Depends(get_current_user_id),
@@ -41,7 +54,18 @@ async def ask_trip_assistant(
     """Trip'in gerçek durak/itinerary verisine grounded, salt-okunur soru-cevap."""
     rid = str(uuid.uuid4())[:8]
     async with mobile_error_wrapper(request_id=rid):
-        async with internal_client(30.0) as client:  # LLM çağrısı diğer proxy'lerden daha uzun sürebilir
+        # M33 — 30s'den 60s'e çıkarıldı: Milestone 32'nin araç çağrısı döngüsü
+        # tek bir istekte core-api'nin AIProvider'ı en fazla 4 kez çağırmasına
+        # izin verir (bkz. TripAssistantService.MAX_TOOL_CALLS + 1); gerçek
+        # doğrulamada (docs/trip-assistant.md) tek bir Ollama çağrısı bile
+        # ~11-18s sürebiliyordu — 30s'lik eski değer, hiçbir yeniden deneme
+        # OLMASA bile araç döngüsünün gerçekçi mutlu-yol gecikmesine karşı
+        # ARTIK YETERSİZDİ. 60s hâlâ core-api'nin KENDİ iç zaman aşımlarının
+        # (bkz. RAGService: 90s/çağrı, GeminiService: 30s/çağrı + backoff)
+        # ALTINDA — bir provider gerçekten çok yavaşsa istemci yine de
+        # temiz bir 504 GATEWAY_TIMEOUT alır (bkz. mobile_error_wrapper),
+        # sonsuza kadar ASILI KALMAZ.
+        async with internal_client(60.0) as client:
             resp = await client.post(
                 f"{CORE_API_URL}/internal/trips/{trip_id}/assistant",
                 json=body.model_dump(),

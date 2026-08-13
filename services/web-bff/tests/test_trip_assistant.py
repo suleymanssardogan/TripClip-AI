@@ -98,3 +98,29 @@ def test_assistant_core_api_unreachable_returns_503(client, auth_headers, mock_c
     mock_core_api.post.side_effect = httpx.ConnectError("connection refused")
     resp = client.post("/api/web/trips/2/assistant", json={"message": "soru"}, headers=auth_headers)
     assert resp.status_code == 503
+
+
+def test_assistant_rate_limit(client, auth_headers, mock_core_api, make_response):
+    """M33 — assistant route 20/dakika limiti — 21. istekte 429 dönmeli.
+    Her LLM çağrısının gerçek maliyeti/gecikmesi olduğu için bu route
+    artık ÖNCEDEN olmayan bir per-route limit taşıyor."""
+    mock_core_api.post.return_value = make_response(200, {"answer": "Cevap", "references": []})
+
+    for i in range(20):
+        r = client.post("/api/web/trips/2/assistant", json={"message": "soru"}, headers=auth_headers)
+        assert r.status_code == 200, f"{i+1}. istek beklenmedik şekilde başarısız: {r.status_code}"
+
+    resp = client.post("/api/web/trips/2/assistant", json={"message": "soru"}, headers=auth_headers)
+    assert resp.status_code == 429
+
+
+def test_assistant_core_api_timeout_returns_504_not_a_hang(client, auth_headers, mock_core_api):
+    # M33 — core-api tarafı (Gemini/Ollama + M32'nin araç döngüsü) beklenenden
+    # uzun sürerse (bkz. internal_client(60.0)), BFF sonsuza kadar ASILI
+    # KALMAZ — httpx'in kendi zaman aşımı devreye girer ve temiz bir
+    # 504 GATEWAY_TIMEOUT döner, ham bir bağlantı hatası/istisna SIZMAZ.
+    import httpx
+    mock_core_api.post.side_effect = httpx.ReadTimeout("timed out")
+    resp = client.post("/api/web/trips/2/assistant", json={"message": "soru"}, headers=auth_headers)
+    assert resp.status_code == 504
+    assert resp.json()["code"] == "GATEWAY_TIMEOUT"

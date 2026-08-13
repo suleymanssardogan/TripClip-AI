@@ -13,12 +13,20 @@ ayakta değil) tüm metodlar sessizce boş/None döner — arayan taraf
 mevcutsa aktif" felsefesi SENTRY_DSN ve APNs istemcisiyle paylaşılıyor.
 """
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchAny
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchAny, ScoredPoint
 from sentence_transformers import SentenceTransformer
-from typing import List, Optional
+from typing import Dict, List, Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Yalnızca semantik arama (`.search()`) için — `upsert_place` GERİ ADIM
+# ATMAYACAK şekilde (best-effort, ayrı try/except) kalır. M30'da Trip
+# Assistant RAG retrieval'ının tek bir bağlı (bounded) ağ çağrısı olması
+# gerektiği için eklendi (bkz. milestone Req 14) — var olan Place kütüphanesi
+# anlamsal aramasına da (search_place_ids) aynı üst sınır UYGULANIR: bu yalnızca
+# hiç var olmayan bir sınırsız-bekleme riskini KAPATIR, davranışı DEĞİŞTİRMEZ.
+_SEARCH_TIMEOUT_SECONDS = 5
 
 
 class QdrantService:
@@ -93,6 +101,37 @@ class QdrantService:
         except Exception as exc:
             logger.warning("Qdrant place embed başarısız | place_id=%s | %s", place_id, exc)
 
+    def _search(self, query: str, place_ids: List[int], limit: int) -> List[ScoredPoint]:
+        """Hem `search_place_ids` (Place kütüphanesi araması, M-öncesi) hem
+        `search_places` (Trip Assistant RAG, M30) TARAFINDAN paylaşılan tek
+        Qdrant `.search()` çağrısı — aynı embedding çağrısının/filtresinin
+        İKİ YERDE TEKRARLANMAMASI için (bkz. milestone Req 4 "Do not
+        duplicate existing vector-search infrastructure").
+
+        `place_ids` boşsa ya da Qdrant erişilemezse/hata verirse boş liste
+        döner, ASLA fırlatmaz — iki çağıran taraf da bunu aynı şekilde
+        "sonuç yok" olarak yorumlar."""
+        if not place_ids:
+            return []
+
+        try:
+            self._load()
+            self._ensure_collection()
+
+            vector = self.model.encode(query).tolist()
+            return self.client.search(
+                collection_name=self.collection_name,
+                query_vector=vector,
+                query_filter=Filter(
+                    must=[FieldCondition(key="place_id", match=MatchAny(any=place_ids))]
+                ),
+                limit=limit,
+                timeout=_SEARCH_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            logger.warning("Qdrant anlamsal arama başarısız: %s", exc)
+            return []
+
     def search_place_ids(self, query: str, place_ids: List[int], limit: int = 20) -> List[int]:
         """
         `place_ids` kümesiyle sınırlı anlamsal arama — kullanıcının kendi
@@ -103,23 +142,20 @@ class QdrantService:
         liste döner — çağıran taraf bunu "substring aramasına düş" sinyali
         olarak kullanır.
         """
-        if not place_ids:
-            return []
+        return [r.payload["place_id"] for r in self._search(query, place_ids, limit)]
 
-        try:
-            self._load()
-            self._ensure_collection()
+    def search_places(self, query: str, place_ids: List[int], limit: int = 5) -> List[Dict]:
+        """M30 — Trip Assistant RAG retrieval için: `search_place_ids`'in
+        AKSİNE yalnızca çıplak ID değil, benzerlik skorunu da döner (çağıran
+        taraf — `SqlPlaceKnowledgeRetriever` — bunu Postgres'ten gelen
+        gerçek Place kaydıyla birleştirip `RetrievedPlaceKnowledge`'a
+        çevirir; Qdrant-özgü `ScoredPoint` nesnesi bu katmanın DIŞINA hiç
+        SIZMAZ, bkz. milestone Req 3).
 
-            vector = self.model.encode(query).tolist()
-            results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=vector,
-                query_filter=Filter(
-                    must=[FieldCondition(key="place_id", match=MatchAny(any=place_ids))]
-                ),
-                limit=limit,
-            )
-            return [r.payload["place_id"] for r in results]
-        except Exception as exc:
-            logger.warning("Qdrant anlamsal arama başarısız: %s", exc)
-            return []
+        Döner: `[{"place_id": int, "score": float}, ...]`, benzerlik
+        sırasına göre. Boş girdi/hata → boş liste (`_search`'ün AYNI
+        sözleşmesi)."""
+        return [
+            {"place_id": r.payload["place_id"], "score": r.score}
+            for r in self._search(query, place_ids, limit)
+        ]

@@ -75,6 +75,28 @@ class TripContext:
     def total_stops(self) -> int:
         return sum(len(d.stops) for d in self.days)
 
+    @property
+    def all_stop_place_ids(self) -> List[int]:
+        """M30 — RAG retrieval'ın aday havuzunu genişletmek için kullanılır
+        (bkz. `SqlPlaceKnowledgeRetriever._candidate_place_ids`): gezinin
+        KENDİ duraklarının place_id'leri de her zaman aday havuzunda olur,
+        böylece "Zeugma Müzesi hakkında ne biliyorsun?" gibi sorular
+        Zeugma trip'in kendi durağıysa bile doğru şekilde eşleşebilir."""
+        return [s.place_id for d in self.days for s in d.stops]
+
+    @property
+    def all_cities(self) -> List[str]:
+        """M30 — aynı şehirdeki DİĞER (trip'te olmayan) mekanları aday
+        havuzuna eklemek için (bkz. milestone Req 6 örneği: "Gaziantep'te
+        bu geziye yakın başka tarihi yerler neler?"). Sıra korunur, tekrar
+        YOK — SQL sorgusunda deterministik/test edilebilir kalması için."""
+        seen: List[str] = []
+        for d in self.days:
+            for s in d.stops:
+                if s.city and s.city not in seen:
+                    seen.append(s.city)
+        return seen
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "trip_id": self.trip_id, "title": self.title, "today": self.today,

@@ -12,8 +12,9 @@ from app.application.services.optimization_service import OptimizationService
 from app.application.services.trip_assistant_service import TripAssistantService
 from app.core.database import get_db
 from app.infrastructure.repositories.sql_optimization_repository import SqlOptimizationRepository
+from app.infrastructure.repositories.sql_place_knowledge_retriever import SqlPlaceKnowledgeRetriever
 from app.infrastructure.repositories.sql_trip_repository import SqlTripRepository
-from app.ml.ai_provider import get_ai_provider
+from app.ml.ai_provider import get_ai_provider, get_provider_metadata
 
 router = APIRouter(tags=["internal"])
 
@@ -23,6 +24,16 @@ def get_trip_assistant_service(db: Session = Depends(get_db)) -> TripAssistantSe
         trip_repo=SqlTripRepository(db),
         optimization_service=OptimizationService(SqlOptimizationRepository(db)),
         provider=get_ai_provider(),
+        # M30 — var olan Qdrant/Place altyapısını kullanan RAG retrieval.
+        # Retriever kendi içinde best-effort (bkz. SqlPlaceKnowledgeRetriever/
+        # QdrantService) — Qdrant erişilemezse asistan normal (RAG'siz)
+        # şekilde çalışmaya devam eder, ASSISTANT_UNAVAILABLE OLMAZ.
+        retriever=SqlPlaceKnowledgeRetriever(db),
+        # M33 — YALNIZCA gözlemlenebilirlik logu için (bkz.
+        # TripAssistantService.__init__'in kendi doc yorumu). `get_provider_metadata()`
+        # (M29, DEĞİŞMEDİ) ile AYNI, ağsız/yan-etkisiz fonksiyon — servise
+        # "hangi sağlayıcı" konusunda hiçbir DAVRANIŞ kararı VERMEZ.
+        provider_metadata=get_provider_metadata(),
     )
 
 

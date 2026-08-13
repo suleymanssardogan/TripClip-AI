@@ -136,3 +136,61 @@ def test_search_returns_empty_list_when_no_hits(service):
     service.client.search.return_value = []
 
     assert service.search_place_ids("bulunamayan yer", place_ids=[1]) == []
+
+
+def test_search_forwards_a_bounded_timeout_to_qdrant_client(service):
+    # M30 — Trip Assistant RAG'in tek bağlı (bounded) ağ çağrısı olması
+    # gerektiği için eklendi; var olan search_place_ids çağrısı da (bu test
+    # onun üzerinden kontrol ediyor) aynı sınırdan faydalanır.
+    service.client.get_collections.return_value = _fake_collections(["places"])
+    service.client.search.return_value = []
+
+    service.search_place_ids("plaj", place_ids=[1])
+
+    _, kwargs = service.client.search.call_args
+    assert isinstance(kwargs["timeout"], int) and kwargs["timeout"] > 0
+
+
+# ─── search_places (M30 — Trip Assistant RAG) ───────────────────────────────
+
+def test_search_places_returns_place_id_and_score(service):
+    service.client.get_collections.return_value = _fake_collections(["places"])
+    service.client.search.return_value = [_fake_hit(5, 0.9), _fake_hit(2, 0.7)]
+
+    result = service.search_places("Zeugma Müzesi hakkında", place_ids=[5, 2, 9], limit=4)
+
+    assert result == [{"place_id": 5, "score": 0.9}, {"place_id": 2, "score": 0.7}]
+    _, kwargs = service.client.search.call_args
+    assert kwargs["limit"] == 4
+    assert kwargs["query_filter"].must[0].match.any == [5, 2, 9]
+
+
+def test_search_places_returns_empty_list_when_no_place_ids_given(service):
+    assert service.search_places("plaj", place_ids=[]) == []
+    service.client.search.assert_not_called()
+
+
+def test_search_places_returns_empty_list_on_qdrant_error(service):
+    service.client.get_collections.side_effect = RuntimeError("unreachable")
+
+    assert service.search_places("plaj", place_ids=[1, 2]) == []
+
+
+def test_search_places_returns_empty_list_when_no_hits(service):
+    service.client.get_collections.return_value = _fake_collections(["places"])
+    service.client.search.return_value = []
+
+    assert service.search_places("bulunamayan yer", place_ids=[1]) == []
+
+
+def test_search_places_and_search_place_ids_reuse_the_same_qdrant_call(service):
+    # Milestone Req 4/14 — iki ayrı Qdrant client/embedding çağrısı DEĞİL,
+    # tek paylaşılan `_search` üzerinden.
+    service.client.get_collections.return_value = _fake_collections(["places"])
+    service.client.search.return_value = [_fake_hit(5, 0.9)]
+
+    service.search_place_ids("plaj", place_ids=[5])
+    service.search_places("plaj", place_ids=[5])
+
+    assert service.model.encode.call_count == 2  # her çağrı kendi embedding'ini üretir
+    assert service.client.search.call_count == 2

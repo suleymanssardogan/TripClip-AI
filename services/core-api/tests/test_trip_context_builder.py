@@ -146,3 +146,39 @@ def test_find_stop_locates_by_day_index_and_place_id_not_array_position():
     assert ctx.find_stop(day_index=0, place_id=99) is not None
     assert ctx.find_stop(day_index=0, place_id=1) is None
     assert ctx.find_stop(day_index=1, place_id=99) is None
+
+
+# ─── all_stop_place_ids / all_cities — used by M30 RAG retrieval ───────────
+
+def test_all_stop_place_ids_collects_ids_across_all_days():
+    trip = _trip(days=[
+        [{"place_id": 1, "name": "A", "lat": 1, "lng": 1, "city": None, "category": None, "day_index": 0, "order_index": 0}],
+        [{"place_id": 2, "name": "B", "lat": 2, "lng": 2, "city": None, "category": None, "day_index": 1, "order_index": 0}],
+    ])
+    ctx = build_trip_context(trip, itinerary=None, today=date(2026, 8, 8))
+    assert ctx.all_stop_place_ids == [1, 2]
+
+
+def test_all_cities_deduplicates_and_preserves_order():
+    trip = _trip(days=[[
+        {"place_id": 1, "name": "A", "lat": 1, "lng": 1, "city": "Gaziantep", "category": None, "day_index": 0, "order_index": 0},
+        {"place_id": 2, "name": "B", "lat": 2, "lng": 2, "city": "Antalya", "category": None, "day_index": 0, "order_index": 1},
+        {"place_id": 3, "name": "C", "lat": 3, "lng": 3, "city": "Gaziantep", "category": None, "day_index": 0, "order_index": 2},
+    ]])
+    ctx = build_trip_context(trip, itinerary=None, today=date(2026, 8, 8))
+    assert ctx.all_cities == ["Gaziantep", "Antalya"]
+
+
+def test_all_cities_skips_missing_city():
+    trip = _trip(days=[[
+        {"place_id": 1, "name": "A", "lat": 1, "lng": 1, "city": None, "category": None, "day_index": 0, "order_index": 0},
+    ]])
+    ctx = build_trip_context(trip, itinerary=None, today=date(2026, 8, 8))
+    assert ctx.all_cities == []
+
+
+def test_all_stop_place_ids_empty_for_trip_with_no_stops():
+    trip = _trip(days=[])
+    ctx = build_trip_context(trip, itinerary=None, today=date(2026, 8, 8))
+    assert ctx.all_stop_place_ids == []
+    assert ctx.all_cities == []
