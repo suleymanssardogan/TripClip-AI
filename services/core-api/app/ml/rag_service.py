@@ -4,6 +4,7 @@ import requests
 import time
 from typing import List, Dict, Optional
 import logging
+from app.ml.request_budget import remaining_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +13,10 @@ _OLLAMA_RETRY_AFTER = 120  # saniye
 
 
 class RAGService:
-    """RAG sistemi - Qdrant + Ollama (LLM) ile travel tips üretimi.
+    """Ollama text generation adapter; this class does not perform retrieval.
+
+    Actual RAG lives in TripAssistantService + SqlPlaceKnowledgeRetriever.
+    The legacy class name is retained for compatibility.
 
     Ollama tamamen opsiyoneldir. OLLAMA_URL ayarlanmazsa bu servis
     devre dışı kalır ve generate_travel_tips() boş sonuç döner —
@@ -47,11 +51,13 @@ class RAGService:
         """Ollama ile metin üret. Devre dışıysa veya cooldown süresi dolmadıysa skip et."""
         if not self._ollama_available():
             return ""
+        from app.core.privacy import require_reviewed_transfer
+        require_reviewed_transfer("ollama")
         try:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
                 json={"model": self.model, "prompt": prompt, "stream": False},
-                timeout=90,
+                timeout=remaining_timeout(90),
             )
             if response.status_code == 200:
                 self._ollama_failed_at = None   # başarılı → sıfırla
@@ -100,7 +106,7 @@ class RAGService:
                 logger.info(f"✅ Generated tip for: {name}")
 
         # Genel özet
-        summary_prompt = f'Şu Türkiye mekanlarını ziyaret eden biri için 2 cümlelik gezi özeti: {locations_text}. Türkçe.'
+        summary_prompt = f'Şu mekanları ziyaret eden biri için 2 cümlelik gezi özeti: {locations_text}. Türkçe.'
 
         summary = self._generate(summary_prompt)
         logger.info(f"✅ Generated summary for {len(tips)} locations")
@@ -162,6 +168,8 @@ class RAGService:
         if not self.enabled:
             raise RuntimeError("OLLAMA_URL ayarlanmamış — Ollama sağlayıcısı devre dışı.")
 
+        from app.core.privacy import require_reviewed_transfer
+        require_reviewed_transfer("ollama")
         try:
             response = requests.post(
                 f"{self.ollama_url}/api/generate",
@@ -172,7 +180,7 @@ class RAGService:
                     "stream": False,
                     "format": "json",
                 },
-                timeout=90,
+                timeout=remaining_timeout(90),
             )
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Ollama'ya ulaşılamadı: {e}") from e

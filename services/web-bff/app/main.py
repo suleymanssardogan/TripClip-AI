@@ -12,6 +12,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from prometheus_fastapi_instrumentator import Instrumentator
 from app.routes import auth, plans, analytics, trip_sharing, trip_optimization, trips, trip_assistant
+from app.core.auth import ACCESS_COOKIE, REFRESH_COOKIE
 from app.routes import videos as videos_router
 import logging
 import sys
@@ -21,12 +22,15 @@ import os
 
 # Sentry — yalnızca DSN tanımlanmışsa etkinleştir (core-api ile aynı desen)
 _sentry_dsn = os.getenv("SENTRY_DSN")
-if _sentry_dsn:
+if _sentry_dsn and "sentry" in {v.strip().lower() for v in os.getenv("PRIVACY_REVIEWED_PROVIDERS", "").split(",")}:
     import sentry_sdk
+    from app.core.privacy import scrub_error_event
     sentry_sdk.init(
         dsn=_sentry_dsn,
-        send_default_pii=True,
-        traces_sample_rate=float(os.getenv("SENTRY_TRACES_RATE", "1.0")),
+        send_default_pii=False,
+        include_local_variables=False,
+        before_send=scrub_error_event,
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES_RATE", "0.0")),
     )
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -61,18 +65,34 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         response.headers["X-Request-Id"] = rid
         return response
 
+
+class CookieOriginMiddleware(BaseHTTPMiddleware):
+    """Cookie-authenticated writes must originate from this site."""
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        if (request.url.path.startswith("/api/web/")
+                and request.method not in {"GET", "HEAD", "OPTIONS"}
+                and (ACCESS_COOKIE in request.cookies or REFRESH_COOKIE in request.cookies)):
+            host = request.headers.get("host", "")
+            scheme = "https" if os.getenv("APP_ENV") == "production" else request.url.scheme
+            expected_origin = f"{scheme}://{host}"
+            allowed_origins = {expected_origin, *ALLOWED_ORIGINS}
+            if request.headers.get("origin") not in allowed_origins:
+                return JSONResponse(status_code=403, content={"code": "INVALID_ORIGIN", "message": "Geçersiz istek kaynağı."})
+        return await call_next(request)
+
 # Web BFF: yalnızca Next.js web uygulamasından istek gelir.
 # ALLOWED_ORIGINS env ile production domain eklenebilir.
 _raw = os.getenv("ALLOWED_ORIGINS", "")
 ALLOWED_ORIGINS = (
     [o.strip() for o in _raw.split(",") if o.strip()]
     if _raw
-    else [
+    else ([] if os.getenv("APP_ENV") == "production" else [
         "http://localhost:3000",    # local Next.js dev
         "http://127.0.0.1:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3001",
-    ]
+    ])
 )
 
 app = FastAPI(
@@ -103,6 +123,7 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type"],
 )
 app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(CookieOriginMiddleware)
 
 # ── Prometheus metrikleri ──────────────────────────────────────────────────────
 Instrumentator().instrument(app).expose(app, include_in_schema=False)

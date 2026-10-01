@@ -19,12 +19,15 @@ import os as _os
 
 # Sentry — yalnızca DSN tanımlanmışsa etkinleştir (core-api ile aynı desen)
 _sentry_dsn = _os.getenv("SENTRY_DSN")
-if _sentry_dsn:
+if _sentry_dsn and "sentry" in {v.strip().lower() for v in os.getenv("PRIVACY_REVIEWED_PROVIDERS", "").split(",")}:
     import sentry_sdk
+    from app.core.privacy import scrub_error_event
     sentry_sdk.init(
         dsn=_sentry_dsn,
-        send_default_pii=True,
-        traces_sample_rate=float(_os.getenv("SENTRY_TRACES_RATE", "1.0")),
+        send_default_pii=False,
+        include_local_variables=False,
+        before_send=scrub_error_event,
+        traces_sample_rate=float(_os.getenv("SENTRY_TRACES_RATE", "0.0")),
     )
 
 # ── Logging ───────────────────────────────────────────────────────────────────

@@ -17,6 +17,10 @@ MONGO_BACKUP="${2:-}"
 [[ -f .env ]] || { echo "ERROR: .env file not found. Run from the repository root."; exit 1; }
 # shellcheck disable=SC1091
 source .env
+if [[ -n "$MONGO_BACKUP" ]]; then
+    [[ -f "$MONGO_BACKUP" ]] || { echo "ERROR: $MONGO_BACKUP not found."; exit 1; }
+    [[ -n "${MONGODB_ROOT_USERNAME:-}" && -n "${MONGODB_ROOT_PASSWORD:-}" ]] || { echo "ERROR: MONGODB_ROOT_USERNAME and MONGODB_ROOT_PASSWORD must be set in .env"; exit 1; }
+fi
 
 echo "!! This will OVERWRITE the current database(s) with the contents of:"
 echo "     Postgres: $PG_BACKUP"
@@ -30,11 +34,12 @@ echo "==> Restoring PostgreSQL from $PG_BACKUP..."
 gunzip -c "$PG_BACKUP" | $COMPOSE exec -T postgres psql -U "${POSTGRES_USER:-tripclip}" "${POSTGRES_DB:-tripclip}"
 
 if [[ -n "$MONGO_BACKUP" ]]; then
-    [[ -f "$MONGO_BACKUP" ]] || { echo "ERROR: $MONGO_BACKUP not found."; exit 1; }
     echo "==> Restoring MongoDB from $MONGO_BACKUP..."
     # See backup.sh: mongo:7 doesn't bundle mongorestore, use the tools image.
     gunzip -c "$MONGO_BACKUP" | docker run --rm -i --network container:tripclip-mongo \
-        mongodb/mongodb-database-tools mongorestore --host=127.0.0.1 --port=27017 --archive --drop
+        mongodb/mongodb-database-tools mongorestore --host=127.0.0.1 --port=27017 \
+        --username="$MONGODB_ROOT_USERNAME" --password="$MONGODB_ROOT_PASSWORD" \
+        --authenticationDatabase=admin --archive --drop
 fi
 
 echo "==> Restore complete. Restart dependent services:"

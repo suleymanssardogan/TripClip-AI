@@ -380,7 +380,7 @@ struct TripOptimizerConfigView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
                     .background(vm.canOptimize ? AppColors.accent : AppColors.surface2)
-                    .foregroundStyle(vm.canOptimize ? Color.white : AppColors.textTertiary)
+                    .foregroundStyle(vm.canOptimize ? AppColors.onAccent : AppColors.textTertiary)
                     .clipShape(Capsule())
             }
             .disabled(!vm.canOptimize)

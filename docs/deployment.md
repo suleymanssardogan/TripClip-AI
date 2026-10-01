@@ -1,9 +1,11 @@
 # Deployment Guide
 
+Adım adım hazırlık durumu ve yayın kapıları: [production-roadmap.md](production-roadmap.md).
+
 ## Prerequisites
 
-- Ubuntu 22.04+ server (minimum 4GB RAM, 40GB disk)
-- Docker 24+ and Docker Compose plugin installed
+- Ubuntu 22.04+ server (capacity determined by staging load tests; the current hybrid worker alone has an 8GB memory limit, so 4GB is insufficient for the full stack)
+- Docker 24+, Docker Compose with `up --wait --wait-timeout`, and Python 3 installed
 - Domain name with A record pointing to the server IP
 - Port 80 and 443 open in the firewall
 - Outbound internet access for the server itself — `scripts/setup-ssl.sh`, `scripts/renew-ssl.sh`, and `scripts/backup.sh` pull small helper images on demand (`certbot/certbot`, `mongodb/mongodb-database-tools`, `alpine`)
@@ -33,7 +35,16 @@ Open `.env` and fill in the required values:
 - `POSTGRES_PASSWORD` — already generated
 - `REDIS_PASSWORD` — already generated
 - `GEMINI_API_KEY` — from Google AI Studio (aistudio.google.com)
+- `INTERNAL_API_SECRET` — independent random value, at least 32 characters
+- `GRAFANA_ADMIN_PASSWORD` — non-default monitoring password
+- `ALLOWED_HOSTS` — public domains (internal service names are added automatically)
+- `ALLOWED_ORIGINS` — HTTPS web origin
 - `SENTRY_DSN` — optional, from sentry.io
+- SMTP credentials and an HTTPS `PASSWORD_RESET_URL_BASE` for password reset
+- Google OAuth credentials/redirect allowlist if Google login is enabled
+- APNs credentials with `APNS_USE_SANDBOX=false` for TestFlight/App Store
+
+Production Compose passes Google client ID to the web build automatically; changing it requires rebuilding the web image. No client secret goes to the browser.
 
 ### 3. Obtain SSL certificate
 
@@ -60,7 +71,7 @@ server_name yourdomain.com;
 ./scripts/deploy.sh
 ```
 
-The script validates the environment, builds all images, starts services, and waits for health checks.
+The script validates Compose configuration without executing `.env` as shell code, builds images, waits up to 300 seconds for service health, and checks database/broker readiness. Any failed check exits nonzero. Docker Compose must support `up --wait --wait-timeout`.
 
 ---
 
@@ -101,9 +112,9 @@ Externally reachable endpoints (through nginx):
 |----------|----------|
 | `GET /health` | `{"status":"healthy"}` — web-bff |
 | `GET /health/mobile` | `{"status":"healthy"}` — mobile-bff |
-| `GET /health/ready` | `{"status":"ready","checks":{"postgres":"ok","redis":"ok"}}` — core-api, proxied at the BFF layer |
+| `GET /health/ready` | `{"status":"ready","checks":{"postgres":"ok","redis":"ok"}}` — core-api, proxied by nginx |
 
-The `/health/ready` endpoint returns 503 when any dependency is down. Connect it to an external uptime monitor (UptimeRobot, Betterstack, etc.).
+The `/health/ready` endpoint returns 503 when PostgreSQL or Redis is unavailable. Optional AI dependencies are reported separately. Nginx proxies this route directly to core-api. Connect it to an external uptime monitor (UptimeRobot, Betterstack, etc.).
 
 ---
 
@@ -186,7 +197,8 @@ Checks: HTTP→HTTPS redirect, web app loads, web-bff and mobile-bff health endp
 | `POSTGRES_PASSWORD` | Yes | PostgreSQL password. |
 | `REDIS_PASSWORD` | Yes | Redis password. |
 | `APP_ENV` | Yes | Set to `production` to enforce secret validation. |
-| `NEXT_PUBLIC_API_URL` | Yes | Web BFF URL seen by the browser. Use `/api/web` with nginx. |
+| `LEGAL_OPERATOR_NAME`, `LEGAL_CONTACT_EMAIL` | Yes | Verified operator identity and privacy contact shown on legal pages. |
+| `LEGAL_CONTENT_APPROVED` | Yes | Set to `true` only after the privacy and terms text is reviewed for the actual operator and data flows. |
 | `GEMINI_MODEL` | No | Gemini model name. Default: `gemini-2.5-flash`. |
 | `WHISPER_MODEL` | No | Whisper model size. Default: `base`. |
 | `USE_GEMINI` | No | Enable Gemini pipeline. Default: `true`. |

@@ -54,7 +54,7 @@ struct LibraryView: View {
             VStack(spacing: 0) {
                 if !availableCategories.isEmpty {
                     categoryChips
-                        .padding(.top, 8)
+                        .padding(.vertical, 12)
                 }
 
                 if vm.isLoading && vm.places.isEmpty {
@@ -82,8 +82,8 @@ struct LibraryView: View {
                 selectionBar
             }
         }
-        .navigationTitle("Kütüphane")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Mekanlar")
+        .navigationBarTitleDisplayMode(.large)
         .searchable(text: $searchText, prompt: "Mekan veya şehir ara")
         .onSubmit(of: .search) {
             // Yerel substring filtresi zaten bir şey bulduysa anlamsal
@@ -98,19 +98,12 @@ struct LibraryView: View {
         }
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                HStack(spacing: 16) {
-                    if !vm.places.isEmpty {
-                        Button(isSelecting ? "Vazgeç" : "Gezi Oluştur") {
-                            withAnimation {
-                                isSelecting.toggle()
-                                if !isSelecting { selectedIDs.removeAll() }
-                            }
+                if !vm.places.isEmpty {
+                    Button(isSelecting ? "Vazgeç" : "Gezi Oluştur") {
+                        withAnimation {
+                            isSelecting.toggle()
+                            if !isSelecting { selectedIDs.removeAll() }
                         }
-                        .font(.system(size: 14, weight: .semibold))
-                    }
-                    NavigationLink(destination: TripsListView()) {
-                        Image(systemName: "map")
-                            .foregroundStyle(AppColors.accentText)
                     }
                 }
             }
@@ -187,7 +180,7 @@ struct LibraryView: View {
         Button(action: action) {
             Text(label)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(isSelected ? Color.white : AppColors.textSecondary)
+                .foregroundStyle(isSelected ? AppColors.onAccent : AppColors.textSecondary)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
                 .background(isSelected ? AppColors.accent : AppColors.surface)
@@ -214,7 +207,7 @@ struct LibraryView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
                     .background(AppColors.accent)
-                    .foregroundStyle(Color.white)
+                    .foregroundStyle(AppColors.onAccent)
                     .clipShape(Capsule())
             }
         }

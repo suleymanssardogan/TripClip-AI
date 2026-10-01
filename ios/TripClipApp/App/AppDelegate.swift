@@ -18,13 +18,20 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
-        requestNotificationPermission()
+        UNUserNotificationCenter.current().delegate = self
+        // Existing opt-in remains active after relaunch. The first permission
+        // prompt is shown only after a person chooses it from the account menu.
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            if settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional {
+                DispatchQueue.main.async { application.registerForRemoteNotifications() }
+            }
+        }
         return true
     }
 
     // MARK: - Push Notifications
 
-    private func requestNotificationPermission() {
+    func requestNotificationPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             if granted {
                 DispatchQueue.main.async {
@@ -35,7 +42,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                 Logger.upload.warning("Notification permission error: \(error.localizedDescription)")
             }
         }
-        UNUserNotificationCenter.current().delegate = self
     }
 
     func application(

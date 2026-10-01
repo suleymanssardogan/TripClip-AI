@@ -20,4 +20,12 @@ struct AssistantReference: Decodable, Hashable {
 struct AssistantResponse: Decodable {
     let answer: String
     let references: [AssistantReference]
+    var sources: [AssistantSource]? = nil
+}
+
+struct AssistantSource: Decodable, Hashable {
+    let title: String
+    let url: String
+    let observedAt: String
+    let expiresAt: String
 }

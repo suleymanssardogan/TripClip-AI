@@ -5,159 +5,172 @@ struct WelcomeView: View {
 
     @Environment(AuthEnvironment.self) private var auth
     @Environment(\.colorScheme) private var colorScheme
-    @State private var path      = NavigationPath()
-    @State private var appleErr  = ""
+    @State private var path = NavigationPath()
+    @State private var appleErr = ""
     @State private var googleErr = ""
-    @State private var loading   = false
+    @State private var loading = false
     @State private var googleCoordinator = GoogleSignInCoordinator()
 
     var body: some View {
         NavigationStack(path: $path) {
-            ZStack {
-                AppColors.background.ignoresSafeArea()
+            VStack(spacing: 0) {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 0) {
+                            Text("tripclip")
+                                .foregroundStyle(AppColors.text)
+                            Text(".")
+                                .foregroundStyle(AppColors.accentText)
+                        }
+                        .font(.system(.title2, design: .rounded, weight: .heavy))
+                        .tracking(-1.2)
+                        .padding(.top, 14)
 
-                VStack(spacing: 0) {
-                    Spacer()
+                        Image("WelcomePhoto")
+                            .resizable()
+                            .scaledToFill()
+                            .frame(height: 238)
+                            .frame(maxWidth: .infinity)
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                            .accessibilityLabel("İstanbul Boğazı'nı gösteren temsili seyahat görseli")
+                            .padding(.top, 24)
 
-                    // ── Logo / Hero ─────────────────────────────────────────
-                    VStack(spacing: 16) {
-                        Image(systemName: "mappin.and.ellipse")
-                            .font(.system(size: 64))
-                            .foregroundStyle(AppColors.accentText)
-                            .symbolEffect(.pulse)
+                        Text("İstanbul, Türkiye · Temsili görsel")
+                            .font(.caption2)
+                            .foregroundStyle(AppColors.textTertiary)
+                            .padding(.top, 9)
 
-                        Text("TripClip")
-                            .font(.system(size: 42, weight: .black, design: .rounded))
+                        Text("Gördüğün yerler,\ngideceğin yerler.")
+                            .font(.system(.largeTitle, design: .rounded, weight: .bold))
+                            .tracking(-1.4)
                             .foregroundStyle(AppColors.text)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 27)
 
-                        Text("Instagram videolarından\ngezi planı oluştur")
-                            .font(.system(size: 16))
+                        Text("Gezi videolarındaki durakları keşfet. Beğendiklerini kaydet, kendi rotanı oluştur.")
+                            .font(.body)
                             .foregroundStyle(AppColors.textSecondary)
-                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .lineSpacing(3)
+                            .padding(.top, 12)
                     }
-
-                    Spacer()
-
-                    // ── CTA Buttons ─────────────────────────────────────────
-                    VStack(spacing: 12) {
-                        NavigationLink(value: "login") {
-                            Label("Giriş Yap", systemImage: "arrow.right.circle.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(AppColors.accent)
-                                .foregroundStyle(AppColors.onAccent)
-                                .clipShape(RoundedRectangle(cornerRadius: 16))
-                        }
-                        .buttonStyle(PressableButtonStyle())
-
-                        NavigationLink(value: "register") {
-                            Text("Hesap Oluştur")
-                                .font(.system(size: 16, weight: .semibold))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 16)
-                                .background(AppColors.surface2)
-                                .foregroundStyle(AppColors.text)
-                                .clipShape(RoundedRectangle(cornerRadius: 16))
-                        }
-                        .buttonStyle(PressableButtonStyle())
-
-                        // ── Divider ─────────────────────────────────────────
-                        HStack(spacing: 12) {
-                            Rectangle().fill(AppColors.border).frame(height: 1)
-                            Text("veya").font(.caption).foregroundStyle(AppColors.textTertiary)
-                            Rectangle().fill(AppColors.border).frame(height: 1)
-                        }
-
-                        // ── Apple Sign In ────────────────────────────────────
-                        SignInWithAppleButton(.signIn) { request in
-                            request.requestedScopes = [.fullName, .email]
-                        } onCompletion: { result in
-                            Task {
-                                loading  = true
-                                appleErr = ""
-                                do {
-                                    try await auth.appleSignIn(result: result)
-                                } catch {
-                                    appleErr = error.localizedDescription
-                                }
-                                loading = false
-                            }
-                        }
-                        .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                        .disabled(loading)
-
-                        if !appleErr.isEmpty {
-                            Text(appleErr)
-                                .font(.caption)
-                                .foregroundStyle(AppColors.destructive)
-                                .multilineTextAlignment(.center)
-                        }
-
-                        // ── Google Sign In ───────────────────────────────────
-                        // `Config.googleClientID` boşsa (varsayılan, GOOGLE_CLIENT_ID
-                        // set edilmemiş) buton hiç GÖRÜNMEZ — web'in aynı
-                        // `isGoogleSignInConfigured()` deseniyle tutarlı.
-                        if Config.googleClientID != nil {
-                            Button {
-                                Task {
-                                    loading   = true
-                                    googleErr = ""
-                                    do {
-                                        let code = try await googleCoordinator.requestAuthorizationCode()
-                                        try await auth.googleSignIn(code: code, redirectUri: Config.googleRedirectURI)
-                                    } catch {
-                                        googleErr = error.localizedDescription
-                                    }
-                                    loading = false
-                                }
-                            } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: "g.circle.fill")
-                                        .font(.system(size: 18))
-                                    Text("Google ile devam et")
-                                        .font(.system(size: 16, weight: .semibold))
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 14)
-                                .background(AppColors.surface2)
-                                .foregroundStyle(AppColors.text)
-                                .clipShape(RoundedRectangle(cornerRadius: 16))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .stroke(AppColors.border, lineWidth: 1)
-                                )
-                            }
-                            .buttonStyle(PressableButtonStyle())
-                            .disabled(loading)
-
-                            if !googleErr.isEmpty {
-                                Text(googleErr)
-                                    .font(.caption)
-                                    .foregroundStyle(AppColors.destructive)
-                                    .multilineTextAlignment(.center)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 48)
+                    .padding(.horizontal, 22)
+                    .padding(.bottom, 24)
+                    .frame(maxWidth: 560)
+                    .frame(maxWidth: .infinity)
                 }
+                .scrollIndicators(.hidden)
+
+                actions
             }
+            .background(AppColors.background.ignoresSafeArea())
             .navigationDestination(for: String.self) { destination in
                 switch destination {
-                case "login":    LoginView()
+                case "login": LoginView()
                 case "register": RegisterView()
-                default:         EmptyView()
+                default: EmptyView()
                 }
             }
+        }
+        .tint(AppColors.accentText)
+    }
+
+    private var actions: some View {
+        VStack(spacing: 10) {
+            NavigationLink(value: "register") {
+                Text("Ücretsiz başla")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(AppColors.accent)
+
+            NavigationLink(value: "login") {
+                Text("Giriş yap")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+
+            SignInWithAppleButton(.signIn) { request in
+                request.requestedScopes = [.fullName, .email]
+            } onCompletion: { result in
+                Task {
+                    loading = true
+                    appleErr = ""
+                    do { try await auth.appleSignIn(result: result) }
+                    catch { appleErr = error.localizedDescription }
+                    loading = false
+                }
+            }
+            .signInWithAppleButtonStyle(colorScheme == .dark ? .white : .black)
+            .frame(height: 51)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .disabled(loading)
+            .padding(.top, 4)
+
+            if !appleErr.isEmpty {
+                Text(appleErr)
+                    .font(.caption)
+                    .foregroundStyle(AppColors.destructive)
+                    .multilineTextAlignment(.center)
+            }
+
+            if Config.googleClientID != nil {
+                Button {
+                    Task {
+                        loading = true
+                        googleErr = ""
+                        do {
+                            let code = try await googleCoordinator.requestAuthorizationCode()
+                            try await auth.googleSignIn(code: code, redirectUri: Config.googleRedirectURI)
+                        } catch { googleErr = error.localizedDescription }
+                        loading = false
+                    }
+                } label: {
+                    Text("Google ile devam et")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(loading)
+
+                if !googleErr.isEmpty {
+                    Text(googleErr)
+                        .font(.caption)
+                        .foregroundStyle(AppColors.destructive)
+                        .multilineTextAlignment(.center)
+                }
+            }
+
+            HStack(spacing: 4) {
+                Text("Bilgi için")
+                Link("Gizlilik", destination: URL(string: "https://tripclip.app/privacy")!)
+                Text("ve")
+                Link("Koşullar'ı", destination: URL(string: "https://tripclip.app/terms")!)
+                Text("incele.")
+            }
+            .font(.caption2)
+            .foregroundStyle(AppColors.textSecondary)
+            .minimumScaleFactor(0.85)
+            .padding(.top, 5)
+        }
+        .padding(.horizontal, 22)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
+        .frame(maxWidth: 560)
+        .frame(maxWidth: .infinity)
+        .background(AppColors.background)
+        .overlay(alignment: .top) {
+            Rectangle().fill(AppColors.border).frame(height: 1)
         }
     }
 }
 
 #Preview {
-    WelcomeView()
-        .environment(AuthEnvironment())
+    WelcomeView().environment(AuthEnvironment())
 }

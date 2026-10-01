@@ -4,6 +4,15 @@ import XCTest
 @MainActor
 final class TripAssistantViewModelTests: XCTestCase {
 
+    func test_sourceDecodingSupportsOldAndNewResponses() throws {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let old = try decoder.decode(AssistantResponse.self, from: Data(#"{"answer":"Cevap","references":[]}"#.utf8))
+        XCTAssertNil(old.sources)
+        let new = try decoder.decode(AssistantResponse.self, from: Data(#"{"answer":"Cevap","references":[],"sources":[{"title":"Kaynak","url":"https://example.org","observed_at":"2026-09-30","expires_at":"2026-10-30"}]}"#.utf8))
+        XCTAssertEqual(new.sources?.first?.observedAt, "2026-09-30")
+    }
+
     private func makeAuth(fake: FakeAPIClient, withUser: Bool = true) -> AuthEnvironment {
         let auth = AuthEnvironment(apiClient: fake)
         if withUser {

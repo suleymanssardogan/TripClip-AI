@@ -1,0 +1,49 @@
+# Disposable test infrastructure: no public ports, production volumes or Docker socket.
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: integration
+      POSTGRES_PASSWORD: integration-only
+      POSTGRES_DB: tripclip_integration
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U integration -d tripclip_integration]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.9.0
+  runner:
+    build:
+      context: .
+      dockerfile: integration/Dockerfile
+    environment:
+      TRIPCLIP_INTEGRATION: "1"
+      APP_ENV: integration
+      DATABASE_URL: postgresql://integration:integration-only@postgres:5432/tripclip_integration
+      REDIS_URL: redis://toxiproxy:16379/0
+      QDRANT_URL: http://toxiproxy:16333
+      TOXIPROXY_URL: http://toxiproxy:8474
+      UPLOAD_DIR: /tmp/integration-uploads
+      ANALYTICS_ENABLED: "false"
+      CELERY_METRICS_PORT: "9808"
+    volumes:
+      - ./integration-reports:/reports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      toxiproxy:
+        condition: service_started

@@ -3,10 +3,10 @@ Presentation katmanı — Video route handler'ları.
 Sadece: input al → service çağır → response döndür.
 DB sorguları, ML pipeline, json dönüşümleri burada YOK.
 """
-from fastapi import APIRouter, UploadFile, File, Depends, Header, Request, Query
+from fastapi import APIRouter, UploadFile, File, Depends, Header, Request, Query, BackgroundTasks
 from fastapi.responses import JSONResponse
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 from sqlalchemy.orm import Session
 from typing import Optional
 from urllib.parse import urlparse
@@ -80,6 +80,7 @@ def _enforce_daily_quota(user_id: int) -> None:
 @limiter.limit("10/minute")
 async def process_video(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     service: VideoService = Depends(get_video_service),
     x_user_id: Optional[int] = Header(default=None),
@@ -114,41 +115,18 @@ async def process_video(
         user_id=x_user_id,
     )
 
-    # ── Celery task'ı kuyruğa ekle ────────────────────────────────────────────
-    try:
-        from app.tasks.video_tasks import process_video_task
-        task = process_video_task.delay(video_id, str(file_path))
-        logger.info("📤 Celery task kuyruğa eklendi | video_id=%s | task_id=%s",
-                    video_id, task.id)
-    except Exception as exc:
-        # Redis bağlantısı yoksa (local geliştirme) BackgroundTasks fallback
-        logger.warning("⚠️  Celery ulaşılamıyor, BackgroundTasks fallback: %s", exc)
-        from fastapi import BackgroundTasks
-        bt = BackgroundTasks()
-        bt.add_task(_fallback_run_ml_pipeline, video_id=video_id, video_path=str(file_path))
+    # The job is already committed with the video; publication can be retried.
+    background_tasks.add_task(_dispatch_analysis_work)
 
     return service.build_upload_response(video_id, file.filename)
 
 
-def _fallback_run_ml_pipeline(video_id: int, video_path: str) -> None:
-    """
-    Celery erişilemiyorsa (local geliştirme) doğrudan çalışır.
-    Production'da bu kod bloğuna girilmez.
-    """
-    from app.core.database import SessionLocal
-    from app.core.services.video_processor import VideoProcessingService
-    db   = SessionLocal()
-    repo = SqlVideoRepository(db)
+def _dispatch_analysis_work() -> None:
+    from app.application.services.deferred_work import dispatch_pending_work
     try:
-        repo.mark_processing(video_id)
-        result = VideoProcessingService().process_video(video_path, video_id)
-        repo.save_results(video_id, result)
-        logger.info("✅ Fallback pipeline tamamlandı | video_id=%s", video_id)
-    except Exception as e:
-        logger.error("❌ Fallback pipeline başarısız | video_id=%s | %s", video_id, e)
-        repo.mark_failed(video_id)
-    finally:
-        db.close()
+        dispatch_pending_work()
+    except Exception as exc:
+        logger.warning("Analysis dispatch deferred: %s", type(exc).__name__)
 
 
 @router.get("/{video_id}/progress", response_model=ProgressResponse)
@@ -259,8 +237,8 @@ def _is_supported_video_url(v: str) -> bool:
 
 
 class URLQueueRequest(BaseModel):
-    url: str
-    source: str = "unknown"
+    url: str = Field(max_length=2048)
+    source: str = Field(default="unknown", max_length=64)
 
     @field_validator("url")
     @classmethod
@@ -281,6 +259,7 @@ class URLQueueRequest(BaseModel):
 @limiter.limit("20/minute")
 def queue_url(
     request: Request,
+    background_tasks: BackgroundTasks,
     body: URLQueueRequest,
     service: VideoService = Depends(get_video_service),
     x_user_id: Optional[int] = Header(default=None),
@@ -312,19 +291,11 @@ def queue_url(
         filename=filename,
         content=b"",          # dosya henüz yok — URL'den indirilecek
         user_id=x_user_id,
+        source_url=str(body.url),
+        source_platform=body.source,
     )
 
-    # Celery task — URL'i indirip işleyecek
-    try:
-        from app.tasks.video_tasks import process_url_task
-        task = process_url_task.delay(video_id, body.url, body.source)
-        logger.info(
-            "📎 URL kuyruğa alındı | video_id=%s | task_id=%s | url=%.60s",
-            video_id, task.id, body.url,
-        )
-    except Exception as exc:
-        logger.warning("⚠️ Celery ulaşılamıyor, URL task atlandı: %s", exc)
-        # Fallback: kaydı "queued" durumunda bırak, manuel işlenebilir
+    background_tasks.add_task(_dispatch_analysis_work)
 
     return {
         "id":      video_id,

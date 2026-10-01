@@ -6,24 +6,14 @@ struct TripRowView: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(AppColors.surface2)
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.border))
-                Image(systemName: "map.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(AppColors.accentText)
-            }
-            .frame(width: 52, height: 52)
-
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(trip.title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.headline)
                     .foregroundStyle(AppColors.text)
                     .lineLimit(1)
 
                 HStack(spacing: 10) {
-                    Label("\(trip.stopsCount) durak", systemImage: "mappin")
+                    Text("\(trip.stopsCount) durak")
                         .font(.system(size: 12))
                         .foregroundStyle(AppColors.textSecondary)
 
@@ -41,11 +31,11 @@ struct TripRowView: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(AppColors.textTertiary)
         }
-        .padding(14)
+        .padding(16)
         .background(AppColors.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(AppColors.border, lineWidth: 1)
         )
     }

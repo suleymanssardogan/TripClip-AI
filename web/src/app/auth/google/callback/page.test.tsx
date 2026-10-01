@@ -13,7 +13,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, googleSignIn: vi.fn(), saveAuthTokens: vi.fn() };
+  return { ...actual, googleSignIn: vi.fn() };
 });
 
 const STATE_KEY = "tripclip_google_oauth_state";
@@ -27,19 +27,16 @@ beforeEach(() => {
 });
 
 describe("GoogleCallbackPage", () => {
-  it("exchanges the code for tokens and redirects to the stored `next` path when the OAuth state matches", async () => {
+  it("establishes a cookie session and redirects to the stored `next` path when the OAuth state matches", async () => {
     sessionStorage.setItem(STATE_KEY, "abc123");
     sessionStorage.setItem(NEXT_KEY, "/dashboard");
     params = { code: "authcode", state: "abc123" };
-    vi.mocked(api.googleSignIn).mockResolvedValue({
-      access_token: "t", refresh_token: "r", user_id: 1, email: "g@test.com",
-    });
+    vi.mocked(api.googleSignIn).mockResolvedValue({ user_id: 1, email: "g@test.com" });
 
     render(<GoogleCallbackPage />);
 
     await waitFor(() => expect(api.googleSignIn).toHaveBeenCalledWith("authcode", expect.stringContaining("/auth/google/callback")));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/dashboard"));
-    expect(api.saveAuthTokens).toHaveBeenCalled();
   });
 
   it("shows a safe error and never calls the API when the OAuth state does not match (CSRF protection)", async () => {

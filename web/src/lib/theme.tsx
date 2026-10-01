@@ -27,14 +27,12 @@ function applyTheme(t: Theme) {
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>("dark");
+  const [theme, setThemeState] = useState<Theme>("light");
 
-  // Initial mount: localStorage > prefers-color-scheme > dark
+  // Initial mount: an explicit saved choice wins; the journal opens in light mode.
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY) as Theme | null;
-    const initial: Theme =
-      saved ??
-      (window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark");
+    const initial: Theme = saved === "dark" ? "dark" : "light";
     applyTheme(initial);
     setTimeout(() => {
       setThemeState(initial);

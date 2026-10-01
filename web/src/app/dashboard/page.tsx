@@ -1,14 +1,14 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  MapPin, Clock, CheckCircle2, ChevronRight,
-  Globe2, Video, LogOut, Loader2, AlertTriangle, RotateCcw,
+  MapPin, Clock, ChevronRight,
+  LogOut, Loader2, AlertTriangle, RotateCcw,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
-import { getUserPlans, getStats, logout, type Plan, type PlatformStats } from "@/lib/api";
+import { getSession, getUserPlans, getStats, logout, deleteAccount, type Plan, type PlatformStats } from "@/lib/api";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -43,20 +43,6 @@ function planTitle(plan: Plan, index: number): string {
   return raw.replace(/\b\w/g, c => c.toUpperCase());
 }
 
-const LOCATION_EMOJIS: Record<string, string> = {
-  istanbul: "🕌", ankara: "🏛️", izmir: "🏖️", antalya: "🏝️",
-  kapadokya: "🎈", trabzon: "⛰️", bodrum: "⛵", mardin: "🌙",
-  default: "🗺️",
-};
-
-function locationEmoji(loc?: string): string {
-  if (!loc) return LOCATION_EMOJIS.default;
-  const key = loc.toLowerCase().replace(/[çğışöü]/g, c =>
-    ({ ç: "c", ğ: "g", ı: "i", ş: "s", ö: "o", ü: "u" }[c] ?? c)
-  );
-  return LOCATION_EMOJIS[key] ?? LOCATION_EMOJIS.default;
-}
-
 const cardVariants = {
   hidden: { opacity: 0, y: 20 },
   visible: (i: number) => ({
@@ -76,14 +62,16 @@ function TripCard({ plan, index }: { plan: Plan; index: number }) {
       <Card
         hover={isCompleted}
         onClick={() => isCompleted && router.push(`/analyze/${plan.id}`)}
-        className={`group ${isCompleted ? "cursor-pointer" : "opacity-70"}`}
+        onKeyDown={event => { if (isCompleted && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); router.push(`/analyze/${plan.id}`); } }}
+        role={isCompleted ? "link" : undefined}
+        tabIndex={isCompleted ? 0 : undefined}
+        aria-label={isCompleted ? `${title} detaylarını gör` : undefined}
+        className={`group ${isCompleted ? "cursor-pointer focus-visible:outline-2 focus-visible:outline-route" : "opacity-70"}`}
       >
-        <div className="h-20 flex items-center justify-center text-3xl bg-surface2">
-          {locationEmoji(plan.top_location ?? undefined)}
-        </div>
-        <div className="p-4">
+        <div className="p-6">
+          <p className="mb-4 text-[10px] font-semibold uppercase tracking-[0.16em] text-accent-text">Video planı</p>
           <div className="flex items-start justify-between gap-2 mb-2">
-            <h3 className="font-display font-bold text-text text-sm leading-snug">{title}</h3>
+            <h3 className="font-display text-lg font-bold leading-snug tracking-tight text-text">{title}</h3>
             {isCompleted
               ? <Badge variant="success" className="shrink-0">Tamamlandı</Badge>
               : <Badge variant="warning" className="shrink-0">İşleniyor</Badge>}
@@ -117,16 +105,16 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [email, setEmail] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const username = email.split("@")[0];
 
-  function load() {
-    const userId = Number(localStorage.getItem("user_id") ?? "0");
-    const storedEmail = localStorage.getItem("email") ?? "";
-
-    Promise.all([getUserPlans(userId), getStats()])
+  const load = useCallback(async () => {
+    const session = await getSession();
+    if (!session) { router.push("/login"); return; }
+    Promise.all([getUserPlans(session.user_id), getStats()])
       .then(([up, st]) => {
         setTimeout(() => {
-          setEmail(storedEmail);
+          setEmail(session.email);
           setPlans(up.plans);
           setStats(st);
           setLoading(false);
@@ -139,7 +127,7 @@ export default function DashboardPage() {
           setLoading(false);
         }, 0);
       });
-  }
+  }, [router]);
 
   function retry() {
     setLoading(true);
@@ -147,14 +135,17 @@ export default function DashboardPage() {
     load();
   }
 
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) { router.push("/login"); return; }
-    load();
-  }, [router]);
+  useEffect(() => { load(); }, [load]);
 
   const completedCount = plans.filter(p => ["completed", "COMPLETED"].includes(p.status)).length;
   const totalLocations = plans.reduce((a, p) => a + (p.locations_count || 0), 0);
+
+  async function handleDeleteAccount() {
+    if (!window.confirm("Hesabınız ve tüm verileriniz kalıcı olarak silinecek. Devam edilsin mi?")) return;
+    setDeleting(true);
+    try { await deleteAccount(); window.location.href = "/"; }
+    catch { setDeleting(false); window.alert("Hesap silinemedi. Lütfen tekrar deneyin."); }
+  }
 
   if (loading) {
     return (
@@ -170,7 +161,7 @@ export default function DashboardPage() {
         <Navbar />
         <div className="pt-32 pb-20 px-6 max-w-screen-xl mx-auto flex flex-col items-center justify-center gap-4 text-center">
           <AlertTriangle className="w-10 h-10 text-destructive" />
-          <h2 className="font-display text-2xl font-black tracking-tight text-text">Gezileriniz yüklenemedi</h2>
+          <h2 className="font-display text-2xl font-bold tracking-tight text-text">Gezileriniz yüklenemedi</h2>
           <p className="text-text-secondary text-sm max-w-sm">Sunucuya ulaşılamadı. İnternet bağlantınızı kontrol edip tekrar deneyin.</p>
           <Button onClick={retry}>
             <RotateCcw className="w-4 h-4" /> Tekrar Dene
@@ -184,17 +175,17 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-bg pb-24">
       <Navbar />
 
-      <div className="pt-28 px-4 md:px-8 max-w-6xl mx-auto">
+      <div className="mx-auto max-w-7xl px-5 pb-24 pt-28 sm:px-8">
 
         {/* ── Başlık ─────────────────────────────────────────────────── */}
         <motion.header
           initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-between mb-8"
+          className="mb-7 flex items-center justify-between"
         >
           <div>
-            <p className="font-mono text-xs text-text-tertiary tracking-widest uppercase mb-1">Dashboard</p>
-            <h1 className="font-display font-black text-3xl text-text">
-              Hoş geldin, <span className="text-accent-text">{username}</span>
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-route">YOLCULUK GÜNLÜĞÜN</p>
+            <h1 className="font-display text-3xl font-bold tracking-[-0.05em] text-text sm:text-4xl">
+              Merhaba, <span className="text-accent-text">{username}</span>.
             </h1>
           </div>
           <Button
@@ -207,37 +198,45 @@ export default function DashboardPage() {
           </Button>
         </motion.header>
 
+        <div className="mb-7 rounded-2xl border border-[#dce9f2] bg-[#eef5fa] px-7 py-8 dark:border-border dark:bg-surface sm:px-10 sm:py-10">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent-text">Bir sonraki gezi</p>
+          <h2 className="mt-3 max-w-lg font-display text-2xl font-bold leading-tight tracking-[-0.045em] text-text sm:text-3xl">İlham aldığın videolar birer rotaya dönüşsün.</h2>
+          <p className="mt-3 max-w-lg text-sm leading-6 text-text-secondary">iOS uygulamasından bir video paylaş veya gezi fikirlerine göz at.</p>
+          <button onClick={() => router.push("/explore")} className="mt-6 inline-flex items-center gap-2 rounded-md bg-accent px-5 py-3 text-sm font-semibold text-on-accent hover:bg-accent-hover">Gezileri keşfet <ChevronRight className="h-4 w-4" /></button>
+        </div>
+
         {/* ── Kendi istatistiklerim ─────────────────────────────────── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+        <div className="mb-8 grid grid-cols-2 gap-3 md:grid-cols-4">
           {[
-            { label: "Toplam Video", value: plans.length, icon: Video },
-            { label: "Tamamlanan", value: completedCount, icon: CheckCircle2 },
-            { label: "Toplam Mekan", value: totalLocations, icon: MapPin },
-            { label: "Platform Kullanıcı", value: stats?.total_users ?? "—", icon: Globe2 },
+            { label: "Toplam video", value: plans.length },
+            { label: "Tamamlanan", value: completedCount },
+            { label: "Toplam mekân", value: totalLocations },
+            { label: "Platform kullanıcı", value: stats?.total_users ?? "—" },
           ].map((s, i) => (
             <motion.div key={i} custom={i} variants={cardVariants} initial="hidden" animate="visible">
-              <Card className="rounded-md p-4 flex items-center gap-3">
-                <s.icon className="w-5 h-5 text-text-tertiary shrink-0" />
-                <div>
-                  <p className="font-mono text-xl font-semibold text-text tabular-nums">{s.value}</p>
-                  <p className="text-[10px] text-text-tertiary uppercase tracking-wider">{s.label}</p>
-                </div>
+              <Card className="p-5 sm:p-6">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-text-tertiary">{s.label}</p>
+                <p className="mt-3 font-display text-3xl font-bold tabular-nums tracking-tight text-text">{s.value}</p>
               </Card>
             </motion.div>
           ))}
+        </div>
+        <div className="mb-8 flex justify-end">
+          <button onClick={handleDeleteAccount} disabled={deleting} className="text-xs text-destructive hover:underline disabled:opacity-50">
+            {deleting ? "Hesap siliniyor…" : "Hesabımı ve verilerimi sil"}
+          </button>
         </div>
 
         {/* ── Gezi listesi ──────────────────────────────────────────── */}
         <section>
           <div className="flex items-center justify-between mb-5">
-            <h2 className="font-display font-bold text-xl text-text">Gezi Geçmişim</h2>
+            <h2 className="font-display text-2xl font-bold tracking-tight text-text">Kaydettiğin yolculuklar</h2>
             <span className="text-xs text-text-tertiary">{plans.length} video</span>
           </div>
 
           {plans.length === 0 ? (
-            <div className="text-center py-20 rounded-lg border border-border-strong border-dashed">
-              <div className="text-5xl mb-4">🗺️</div>
-              <p className="text-text font-semibold mb-2">Henüz video analiz edilmedi</p>
+            <div className="rounded-xl border border-border bg-surface px-6 py-16 text-center">
+              <p className="mb-2 font-display text-xl font-bold text-text">İlk yolculuğun burada görünecek</p>
               <p className="text-text-secondary text-sm">
                 Bir Instagram Reel&apos;i TripClip iOS uygulamasından paylaşarak başla.
               </p>

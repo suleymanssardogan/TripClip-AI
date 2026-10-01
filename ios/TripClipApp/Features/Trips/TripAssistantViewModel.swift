@@ -10,6 +10,7 @@ struct ChatMessage: Identifiable {
     let role: ChatRole
     let content: String
     var references: [AssistantReference] = []
+    var sources: [AssistantSource] = []
 }
 
 @Observable
@@ -49,7 +50,8 @@ final class TripAssistantViewModel {
             let response: AssistantResponse = try await auth.apiClient.send(
                 .assistant(tripID: tripID, message: trimmed, history: history), token: token
             )
-            messages.append(ChatMessage(role: .assistant, content: response.answer, references: response.references))
+            messages.append(ChatMessage(role: .assistant, content: response.answer, references: response.references,
+                                        sources: response.sources ?? []))
         } catch let apiError as APIError {
             // Başarısız kullanıcı mesajı sohbette KALMAZ — web'in AYNI
             // davranışı (yeniden gönderilecek, kalıcı bir "gönderilemedi"

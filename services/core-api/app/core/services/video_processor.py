@@ -287,19 +287,10 @@ class VideoProcessingService:
         self.frames_dir.mkdir(parents=True, exist_ok=True)
         self.base_fps = 0.25
 
-        # Modül importları — test ortamında (torch/ultralytics vb. kurulu değilse)
-        # ImportError fırlatır; bu durumda ML pipeline'ın TAMAMI kullanılamaz
-        # (process_video en başta RuntimeError fırlatır, bkz. aşağı).
+        # FFmpeg is required for the video path. Optional ML imports and
+        # model initialization are isolated per stage below.
         try:
             import ffmpeg as _ffmpeg_module  # noqa: F401
-            from app.ml.computer_vision import ObjectDetectionService, LandmarkDetectionService
-            from app.ml.ocr_service import OCRService
-            from app.ml.speech_to_text import AudioProcessingService
-            from app.ml.ner_service import NERService
-            from app.ml.places_service import PlacesService
-            from app.ml.location_deduplicator import LocationDeduplicator
-            from app.ml.route_optimizer import RouteOptimizer
-            from app.ml.rag_service import RAGService
         except ImportError as e:
             logger.warning("ML servisleri yüklenemedi (test modu?): %s", e)
             self._ml_available = False
@@ -309,17 +300,15 @@ class VideoProcessingService:
         # başarısız olsa bile diğerleri kurulmaya devam eder. Pipeline
         # çalışırken bu servisin sonucu None üzerinden fallback'e düşer
         # (bkz. _safe_run çağrıları), tüm işlem çökmez.
-        self.detector        = self._try_init("YOLO/ObjectDetection", ObjectDetectionService)
-        self.vision_detector = self._try_init("Landmark/Vision",      LandmarkDetectionService)
-        self.ocr             = self._try_init("OCR",                  OCRService)
-        self.audio_processor = self._try_init("Whisper",               AudioProcessingService)
-        self.ner              = self._try_init("NER",                  NERService)
-        self.places           = self._try_init("Places/Nominatim",     PlacesService)
-        self.deduplicator     = self._try_init(
-            "LocationDeduplicator", lambda: LocationDeduplicator(distance_threshold_km=2.0)
-        )
-        self.route_optimizer  = self._try_init("RouteOptimizer", RouteOptimizer)
-        self.rag              = self._try_init("RAG",           RAGService)
+        self.detector        = self._init_ml_service("YOLO", "computer_vision", "ObjectDetectionService")
+        self.vision_detector = self._init_ml_service("Vision", "computer_vision", "LandmarkDetectionService")
+        self.ocr             = self._init_ml_service("OCR", "ocr_service", "OCRService")
+        self.audio_processor = self._init_ml_service("Whisper", "speech_to_text", "AudioProcessingService")
+        self.ner             = self._init_ml_service("NER", "ner_service", "NERService")
+        self.places          = self._init_ml_service("Places", "places_service", "PlacesService")
+        self.deduplicator    = self._init_ml_service("Dedup", "location_deduplicator", "LocationDeduplicator", distance_threshold_km=2.0)
+        self.route_optimizer = self._init_ml_service("Route", "route_optimizer", "RouteOptimizer")
+        self.rag             = self._init_ml_service("Ollama", "rag_service", "RAGService")
         self._ml_available    = True
 
         # ── Gemini / Hibrit modu (opsiyonel) ──────────────────────────────
@@ -331,14 +320,18 @@ class VideoProcessingService:
         self._use_gemini = self._use_hybrid or os.getenv("USE_GEMINI", "false").lower() == "true"
 
         if self._use_gemini:
-            from app.ml.gemini_service import GeminiService
-            self.gemini = self._try_init("Gemini", GeminiService)
+            self.gemini = self._init_ml_service("Gemini", "gemini_service", "GeminiService")
             mode = "🔀 HİBRİT" if self._use_hybrid else "🤖 GEMINI"
             logger.info("%s modu AKTİF (model=%s)",
                         mode, os.getenv("GEMINI_MODEL", "gemini-2.0-flash"))
         else:
             self.gemini = None
             logger.info("🔧 Klasik pipeline modu (Gemini devre dışı)")
+
+    @classmethod
+    def _init_ml_service(cls, label, module, class_name, **kwargs):
+        from importlib import import_module
+        return cls._try_init(label, lambda: getattr(import_module(f"app.ml.{module}"), class_name)(**kwargs))
 
     # ─────────────────────────────────────────────────────────────────────────
     # Ana pipeline

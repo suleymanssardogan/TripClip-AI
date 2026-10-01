@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Search, MapPin, Clock, ArrowRight, Filter, RotateCcw, AlertTriangle } from "lucide-react";
+import { Search, Clock, ArrowRight, RotateCcw } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Link from "next/link";
 import { getPlans, getStats, Plan, PlatformStats } from "@/lib/api";
@@ -51,30 +51,17 @@ function PlanCard({ plan, index }: { plan: Plan; index: number }) {
     <motion.div
       initial={{ opacity: 0, y: 24 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.05, duration: 0.5, ease: "easeOut" }}
+      transition={{ delay: index * 0.04, duration: 0.35, ease: "easeOut" }}
     >
       <Link href={`/analyze/${plan.id}`} className="block group">
-        <Card hover>
+        <Card hover className="h-full">
 
-          {/* Görsel alanı */}
-          <div className="relative overflow-hidden bg-surface2" style={{ height: "160px" }}>
-            <div className="w-full h-full flex items-center justify-center">
-              <MapPin className="w-8 h-8 text-text-tertiary" />
+          <div className="flex h-full flex-col p-6">
+            <div className="mb-5 flex items-center justify-between border-b border-border pb-4">
+              <span className="text-xs font-semibold uppercase tracking-wider text-accent-text">{city}</span>
+              <span className="text-xs text-text-tertiary">{plan.locations_count} mekân</span>
             </div>
-            <div className="absolute top-4 left-4">
-              <span className="font-mono text-[10px] font-semibold px-2.5 py-1 rounded-full bg-bg/80 border border-border text-text-secondary">
-                {plan.locations_count} Mekan
-              </span>
-            </div>
-            <div className="absolute bottom-4 left-4 flex items-center gap-1.5">
-              <MapPin className="w-3 h-3 text-route" />
-              <span className="text-xs tracking-widest uppercase text-text-secondary">{city}</span>
-            </div>
-          </div>
-
-          {/* Metin */}
-          <div className="p-5">
-            <h3 className="font-display font-bold text-text text-sm leading-snug mb-3
+            <h3 className="font-display text-xl font-bold text-text leading-snug mb-4 tracking-tight
               group-hover:text-accent-text transition-colors line-clamp-1">
               {planTitle(plan, index)}
             </h3>
@@ -90,7 +77,7 @@ function PlanCard({ plan, index }: { plan: Plan; index: number }) {
               </div>
             )}
 
-            <div className="flex items-center justify-between pt-3 border-t border-border">
+            <div className="mt-auto flex items-center justify-between border-t border-border pt-4">
               <span className="flex items-center gap-1.5 text-[11px] text-text-tertiary">
                 <Clock className="w-3 h-3" />
                 {created}
@@ -111,7 +98,6 @@ function PlanCard({ plan, index }: { plan: Plan; index: number }) {
 function Skeleton() {
   return (
     <div className="bg-surface border border-border rounded-lg overflow-hidden animate-pulse">
-      <div className="bg-surface2" style={{ height: "160px" }} />
       <div className="p-5 space-y-3">
         <div className="h-4 bg-surface2 rounded w-3/4" />
         <div className="h-3 bg-surface2 rounded w-1/2" />
@@ -168,28 +154,21 @@ export default function ExplorePage() {
       <Navbar />
 
       {/* ── Hero ────────────────────────────────────────── */}
-      <section className="relative pt-36 pb-20 px-8 overflow-hidden">
-        <div
-          aria-hidden
-          className="absolute -top-24 -right-24 w-[32rem] h-[32rem] rounded-full opacity-[0.12] blur-3xl pointer-events-none"
-          style={{ background: "radial-gradient(circle, rgb(var(--c-accent)) 0%, rgb(var(--c-route)) 70%, transparent 100%)" }}
-        />
+      <section className="bg-surface px-5 pb-12 pt-32 sm:px-8 lg:pt-36">
         <div className="max-w-7xl mx-auto relative">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
             className="flex flex-col md:flex-row md:items-end justify-between gap-8">
 
             <div>
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
-                className="inline-flex items-center gap-2.5 mb-5 px-4 py-1.5 rounded-full
-                  border border-border bg-surface2">
-                <span className="glow-dot" />
-                <span className="font-mono text-xs text-text-secondary tracking-widest uppercase">Keşfet</span>
+                className="mb-4 text-xs font-semibold uppercase tracking-widest text-accent-text">
+                Keşfet
               </motion.div>
 
-              <h1 className="font-display font-black text-text leading-tight"
-                style={{ fontSize: "clamp(2.25rem, 4.5vw, 4rem)" }}>
-                Gerçek Seyahat<br />
-                <span className="text-accent-text">Deneyimleri</span>
+              <h1 className="font-display font-bold tracking-[-0.055em] text-text leading-tight"
+                style={{ fontSize: "clamp(2.5rem, 4.5vw, 4.25rem)" }}>
+                Yeni yerler<br />
+                <span className="text-accent-text">keşfet.</span>
               </h1>
             </div>
 
@@ -209,17 +188,17 @@ export default function ExplorePage() {
           </motion.div>
 
           <p className="text-text-secondary mt-6 max-w-xl leading-relaxed">
-            AI&apos;ın analiz ettiği gerçek gezi videolarından çıkarılan mekanlar, rotalar ve seyahat hikâyeleri.
+            Gezi videolarından çıkan duraklara göz at. Bir sonraki yolculuğun için ilham bul.
           </p>
         </div>
       </section>
 
       {/* ── Arama + filtreler ───────────────────────────────── */}
-      <div className="sticky top-[68px] z-40 bg-bg/90 backdrop-blur-lg border-b border-border">
-        <div className="max-w-7xl mx-auto px-8 py-3 flex items-center gap-4">
+      <div className="sticky top-[72px] z-40 border-y border-border bg-surface/95 backdrop-blur-lg">
+        <div className="max-w-7xl mx-auto flex flex-col gap-3 px-5 py-3 sm:px-8 md:flex-row md:items-center md:gap-5">
 
           {/* Arama */}
-          <div className="relative flex-1 max-w-sm">
+          <div className="relative w-full flex-1 md:max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-tertiary" />
             <Input
               type="text" value={search}
@@ -230,8 +209,7 @@ export default function ExplorePage() {
           </div>
 
           {/* Şehir filtreleri */}
-          <div className="hidden md:flex items-center gap-1 overflow-x-auto no-scrollbar">
-            <Filter className="w-3.5 h-3.5 text-text-tertiary flex-shrink-0 mr-2" />
+          <div className="flex w-full items-center gap-1 overflow-x-auto no-scrollbar md:w-auto">
             {CITY_FILTERS.map(c => (
               <button key={c}
                 onClick={() => { setCity(c); setOffset(0); }}
@@ -248,7 +226,7 @@ export default function ExplorePage() {
       </div>
 
       {/* ── Plan grid ────────────────────────────────────────── */}
-      <main className="relative max-w-7xl mx-auto px-8 py-16">
+      <main className="relative max-w-7xl mx-auto px-5 py-14 sm:px-8">
 
         {/* Sonuç sayısı */}
         {!loading && filtered.length > 0 && (
@@ -265,17 +243,16 @@ export default function ExplorePage() {
             {Array.from({ length: 8 }).map((_, i) => <Skeleton key={i} />)}
           </div>
         ) : error ? (
-          <div className="text-center py-32">
-            <AlertTriangle className="w-10 h-10 text-destructive mx-auto mb-4" />
-            <h3 className="font-display font-bold text-text text-xl mb-2">Geziler yüklenemedi</h3>
-            <p className="text-text-secondary text-sm mb-8">Sunucuya ulaşılamadı. İnternet bağlantınızı kontrol edip tekrar deneyin.</p>
-            <Button variant="subtle" size="sm" onClick={() => fetchPlans(city, offset)}>
+          <div className="mx-auto max-w-2xl rounded-xl border border-border bg-surface px-6 py-14 text-center sm:px-10">
+            <p className="text-xs font-semibold uppercase tracking-[0.17em] text-text-tertiary">Bağlantı sorunu</p>
+            <h3 className="mt-3 font-display text-2xl font-bold tracking-tight text-text">Geziler şu anda yüklenemiyor.</h3>
+            <p className="mx-auto mb-7 mt-3 max-w-md text-sm leading-6 text-text-secondary">İnternet bağlantını kontrol edip yeniden deneyebilirsin.</p>
+            <Button variant="outline" size="sm" onClick={() => fetchPlans(city, offset)}>
               <RotateCcw className="w-3 h-3" /> Tekrar Dene
             </Button>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-32">
-            <MapPin className="w-10 h-10 text-text-tertiary mx-auto mb-4" />
+          <div className="mx-auto max-w-2xl rounded-xl border border-border bg-surface px-6 py-14 text-center sm:px-10">
             <h3 className="font-display font-bold text-text text-xl mb-2">
               {total === 0 ? "Henüz video analiz edilmedi" : "Sonuç bulunamadı"}
             </h3>
@@ -322,18 +299,14 @@ export default function ExplorePage() {
         )}
 
         {/* Alt CTA */}
-        <div className="mt-28 pt-16 border-t border-border text-center">
-          <div className="inline-flex items-center gap-2 mb-4 px-4 py-1.5 rounded-full
-            border border-border bg-surface2">
-            <span className="font-mono text-xs text-text-secondary tracking-widest uppercase">Kendi Planını Oluştur</span>
-          </div>
-          <h2 className="font-display font-black text-text mt-2 mb-4"
+        <div className="mt-24 rounded-2xl bg-surface px-6 py-12 text-center sm:px-12">
+          <p className="text-xs font-bold uppercase tracking-[0.18em] text-accent-text">Kendi planını oluştur</p>
+          <h2 className="font-display font-bold text-text mt-3 mb-4"
             style={{ fontSize: "clamp(1.75rem, 2.8vw, 2.5rem)" }}>
-            Videonu Yükle, Rotanı Keşfet
+            Gördüğün yeri rotana ekle.
           </h2>
-          <p className="text-text-secondary mb-8 max-w-md mx-auto text-sm leading-relaxed">
-            iOS uygulamasından gezi videonu yükle. AI otomatik olarak mekanları tespit eder,
-            haritaya işler ve sana özel rota oluşturur.
+          <p className="text-text-secondary mb-8 max-w-md mx-auto text-sm leading-7">
+            Gezi videonu TripClip iOS uygulamasında paylaş. Duraklarını bulup kendi planına dönüştür.
           </p>
           <Link href="/signup" className={buttonVariants({ size: "lg" }) + " text-sm"}>
             Ücretsiz Başla <ArrowRight className="w-4 h-4" />

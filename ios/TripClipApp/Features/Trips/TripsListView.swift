@@ -30,8 +30,8 @@ struct TripsListView: View {
                 list
             }
         }
-        .navigationTitle("Gezilerim")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Geziler")
+        .navigationBarTitleDisplayMode(.large)
         .task { await vm.load(auth: auth) }
         .onAppear {
             if hasAppearedOnce {
@@ -44,7 +44,11 @@ struct TripsListView: View {
 
     private var list: some View {
         ScrollView {
-            LazyVStack(spacing: 10) {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                Text("\(vm.trips.count) gezi")
+                    .font(.subheadline)
+                    .foregroundStyle(AppColors.textSecondary)
+                    .padding(.bottom, 4)
                 ForEach(vm.trips) { trip in
                     NavigationLink(destination: TripDetailView(tripID: trip.id)) {
                         TripRowView(trip: trip)
@@ -52,19 +56,16 @@ struct TripsListView: View {
                     .buttonStyle(PressableButtonStyle())
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 18)
         }
     }
 
     private var emptyState: some View {
         VStack(spacing: 16) {
             Spacer()
-            Image(systemName: "map")
-                .font(.system(size: 52))
-                .foregroundStyle(AppColors.textTertiary)
             Text("Henüz gezi oluşturmadın")
-                .font(.system(size: 18, weight: .semibold))
+                .font(.system(size: 21, weight: .bold, design: .rounded))
                 .foregroundStyle(AppColors.text)
             Text("Kütüphaneden mekan seçip\n\"Gezi Oluştur\" ile ilk rotanı yap.")
                 .font(.system(size: 14))

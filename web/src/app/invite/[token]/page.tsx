@@ -10,7 +10,7 @@ import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { getSharePreview, acceptShare, declineShare, type SharePreview } from "@/lib/api";
+import { getSession, getSharePreview, acceptShare, declineShare, type SharePreview } from "@/lib/api";
 
 const ROLE_LABELS: Record<string, string> = {
   viewer: "Görüntüleyici",
@@ -32,7 +32,7 @@ export default function InvitePage() {
   const [loggedIn, setLoggedIn] = useState(false);
 
   useEffect(() => {
-    setTimeout(() => setLoggedIn(!!localStorage.getItem("token")), 0);
+    getSession().then(session => setLoggedIn(Boolean(session)));
     getSharePreview(token)
       .then(res => {
         setTimeout(() => {

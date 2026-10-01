@@ -285,6 +285,8 @@ class PlacesService:
                 params["viewbox"] = f"{lon_min},{lat_max},{lon_max},{lat_min}"
                 params["bounded"] = 1
 
+            from app.core.privacy import require_reviewed_transfer
+            require_reviewed_transfer("nominatim")
             resp = requests.get(
                 f"{self.nominatim_url}/search",
                 params=params,
@@ -620,6 +622,8 @@ out center 3;
                 # üzerinden dağıtık (bkz. _throttle).
                 self._throttle(f"ratelimit:overpass:{idx}", self._overpass_min_interval)
                 try:
+                    from app.core.privacy import require_reviewed_transfer
+                    require_reviewed_transfer("overpass")
                     resp = requests.post(url, data={"data": query},
                                          headers=self.headers, timeout=req_timeout)
                     if resp.status_code == 200:

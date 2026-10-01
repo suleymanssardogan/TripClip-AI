@@ -4,7 +4,7 @@ import React, { Suspense, useEffect, useRef, useState } from "react";
 import { Loader2, AlertCircle } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { googleSignIn, saveAuthTokens } from "@/lib/api";
+import { googleSignIn } from "@/lib/api";
 import { consumeGoogleOAuthState, googleCallbackRedirectUri } from "@/lib/googleAuth";
 
 /**
@@ -46,8 +46,7 @@ function GoogleCallback() {
         throw new Error("Güvenlik doğrulaması başarısız oldu. Lütfen tekrar deneyin.");
       }
 
-      const data = await googleSignIn(code, googleCallbackRedirectUri());
-      saveAuthTokens(data);
+      await googleSignIn(code, googleCallbackRedirectUri());
       router.push(next);
     };
 

@@ -19,6 +19,7 @@ import logging
 import os
 
 from celery.exceptions import SoftTimeLimitExceeded
+from app.core.video_claim import serialized_analysis
 
 # @_celery_app.task (shared_task DEĞİL) kasıtlı: shared_task, task.app'i
 # celery.current_app (thread-local) proxy'si üzerinden çözer. FastAPI'nin sync
@@ -155,8 +156,15 @@ def _get_processor():
     retry_jitter=True,            # aynı anda gelen retry'ların dağıtılması
     acks_late=True,
     reject_on_worker_lost=True,
+    soft_time_limit=720,
+    time_limit=780,
 )
 def process_video_task(self, video_id: int, video_path: str) -> dict:
+    return _process_uploaded_analysis(self, video_id, video_path)
+
+
+@serialized_analysis
+def _process_uploaded_analysis(self, video_id: int, video_path: str) -> dict:
     """
     Video ML pipeline'ını Celery worker üzerinde çalıştırır.
 
@@ -177,6 +185,9 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
     repo = SqlVideoRepository(db)
 
     try:
+        existing_result = _existing_analysis_result(repo, video_id)
+        if existing_result is not None:
+            return existing_result
         repo.mark_processing(video_id)
         set_progress(video_id, "queued", 2)
 
@@ -195,11 +206,13 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
 
         # Sonucu kaydettikten SONRA kuyruğa al — bu task başarısız olsa bile
         # video COMPLETED kalır, sadece ipuçları eksik olur.
-        generate_tips_task.delay(video_id)
+        _enqueue_travel_tips(video_id)
 
         return {"status": "completed", "video_id": video_id}
 
     except SoftTimeLimitExceeded:
+        if getattr(self, "durable", False):
+            raise
         logger.error("⏰ Zaman aşımı | video_id=%s", video_id)
         repo.mark_failed(video_id)
         set_progress(video_id, "failed", 0)
@@ -224,6 +237,81 @@ def process_video_task(self, video_id: int, video_path: str) -> dict:
 
     finally:
         db.close()
+
+
+def _enqueue_travel_tips(video_id: int) -> None:
+    """Nudge the durable dispatcher; its periodic loop recovers broker outages."""
+    try:
+        from app.application.services.deferred_work import dispatch_pending_work
+        dispatch_pending_work()
+    except Exception:
+        logger.warning("İpucu kuyruğuna gönderilemedi | video_id=%s", video_id, exc_info=True)
+
+
+def _existing_analysis_result(repo, video_id: int):
+    """Celery can redeliver acknowledged-late tasks; avoid duplicate AI work."""
+    video = repo.get_by_id(video_id)
+    if video is None:
+        return {"status": "skipped", "video_id": video_id, "reason": "video_deleted"}
+    if video.status == "completed":
+        return {"status": "completed", "video_id": video_id}
+    return None
+
+
+@_celery_app.task(name="app.tasks.video_tasks.deferred_work_task", queue="video_processing",
+                  acks_late=True, reject_on_worker_lost=True,
+                  soft_time_limit=210, time_limit=240)
+def deferred_work_task(job_id: int):
+    from app.core.database import SessionLocal
+    from app.application.services.deferred_work import execute_job
+    with SessionLocal() as db:
+        return execute_job(db, job_id, lambda kind, entity_id: _run_deferred_work(db, kind, entity_id))
+
+
+def _run_deferred_work(db, kind, entity_id):
+    if kind == "place_index":
+        from datetime import datetime
+        from app.models.place import Place
+        from app.models.place_knowledge_document import PlaceKnowledgeDocument
+        from app.ml.qdrant_service import QdrantService
+        place = db.query(Place).filter_by(id=entity_id).first()
+        if place is None:
+            return
+        docs = db.query(PlaceKnowledgeDocument).filter(
+            PlaceKnowledgeDocument.place_id == entity_id,
+            PlaceKnowledgeDocument.expires_at > datetime.utcnow(),
+        ).order_by(PlaceKnowledgeDocument.observed_at.desc()).limit(3).all()
+        knowledge = " ".join(d.content for d in docs)[:2400]
+        if not QdrantService().upsert_place(place.id, place.name, place.city, place.category,
+                                           knowledge_text=knowledge):
+            raise RuntimeError("Place indexing unavailable")
+    elif kind == "travel_tips":
+        from app.infrastructure.repositories.sql_video_repository import SqlVideoRepository
+        repo = SqlVideoRepository(db)
+        video = repo.get_by_id(entity_id)
+        if video is None or video.status != "completed" or not video.deduplicated_locations:
+            return
+        if video.travel_tips and (video.travel_tips.get("tips") or video.travel_tips.get("summary")):
+            return
+        gemini_mode = os.getenv("USE_GEMINI", "false").lower() == "true" or os.getenv("USE_HYBRID", "false").lower() == "true"
+        if not (os.getenv("GEMINI_API_KEY") if gemini_mode else os.getenv("OLLAMA_URL")):
+            return  # Optional provider is deliberately disabled.
+        from app.ml.request_budget import request_budget
+        # Tips need only the configured text provider, not YOLO/Whisper/NER.
+        with request_budget(150):
+            if gemini_mode:
+                from app.ml.gemini_service import GeminiService
+                tips = GeminiService().generate_travel_tips(
+                    [loc.get("original_name") or loc.get("name", "") for loc in video.deduplicated_locations],
+                    video_id=entity_id)
+            else:
+                from app.ml.rag_service import RAGService
+                tips = RAGService().generate_travel_tips(video.deduplicated_locations)
+        if not tips or not (tips.get("tips") or tips.get("summary")):
+            raise RuntimeError("Travel tips provider returned no result")
+        repo.save_travel_tips(entity_id, tips)
+    else:
+        raise ValueError("Unknown deferred work kind")
 
 
 # ── Ertelenmiş Seyahat İpuçları Task'ı ────────────────────────────────────────
@@ -303,6 +391,11 @@ def generate_tips_task(self, video_id: int) -> dict:
     time_limit=780,
 )
 def process_url_task(self, video_id: int, source_url: str, source: str = "unknown") -> dict:
+    return _process_url_analysis(self, video_id, source_url, source)
+
+
+@serialized_analysis
+def _process_url_analysis(self, video_id: int, source_url: str, source: str = "unknown") -> dict:
     """
     Instagram URL'ini indir → ML pipeline → DB'ye kaydet.
 
@@ -327,8 +420,12 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
 
     db   = SessionLocal()
     repo = SqlVideoRepository(db)
+    video_path = None
 
     try:
+        existing_result = _existing_analysis_result(repo, video_id)
+        if existing_result is not None:
+            return existing_result
         repo.mark_processing(video_id)
         set_progress(video_id, "downloading", 5)
 
@@ -349,11 +446,13 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
         _notify_push(db, video_id, completed=True)
         _track_trip_created(db, video_id)
 
-        generate_tips_task.delay(video_id)
+        _enqueue_travel_tips(video_id)
 
         return {"status": "completed", "video_id": video_id}
 
     except SoftTimeLimitExceeded:
+        if getattr(self, "durable", False):
+            raise
         logger.error("⏰ URL task zaman aşımı | video_id=%s", video_id)
         repo.mark_failed(video_id)
         set_progress(video_id, "failed", 0)
@@ -387,6 +486,12 @@ def process_url_task(self, video_id: int, source_url: str, source: str = "unknow
         raise
 
     finally:
+        if video_path:
+            try:
+                if os.path.isfile(video_path):
+                    os.remove(video_path)
+            except OSError:
+                logger.warning("URL geçici dosyası silinemedi | video_id=%s", video_id)
         db.close()
 
 
@@ -437,3 +542,33 @@ def _download_url(url: str, video_id: int) -> str:
     logger.info("📥 Video indirildi: %s (%.1f MB)",
                 filename, os.path.getsize(filename) / 1_048_576)
     return filename
+
+
+@_celery_app.task(name="app.tasks.video_tasks.durable_analysis_task", queue="video_processing",
+                  acks_late=True, reject_on_worker_lost=False,
+                  soft_time_limit=720, time_limit=780)
+def durable_analysis_task(job_id: int):
+    from app.core.database import SessionLocal
+    from app.application.services.deferred_work import execute_job
+    from types import SimpleNamespace
+    with SessionLocal() as db:
+        def run(kind, video_id):
+            from app.models.video import Video
+            from app.models.deferred_job import DeferredJob
+            from app.application.services.deferred_work import MAX_ATTEMPTS
+            if kind != "video_analysis":
+                raise ValueError("Unexpected analysis job kind")
+            video = db.get(Video, video_id)
+            if video is None or video.status == "completed":
+                return
+            job = db.get(DeferredJob, job_id)
+            context = SimpleNamespace(request=SimpleNamespace(retries=job.attempts - 1),
+                                      max_retries=MAX_ATTEMPTS - 1, durable=True)
+            # SQL job lease handles retries; the same analysis routines retain
+            # the PostgreSQL video lock used by older queued Celery tasks.
+            context.retry = lambda **kwargs: RuntimeError("Analysis lock busy")
+            if video.source_url:
+                _process_url_analysis(context, video_id, video.source_url, video.source_platform or "unknown")
+            else:
+                _process_uploaded_analysis(context, video_id, video.file_path)
+        return execute_job(db, job_id, run)

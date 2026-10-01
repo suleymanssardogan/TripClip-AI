@@ -6,8 +6,8 @@ import { ArrowLeft, Loader2, AlertTriangle, RotateCcw, Send, Sparkles, MapPin } 
 import { useParams, useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import {
-  getTrip, askTripAssistant,
-  type TripDetail, type AssistantMessage, type AssistantReference,
+  getSession, getTrip, askTripAssistant,
+  type TripDetail, type AssistantMessage, type AssistantReference, type AssistantSource,
 } from "@/lib/api";
 import { Card } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
@@ -29,6 +29,7 @@ const MAX_HISTORY_TURNS = 6;
 
 interface ChatMessage extends AssistantMessage {
   references?: AssistantReference[];
+  sources?: AssistantSource[];
 }
 
 // `messages` bu sayfanın kendi `useState`'iydi — bir referans çipine
@@ -83,9 +84,10 @@ export default function TripAssistantPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) { router.push("/login"); return; }
-    setTimeout(() => load(), 0);
+    getSession().then(session => {
+      if (!session) router.push("/login");
+      else load();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripId, router]);
 
@@ -124,7 +126,7 @@ export default function TripAssistantPage() {
       // üst sınırıyla sınırlı (bkz. modül doc yorumu).
       const history = messages.slice(-MAX_HISTORY_TURNS).map(({ role, content }) => ({ role, content }));
       const result = await askTripAssistant(tripId, { message: trimmed, history });
-      setMessages((prev) => [...prev, { role: "assistant", content: result.answer, references: result.references }]);
+      setMessages((prev) => [...prev, { role: "assistant", content: result.answer, references: result.references, sources: result.sources }]);
     } catch (e) {
       setMessages((prev) => prev.slice(0, -1)); // başarısız kullanıcı mesajını geri al
       setLastFailedMessage(trimmed);
@@ -221,6 +223,17 @@ export default function TripAssistantPage() {
                 >
                   {m.content}
                 </Card>
+                {m.role === "assistant" && !!m.sources?.length && (
+                  <div className="mt-2 space-y-1 text-xs text-text-secondary">
+                    <p>Başvurulan kaynaklar</p>
+                    {m.sources.filter((source) => /^https?:\/\//.test(source.url)).map((source) => (
+                      <a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer"
+                         className="block text-accent-text underline underline-offset-2">
+                        {source.title} · İnceleme: {source.observed_at.slice(0, 10)}
+                      </a>
+                    ))}
+                  </div>
+                )}
                 {m.role === "assistant" && m.references && m.references.length > 0 && (
                   <div className="flex flex-wrap gap-2 mt-2">
                     {m.references.map((ref, ri) => (

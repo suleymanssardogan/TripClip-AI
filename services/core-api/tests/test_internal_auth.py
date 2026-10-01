@@ -28,3 +28,17 @@ async def test_verify_internal_secret_rejects_wrong_value():
 async def test_verify_internal_secret_accepts_correct_value():
     with mock.patch.object(internal_auth, "INTERNAL_API_SECRET", "correct-secret"):
         await internal_auth.verify_internal_secret(x_internal_secret="correct-secret")  # no raise
+
+
+@pytest.mark.parametrize("secret", ["", "short"])
+def test_production_rejects_weak_internal_secret(secret):
+    import os
+    import subprocess
+    import sys
+    result = subprocess.run(
+        [sys.executable, "-c", "import app.core.internal_auth"],
+        env={**os.environ, "APP_ENV": "production", "INTERNAL_API_SECRET": secret},
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert "INTERNAL_API_SECRET must contain at least 32 characters" in result.stderr

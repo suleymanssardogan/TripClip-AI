@@ -57,7 +57,7 @@ def test_get_stats_falls_back_to_zeros_on_error(client, mock_core_api, make_resp
 
 # ─── GET /plans/user/{user_id} ────────────────────────────────────────────────
 
-def test_get_user_plans_happy_path(client, mock_core_api, make_response):
+def test_get_user_plans_happy_path(client, auth_headers, mock_core_api, make_response):
     mock_core_api.get.return_value = make_response(200, {
         "plans": [{
             "id": 2, "filename": "a.mp4", "status": "completed", "duration": 10,
@@ -66,20 +66,26 @@ def test_get_user_plans_happy_path(client, mock_core_api, make_response):
         }],
         "total": 1,
     })
-    resp = client.get("/api/web/plans/user/1")
+    resp = client.get("/api/web/plans/user/1", headers=auth_headers)
     assert resp.status_code == 200
     assert resp.json()["total"] == 1
 
 
-def test_get_user_plans_surfaces_real_errors(client, mock_core_api, make_response):
+def test_get_user_plans_surfaces_real_errors(client, auth_headers, mock_core_api, make_response):
     """core-api'nin /user/{id} route'u için >=400 her zaman gerçek bir arızadır
     (kullanıcının hiç videosu olmaması ayrı bir 200+boş liste yoluyla döner) —
     dashboard'ın "hata" ile "henüz video yok" durumunu ayırt edebilmesi için
     bu artık sessizce boş listeye düşürülmeden frontend'e yansıtılmalı."""
     mock_core_api.get.return_value = make_response(500, {"error": {"code": "DATABASE_ERROR"}})
-    resp = client.get("/api/web/plans/user/1")
+    resp = client.get("/api/web/plans/user/1", headers=auth_headers)
     assert resp.status_code == 503
     assert resp.json()["code"] == "DATABASE_ERROR"
+
+
+def test_get_user_plans_rejects_other_user(client, auth_headers, mock_core_api):
+    resp = client.get("/api/web/plans/user/2", headers=auth_headers)
+    assert resp.status_code == 403
+    mock_core_api.get.assert_not_awaited()
 
 
 # ─── GET /plans/{id} ve transform view'ları ──────────────────────────────────

@@ -62,7 +62,7 @@ async def get_stats():
 
 
 @router.get("/user/{user_id}")
-async def get_user_plans(user_id: int):
+async def get_user_plans(user_id: int, current_user_id: int = Depends(get_current_user_id)):
     """
     Kullanıcıya ait planlar — dashboard formatında.
 
@@ -74,6 +74,9 @@ async def get_user_plans(user_id: int):
     bir hatayı "henüz video yok" boş durumuyla ayırt edilemez hale getiriyordu
     — şimdi hata olduğu gibi frontend'e yansıtılıyor.
     """
+    if user_id != current_user_id:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=403, detail="Bu planlara erişim yetkiniz yok")
     rid = str(uuid.uuid4())[:8]
     async with web_error_wrapper(request_id=rid):
         async with internal_client(15.0) as client:

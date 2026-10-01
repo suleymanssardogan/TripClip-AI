@@ -12,6 +12,8 @@ HİÇBİR yerindeki `logger.info()`/`logger.warning()` çağrısı hiçbir çık
 `alembic/env.py`'de `disable_existing_loggers=False` ile düzeltildi.
 """
 import logging
+from unittest.mock import patch
+import pytest
 
 
 def test_run_migrations_does_not_disable_pre_existing_application_loggers():
@@ -40,3 +42,13 @@ def test_run_migrations_does_not_disable_a_logger_created_after_it_runs():
 
     logger = logging.getLogger("app.this_is_a_brand_new_test_logger")
     assert logger.disabled is False
+
+
+def test_migration_failure_is_fatal_in_production(monkeypatch):
+    """A failed schema upgrade must prevent production startup."""
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///./test.db")
+    with patch("alembic.command.upgrade", side_effect=RuntimeError("migration failed")):
+        from app.core.migrations import run_migrations
+        with pytest.raises(RuntimeError, match="migration failed"):
+            run_migrations()

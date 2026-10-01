@@ -113,6 +113,19 @@ final class AuthEnvironment {
         Logger.auth.info("User logged out")
     }
 
+    @MainActor
+    func deleteAccount() async throws {
+        guard let token = await validAccessToken() else {
+            throw APIError.server(code: "AUTH_REQUIRED", message: "Oturum süresi doldu.")
+        }
+        let _: StatusResponse = try await apiClient.send(.deleteAccount, token: token)
+        user = nil
+        KeychainStore.delete()
+        KeychainStore.deleteRefresh()
+        AppGroupStore.clearAll()
+        Logger.auth.info("Account deleted")
+    }
+
     // MARK: - Token Refresh
 
     /// Yükleme gibi 401-yenile-tekrarla sarmalayıcısından geçmeyen istekler için

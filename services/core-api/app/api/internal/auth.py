@@ -159,6 +159,23 @@ def logout(
     return {"status": "ok"}
 
 
+@router.delete("/account")
+def delete_account(
+    service: AuthService = Depends(get_auth_service),
+    x_user_id: Optional[int] = Header(default=None),
+):
+    if x_user_id is None:
+        raise HTTPException(status_code=401, detail={"code": "UNAUTHORIZED", "message": "Kimlik doğrulama gerekli."})
+    for path in service.delete_account(x_user_id):
+        try:
+            import os
+            if path and os.path.isfile(path):
+                os.remove(path)
+        except OSError:
+            pass
+    return {"status": "deleted"}
+
+
 @router.put("/device-token")
 def register_device_token(
     body: DeviceTokenRequest,

@@ -10,7 +10,7 @@ import {
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Navbar from "@/components/Navbar";
-import { getTrip, type TripDetail, type TripStop, type ItineraryDay, type ItineraryStop } from "@/lib/api";
+import { getSession, getTrip, type TripDetail, type TripStop, type ItineraryDay, type ItineraryStop } from "@/lib/api";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -103,9 +103,10 @@ function TripDetailPageInner() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) { router.push("/login"); return; }
-    setTimeout(() => load(), 0);
+    getSession().then(session => {
+      if (!session) router.push("/login");
+      else load();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripId, router]);
 

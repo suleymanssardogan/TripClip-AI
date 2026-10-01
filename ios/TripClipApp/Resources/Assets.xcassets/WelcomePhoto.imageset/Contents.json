@@ -1,0 +1,6 @@
+{
+  "images" : [
+    { "filename" : "welcome-istanbul.jpg", "idiom" : "universal" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}

@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { JetBrains_Mono } from "next/font/google";
 import localFont from "next/font/local";
 import "./globals.css";
 import { ThemeProvider } from "@/lib/theme";
@@ -22,13 +21,6 @@ const generalSans = localFont({
     { path: "./fonts/GeneralSans-Semibold.woff2", weight: "600", style: "normal" },
   ],
 });
-// Data labels, timestamps, coordinates, budget figures.
-const jbMono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-jbmono",
-  weight: ["400", "500", "600"],
-});
-
 export const metadata: Metadata = {
   title: "TripClip AI | Gezi Planı Oluştur",
   description: "Gezi videolarını akıllı seyahat rotalarına dönüştür.",
@@ -40,7 +32,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="tr" className="dark" suppressHydrationWarning>
+    <html lang="tr" className="light" suppressHydrationWarning>
       <head>
         {/* FOUC önlemek için tema seçimini, React hydration'dan ÖNCE inline script ile uygula */}
         <script
@@ -49,9 +41,7 @@ export default function RootLayout({
               (function() {
                 try {
                   var t = localStorage.getItem('tripclip-theme');
-                  if (!t) {
-                    t = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-                  }
+                  if (t !== 'dark') t = 'light';
                   var html = document.documentElement;
                   html.classList.remove('dark', 'light');
                   html.classList.add(t);
@@ -62,7 +52,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className={`${satoshi.variable} ${generalSans.variable} ${jbMono.variable} font-sans bg-bg text-text antialiased`}
+        className={`${satoshi.variable} ${generalSans.variable} font-sans bg-bg text-text antialiased`}
         suppressHydrationWarning
       >
         <ThemeProvider>{children}</ThemeProvider>

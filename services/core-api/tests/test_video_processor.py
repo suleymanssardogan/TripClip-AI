@@ -9,6 +9,7 @@ import threading
 import time
 from concurrent.futures import Future
 from unittest import mock
+from types import SimpleNamespace
 
 import pytest
 
@@ -71,15 +72,22 @@ def test_init_isolates_single_service_failure():
     VideoProcessingService'in kendisi hiç oluşturulamıyordu (bkz. video_processor.py
     _try_init yorumu).
     """
-    with mock.patch("pathlib.Path.mkdir"), \
-         mock.patch("app.ml.computer_vision.ObjectDetectionService", side_effect=RuntimeError("yolo indirilemedi")), \
-         mock.patch("app.ml.computer_vision.LandmarkDetectionService") as m_vision, \
-         mock.patch("app.ml.ocr_service.OCRService") as m_ocr, \
-         mock.patch("app.ml.speech_to_text.AudioProcessingService") as m_audio, \
-         mock.patch("app.ml.ner_service.NERService") as m_ner, \
-         mock.patch("app.ml.places_service.PlacesService") as m_places, \
-         mock.patch("app.ml.route_optimizer.RouteOptimizer") as m_route, \
-         mock.patch("app.ml.rag_service.RAGService") as m_rag:
+    m_vision, m_ocr, m_audio, m_ner, m_places, m_route, m_rag = [mock.Mock() for _ in range(7)]
+    # Stub the modules before import: patching class paths first imports
+    # native ML packages and can download/configure models in a unit test.
+    modules = {
+        "app.ml.computer_vision": SimpleNamespace(
+            ObjectDetectionService=mock.Mock(side_effect=RuntimeError("yolo indirilemedi")),
+            LandmarkDetectionService=m_vision,
+        ),
+        "app.ml.ocr_service": SimpleNamespace(OCRService=m_ocr),
+        "app.ml.speech_to_text": SimpleNamespace(AudioProcessingService=m_audio),
+        "app.ml.ner_service": SimpleNamespace(NERService=m_ner),
+        "app.ml.places_service": SimpleNamespace(PlacesService=m_places),
+        "app.ml.route_optimizer": SimpleNamespace(RouteOptimizer=m_route),
+        "app.ml.rag_service": SimpleNamespace(RAGService=m_rag),
+    }
+    with mock.patch("pathlib.Path.mkdir"), mock.patch.dict("sys.modules", modules):
         service = VideoProcessingService()
 
     assert service._ml_available is True
@@ -101,6 +109,20 @@ def test_init_sets_ml_unavailable_on_import_error():
         service = VideoProcessingService()
 
     assert service._ml_available is False
+
+
+def test_optional_import_failure_keeps_gemini_and_other_stages_available(monkeypatch):
+    monkeypatch.setenv("USE_GEMINI", "true")
+    def module(name):
+        if name == "app.ml.speech_to_text":
+            raise ImportError("Whisper is not installed")
+        return mock.MagicMock()
+    with mock.patch("pathlib.Path.mkdir"), mock.patch("importlib.import_module", side_effect=module):
+        service = VideoProcessingService()
+    assert service._ml_available
+    assert service.audio_processor is None
+    assert service.gemini is not None
+    assert service.places is not None
 
 
 # ─── _FFmpegTimeoutGuard (M39 audit bulgusu) ─────────────────────────────────

@@ -41,7 +41,7 @@ class VideoService:
 
     # ── Upload ────────────────────────────────────────────────────────────────
 
-    def create_upload(self, filename: str, content: bytes, user_id: int) -> tuple[int, Path]:
+    def create_upload(self, filename: str, content: bytes, user_id: int, source_url: Optional[str] = None, source_platform: Optional[str] = None) -> tuple[int, Path]:
         """
         Dosyayı diske yazar, DB kaydı oluşturur.
         (video_id, file_path) döner — background task bu bilgiyle ML çalıştırır.
@@ -50,10 +50,15 @@ class VideoService:
         file_path = UPLOAD_DIR / f"{uuid.uuid4()}{ext}"
         file_path.write_bytes(content)
 
+        # Keep the file if SQL reports an error: a lost commit acknowledgement
+        # can mean the durable job actually committed. Deleting its input here
+        # would turn a recoverable connection failure into lost analysis data.
         video = self._repo.create(
             filename=filename,
             file_path=str(file_path),
             user_id=user_id,
+            source_url=source_url,
+            source_platform=source_platform,
         )
         return video.id, file_path
 
@@ -62,7 +67,7 @@ class VideoService:
             id=video_id,
             filename=filename,
             status=VideoStatus.UPLOADED.value,
-            message="Video uploaded! Processing started in background.",
+            message="Video alındı. Analiz işi sıraya kaydedildi.",
         )
 
     # ── Progress ──────────────────────────────────────────────────────────────
@@ -94,6 +99,13 @@ class VideoService:
         if created and created.tzinfo is None:
             created = created.replace(tzinfo=timezone.utc)
         elapsed = int((now_utc - created).total_seconds()) if created else 0
+
+        if video.status in (VideoStatus.COMPLETED, VideoStatus.FAILED):
+            completed = video.status == VideoStatus.COMPLETED
+            return ProgressResponse(stage="done" if completed else "failed", percent=100 if completed else 0,
+                                    elapsed_seconds=elapsed, stale=False)
+        if video.status == VideoStatus.UPLOADED:
+            return ProgressResponse(stage="queued", percent=0, elapsed_seconds=elapsed, stale=False)
 
         # Redis'ten gerçek zamanlı veri dene
         if redis_client:
@@ -186,14 +198,14 @@ class VideoService:
         is_owner = requesting_user_id is not None and video.user_id == requesting_user_id
         is_completed = video.status == VideoStatus.COMPLETED
 
-        # Non-owners can only access completed (shareable) videos.
+        # Public access requires an explicit publication decision as well as completion.
         # Return 404 rather than 403 to avoid leaking video existence to third parties.
-        if not is_owner and not is_completed:
+        if not is_owner and not (is_completed and video.is_public):
             raise HTTPException(404, detail="Video not found")
 
         return VideoDetailResponse(
             id=video.id,
-            filename=video.filename,
+            filename=video.filename if is_owner else "Gezi planı",
             status=video.status.value,
             duration=video.duration,
             created_at=video.created_at.isoformat(),
@@ -205,10 +217,10 @@ class VideoService:
                     "landmarks_count": video.landmarks_count,
                     "top_objects":     video.top_objects,
                 },
-                "ocr":    {"extracted_texts": video.extracted_texts},
+                "ocr":    {"extracted_texts": video.extracted_texts if is_owner else None},
                 "vision": {"landmarks": video.vision_landmarks},
-                "audio":  {"transcription": video.transcription},
-                "ner":    {"extracted_locations": video.extracted_locations},
+                "audio":  {"transcription": video.transcription if is_owner else None},
+                "ner":    {"extracted_locations": video.extracted_locations if is_owner else None},
                 "nominatim": {
                     "enriched_locations":    video.enriched_locations,
                     "deduplicated_locations": video.deduplicated_locations,
@@ -216,7 +228,7 @@ class VideoService:
                 },
                 "route":    {"optimized_route": video.optimized_route},
                 "rag":      {"travel_tips": video.travel_tips},
-                "ocr_pois": video.ocr_pois,
+                "ocr_pois": video.ocr_pois if is_owner else None,
             },
             degradation=video.degradation,
             stop_order=video.stop_order,
@@ -256,9 +268,9 @@ class VideoService:
         """
         Videoyu ve diskteki dosyasını kalıcı olarak siler.
 
-        Dosya silme best-effort: DB kaydı gittikten sonra dosya kalırsa bu
-        yalnızca yer kaybıdır, ama dosya silinip DB kaydı kalsaydı kullanıcı
-        açılmayan bir plan görürdü. O yüzden sıra bu şekilde.
+        Repository SQL silme ile dosya imha işini aynı transaction'da yazar.
+        Burada hızlı ilk deneme yapılır; başarısızlık veya süreç kaybında
+        kalıcı imha işi saklama servisi tarafından yeniden denenir.
         """
         file_path = self._repo.delete(video_id, user_id)
         if file_path is None:
@@ -268,7 +280,8 @@ class VideoService:
             raise PermissionDeniedException("Bu videoyu silme yetkiniz yok.")
 
         try:
-            Path(file_path).unlink(missing_ok=True)
+            if file_path:
+                Path(file_path).unlink(missing_ok=True)
         except OSError as exc:
             logger.warning("Video dosyası silinemedi | video_id=%s | %s", video_id, exc)
 

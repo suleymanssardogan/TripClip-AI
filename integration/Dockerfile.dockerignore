@@ -1,0 +1,12 @@
+**
+!integration/
+!integration/**
+!services/
+!services/core-api/
+!services/core-api/app/
+!services/core-api/app/**
+!services/core-api/alembic/
+!services/core-api/alembic/**
+!services/core-api/alembic.ini
+**/__pycache__/
+**/*.pyc

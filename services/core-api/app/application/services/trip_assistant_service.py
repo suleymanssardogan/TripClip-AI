@@ -175,7 +175,8 @@ class TripAssistantService:
                 raise AssistantUnavailableException("AI asistanı boş bir yanıt döndürdü. Lütfen tekrar deneyin.")
 
             references = self._validate_references(raw.get("references") or [], context)
-            result = AssistantResponseDTO(answer=answer, references=references)
+            sources = {s["url"]: s for r in retrieved for s in r.metadata.get("sources", [])}
+            result = AssistantResponseDTO(answer=answer, references=references, sources=list(sources.values()))
             success = True
             return result
         finally:
@@ -189,12 +190,21 @@ class TripAssistantService:
 
     def _call_provider(self, system_prompt: str, conversation: str, trip_id: int) -> dict:
         try:
+            from app.ml.request_budget import remaining_timeout
+            remaining_timeout(45)
             return self._provider.answer(system_prompt, conversation)
-        except AIProviderError as e:
+        except (AIProviderError, TimeoutError) as e:
             logger.warning("Assistant provider hatası (trip_id=%s): %s", trip_id, e)
             raise AssistantUnavailableException()
 
     def _run_tool_loop(
+        self, system_prompt: str, conversation: str, context: TripContext, trip_id: int,
+    ) -> Tuple[dict, List[str]]:
+        from app.ml.request_budget import request_budget
+        with request_budget(45):
+            return self._run_tool_loop_inner(system_prompt, conversation, context, trip_id)
+
+    def _run_tool_loop_inner(
         self, system_prompt: str, conversation: str, context: TripContext, trip_id: int,
     ) -> Tuple[dict, List[str]]:
         """En fazla `MAX_TOOL_CALLS` araç çalıştırır (bkz. milestone Req 6),
@@ -387,7 +397,10 @@ class TripAssistantService:
             "10. Aşağıdaki ARAÇLAR listesinde OLMAYAN bir araç adı UYDURMA; "
             "bir aracı yalnızca gerçekten faydalıysa çağır — soru zaten "
             "yukarıdaki Gezi verisinden cevaplanabiliyorsa araç ÇAĞIRMANA "
-            "GEREK YOK.\n\n"
+            "GEREK YOK.\n"
+            "11. Ek mekan bilgisinde sources varsa kaynak tarihini dikkate al. "
+            "Kaynaklı bir bilgi kullandığında sağlanan kaynak başlığını belirt; "
+            "yeni kaynak veya URL UYDURMA. Kaynaksız fiyat/açılış saatini kesin bilgi olarak verme.\n\n"
             "KULLANABİLECEĞİN ARAÇLAR (salt-okunur, yalnızca bu gezinin "
             "kendi verisinden okur):\n"
             f"{tools_manifest}\n\n"

@@ -1,8 +1,6 @@
-from ultralytics import YOLO
 from pathlib import Path
 from typing import List, Dict
 import logging
-from google.cloud import vision
 
 
 logger = logging.getLogger(__name__)
@@ -12,6 +10,7 @@ class ObjectDetectionService:
 
     def __init__(self):
         """YOLOv8 nano model"""
+        from ultralytics import YOLO
         logger.info("Loading YOLO model...")
         self.model = YOLO('yolov8n.pt')
         logger.info("✅ YOLO model loaded successfully!")
@@ -134,6 +133,7 @@ class LandmarkDetectionService:
         
         if self.enabled:
             try:
+                from google.cloud import vision
                 self.client = vision.ImageAnnotatorClient()
                 logger.info("✅ Google Vision API client initialized")
             except Exception as e:
@@ -148,7 +148,10 @@ class LandmarkDetectionService:
         if not self.enabled or self.client is None:
             return []
         
+        from app.core.privacy import require_reviewed_transfer
+        require_reviewed_transfer("google_vision")
         try:
+            from google.cloud import vision
             with open(image_path, 'rb') as f:
                 content = f.read()
             

@@ -3,18 +3,25 @@ Web BFF — Auth endpoint testleri.
 
 Core API gerçekten çağrılmaz; httpx.AsyncClient mock'lanır (mock_core_api fixture).
 """
+import time
+from jose import jwt
+from app.core.auth import SECRET_KEY, ALGORITHM
+
+
+def _auth_response(user_id: int, email: str) -> dict:
+    return {
+        "access_token": jwt.encode({"sub": str(user_id), "email": email, "type": "access", "exp": int(time.time()) + 1800}, SECRET_KEY, algorithm=ALGORITHM),
+        "refresh_token": "test-refresh-token",
+        "user_id": user_id,
+        "email": email,
+    }
 
 
 # ─── Register ───────────────────────────────────────────────────────────────
 
 def test_register_happy_path(client, mock_core_api, make_response):
-    """Core API 200 dönerse, BFF aynı gövdeyi olduğu gibi iletir."""
-    mock_core_api.post.return_value = make_response(200, {
-        "access_token": "fake-token",
-        "token_type": "bearer",
-        "user_id": 42,
-        "email": "new@test.com",
-    })
+    """Core API tokens become HttpOnly cookies, never JSON fields."""
+    mock_core_api.post.return_value = make_response(200, _auth_response(42, "new@test.com"))
 
     resp = client.post("/api/web/auth/register", json={
         "email": "new@test.com",
@@ -24,8 +31,10 @@ def test_register_happy_path(client, mock_core_api, make_response):
 
     assert resp.status_code == 200
     data = resp.json()
-    assert data["access_token"] == "fake-token"
-    assert data["user_id"] == 42
+    assert data == {"user_id": 42, "email": "new@test.com"}
+    assert "httponly" in resp.headers["set-cookie"].lower()
+    assert "tripclip_access=" in resp.headers["set-cookie"]
+    assert "tripclip_refresh=" in resp.headers["set-cookie"]
     mock_core_api.post.assert_awaited_once()
 
 
@@ -56,12 +65,7 @@ def test_register_duplicate_email_passthrough(client, mock_core_api, make_respon
 # ─── Login ──────────────────────────────────────────────────────────────────
 
 def test_login_happy_path(client, mock_core_api, make_response):
-    mock_core_api.post.return_value = make_response(200, {
-        "access_token": "fake-token",
-        "token_type": "bearer",
-        "user_id": 7,
-        "email": "user@test.com",
-    })
+    mock_core_api.post.return_value = make_response(200, _auth_response(7, "user@test.com"))
 
     resp = client.post("/api/web/auth/login", json={
         "email": "user@test.com",
@@ -69,7 +73,61 @@ def test_login_happy_path(client, mock_core_api, make_response):
     })
 
     assert resp.status_code == 200
-    assert resp.json()["access_token"] == "fake-token"
+    assert resp.json() == {"user_id": 7, "email": "user@test.com"}
+
+
+def test_session_uses_http_only_cookie(client, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(200, _auth_response(7, "user@test.com"))
+    client.post("/api/web/auth/login", json={"email": "user@test.com", "password": "password"})
+
+    resp = client.get("/api/web/auth/session")
+    assert resp.status_code == 200
+    assert resp.json() == {"user_id": 7, "email": "user@test.com"}
+    assert resp.headers["cache-control"] == "no-store"
+
+
+def test_anonymous_session_does_not_trigger_refresh(client, mock_core_api):
+    resp = client.get("/api/web/auth/session")
+    assert resp.status_code == 401
+    assert resp.json() == {"code": "NO_SESSION"}
+    mock_core_api.post.assert_not_awaited()
+
+
+def test_expired_access_with_refresh_cookie_can_be_renewed(client):
+    client.cookies.set("tripclip_refresh", "some-refresh", path="/api/web/auth")
+    resp = client.get("/api/web/auth/session")
+    assert resp.status_code == 401
+    assert resp.json() == {"code": "SESSION_EXPIRED"}
+
+
+def test_refresh_uses_cookie_and_rotates_without_exposing_tokens(client, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(200, _auth_response(7, "user@test.com"))
+    client.cookies.set("tripclip_refresh", "old-refresh", path="/api/web/auth")
+
+    resp = client.post("/api/web/auth/refresh", headers={"Origin": "http://testserver"})
+    assert resp.status_code == 200
+    assert resp.json() == {"user_id": 7, "email": "user@test.com"}
+    assert "access_token" not in resp.text
+    assert any("tripclip_refresh=test-refresh-token" in cookie for cookie in resp.headers.get_list("set-cookie"))
+    assert mock_core_api.post.call_args.kwargs["json"] == {"refresh_token": "old-refresh"}
+
+
+def test_cookie_authenticated_write_rejects_foreign_origin(client, mock_core_api):
+    client.cookies.set("tripclip_access", _auth_response(7, "user@test.com")["access_token"])
+    resp = client.delete("/api/web/auth/account", headers={"Origin": "https://attacker.example"})
+    assert resp.status_code == 403
+    mock_core_api.delete.assert_not_awaited()
+
+
+def test_logout_revokes_and_clears_cookie_session(client, mock_core_api, make_response):
+    mock_core_api.post.return_value = make_response(200, {"status": "ok"})
+    client.cookies.set("tripclip_refresh", "old-refresh", path="/api/web/auth")
+    client.cookies.set("tripclip_access", _auth_response(7, "user@test.com")["access_token"])
+    resp = client.post("/api/web/auth/logout", headers={"Origin": "http://testserver"})
+    assert resp.status_code == 200
+    assert any("tripclip_access=" in cookie and "Max-Age=0" in cookie for cookie in resp.headers.get_list("set-cookie"))
+    assert any("tripclip_refresh=" in cookie and "Max-Age=0" in cookie for cookie in resp.headers.get_list("set-cookie"))
+    assert mock_core_api.post.call_args.kwargs["json"] == {"refresh_token": "old-refresh"}
 
 
 def test_login_wrong_credentials_passthrough(client, mock_core_api, make_response):
@@ -117,12 +175,7 @@ def test_apple_sign_in_invalid_payload(client, mock_core_api):
 
 
 def test_apple_sign_in_happy_path(client, mock_core_api, make_response):
-    mock_core_api.post.return_value = make_response(200, {
-        "access_token": "fake-token",
-        "token_type": "bearer",
-        "user_id": 3,
-        "email": "apple@test.com",
-    })
+    mock_core_api.post.return_value = make_response(200, _auth_response(3, "apple@test.com"))
 
     resp = client.post("/api/web/auth/apple", json={"identity_token": "fake-jwt"})
 
@@ -145,7 +198,8 @@ def test_refresh_token_error_codes_map_to_401(client, mock_core_api, make_respon
         "error": {"code": code, "message": "invalid"},
     })
 
-    resp = client.post("/api/web/auth/refresh", json={"refresh_token": "sometoken"})
+    client.cookies.set("tripclip_refresh", "sometoken", path="/api/web/auth")
+    resp = client.post("/api/web/auth/refresh", headers={"Origin": "http://testserver"})
 
     assert resp.status_code == 401
     assert resp.json()["code"] == code
@@ -163,7 +217,8 @@ def test_forbidden_error_code_maps_to_403(client, mock_core_api, make_response):
         "error": {"code": "FORBIDDEN", "message": "forbidden"},
     })
 
-    resp = client.post("/api/web/auth/refresh", json={"refresh_token": "sometoken"})
+    client.cookies.set("tripclip_refresh", "sometoken", path="/api/web/auth")
+    resp = client.post("/api/web/auth/refresh", headers={"Origin": "http://testserver"})
 
     assert resp.status_code == 403
     assert resp.json()["code"] == "FORBIDDEN"
@@ -174,7 +229,8 @@ def test_share_not_found_error_code_maps_to_404(client, mock_core_api, make_resp
         "error": {"code": "SHARE_NOT_FOUND", "message": "not found"},
     })
 
-    resp = client.post("/api/web/auth/refresh", json={"refresh_token": "sometoken"})
+    client.cookies.set("tripclip_refresh", "sometoken", path="/api/web/auth")
+    resp = client.post("/api/web/auth/refresh", headers={"Origin": "http://testserver"})
 
     assert resp.status_code == 404
     assert resp.json()["code"] == "SHARE_NOT_FOUND"
@@ -183,9 +239,7 @@ def test_share_not_found_error_code_maps_to_404(client, mock_core_api, make_resp
 # ─── Google Sign-In proxy ─────────────────────────────────────────────────────
 
 def test_google_sign_in_happy_path_passthrough(client, mock_core_api, make_response):
-    mock_core_api.post.return_value = make_response(200, {
-        "access_token": "fake-token", "token_type": "bearer", "user_id": 9, "email": "g@test.com",
-    })
+    mock_core_api.post.return_value = make_response(200, _auth_response(9, "g@test.com"))
 
     resp = client.post("/api/web/auth/google", json={"code": "authcode", "redirect_uri": "http://localhost:3000/auth/google/callback"})
 

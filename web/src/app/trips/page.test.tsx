@@ -17,7 +17,7 @@ vi.mock("@/components/Navbar", () => ({ default: () => null }));
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, getTrips: vi.fn() };
+  return { ...actual, getSession: vi.fn(), getTrips: vi.fn() };
 });
 
 function trip(overrides: Partial<api.TripSummary> = {}): api.TripSummary {
@@ -30,7 +30,7 @@ function trip(overrides: Partial<api.TripSummary> = {}): api.TripSummary {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  localStorage.setItem("token", "test-token");
+  vi.mocked(api.getSession).mockResolvedValue({ user_id: 1, email: "test@example.com" });
 });
 
 describe("TripsPage", () => {

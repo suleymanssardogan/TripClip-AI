@@ -5,11 +5,12 @@ import { motion } from "framer-motion";
 import { Loader2, AlertCircle, CheckCircle, ArrowRight } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { login, saveAuthTokens } from "@/lib/api";
+import { login } from "@/lib/api";
 import PasswordInput from "@/components/PasswordInput";
 import GoogleSignInButton from "@/components/GoogleSignInButton";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import AuthShell from "@/components/AuthShell";
 
 function LoginForm() {
   const router = useRouter();
@@ -30,8 +31,7 @@ function LoginForm() {
     setLoading(true); setError("");
     const fd = new FormData(e.currentTarget);
     try {
-      const data = await login(fd.get("email") as string, fd.get("password") as string);
-      saveAuthTokens(data);
+      await login(fd.get("email") as string, fd.get("password") as string);
       setSuccess(true);
       setTimeout(() => router.push(redirectTo), 800);
     } catch (err: unknown) {
@@ -40,23 +40,22 @@ function LoginForm() {
   };
 
   return (
-    <div className="min-h-screen bg-bg flex items-center justify-center px-6">
-      <div className="relative w-full max-w-md">
+    <AuthShell>
+      <div className="relative w-full">
         {/* Logo */}
-        <Link href="/" className="flex flex-col mb-10">
-          <p className="font-display font-black text-text text-2xl tracking-tight">TripClip</p>
-          <p className="font-mono text-[9px] font-semibold tracking-[0.25em] uppercase text-accent-text">AI Travel</p>
+        <Link href="/" className="mb-8 flex items-center gap-2.5">
+          <span className="font-display text-2xl font-bold tracking-[-0.05em] text-text">tripclip<span className="text-accent-text">.</span></span>
         </Link>
 
         <motion.div
           initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: "easeOut" }}
-          className="bg-surface border border-border rounded-lg p-8"
+          className="rounded-lg border border-border bg-surface p-7 shadow-card sm:p-9"
         >
           {/* Başlık */}
           <div className="mb-8">
-            <p className="font-mono text-xs text-text-tertiary uppercase tracking-widest mb-2">Hoş Geldin</p>
-            <h1 className="font-display font-black text-text text-3xl">Giriş Yap</h1>
+            <p className="mb-2 text-xs font-bold uppercase tracking-[0.18em] text-route">HOŞ GELDİN</p>
+            <h1 className="font-display text-3xl font-bold tracking-[-0.045em] text-text">Yolculuğuna devam et.</h1>
           </div>
 
           {/* Hata */}
@@ -133,7 +132,7 @@ function LoginForm() {
           </p>
         </motion.div>
       </div>
-    </div>
+    </AuthShell>
   );
 }
 

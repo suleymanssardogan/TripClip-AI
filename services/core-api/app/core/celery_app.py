@@ -51,6 +51,7 @@ celery_app.conf.update(
     task_acks_late=True,            # worker crash → task yeniden kuyruğa girer
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,   # worker başına 1 task (ML işlem ağır)
+    broker_connection_timeout=3,
 
     # ── Timezone ───────────────────────────────────────────────────────────────
     timezone="Europe/Istanbul",

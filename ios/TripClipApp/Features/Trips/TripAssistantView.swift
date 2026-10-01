@@ -110,6 +110,19 @@ struct TripAssistantView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16))
                 .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
 
+            if message.role == .assistant, !message.sources.isEmpty {
+                Text("Başvurulan kaynaklar")
+                    .font(.caption)
+                    .foregroundStyle(AppColors.textSecondary)
+                ForEach(message.sources, id: \.url) { source in
+                    if let url = URL(string: source.url), ["https", "http"].contains(url.scheme ?? "") {
+                        Link("\(source.title) · \(String(source.observedAt.prefix(10)))", destination: url)
+                            .font(.caption)
+                            .foregroundStyle(AppColors.accentText)
+                    }
+                }
+            }
+
             if message.role == .assistant, !message.references.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {

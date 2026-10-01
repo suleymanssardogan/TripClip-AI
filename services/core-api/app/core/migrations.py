@@ -43,6 +43,12 @@ def run_migrations() -> None:
             alembic_cmd.upgrade(_build_alembic_config(), "head")
             logger.info("✅ Alembic migration tamamlandı")
     except Exception as exc:
+        # Production must never accept traffic against an unknown or partially
+        # migrated schema. Development/test environments retain the existing
+        # best-effort behavior so a missing local database does not block work.
+        if os.getenv("APP_ENV") == "production":
+            logger.exception("❌ Alembic migration başarısız; production startup durduruluyor")
+            raise
         logger.warning("⚠️ Alembic migration atlandı: %s", exc)
 
 

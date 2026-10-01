@@ -5,7 +5,7 @@ import { ArrowLeft, Loader2, AlertTriangle, RotateCcw } from "lucide-react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import {
-  getTrip, getItinerary, optimizeTrip,
+  getSession, getTrip, getItinerary, optimizeTrip,
   type TripDetail, type Itinerary, type OptimizeTripRequest,
 } from "@/lib/api";
 import { Button } from "@/components/ui/Button";
@@ -86,9 +86,10 @@ function OptimizePageInner() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) { router.push("/login"); return; }
-    setTimeout(() => load(), 0);
+    getSession().then(session => {
+      if (!session) router.push("/login");
+      else load();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripId, savedItineraryId, router]);
 

@@ -8,17 +8,17 @@ import { CheckCircle, ArrowRight, Smartphone, Globe, Sparkles } from "lucide-rea
 import { buttonVariants } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { cn } from "@/lib/utils";
+import { getSession } from "@/lib/api";
 
 export default function WelcomePage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
 
   useEffect(() => {
-    const e = localStorage.getItem("email");
-    if (!e) { router.push("/login"); return; }
-    setTimeout(() => {
-      setEmail(e);
-    }, 0);
+    getSession().then(session => {
+      if (!session) router.push("/login");
+      else setEmail(session.email);
+    });
   }, [router]);
 
   return (

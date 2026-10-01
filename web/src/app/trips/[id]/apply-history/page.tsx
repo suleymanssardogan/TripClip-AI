@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { ArrowLeft, Undo2, Check, AlertTriangle, Loader2, RotateCcw } from "lucide-react";
 import { useParams, useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
-import { getApplyHistory, undoApply, ApiError, type ApplyHistoryEntry } from "@/lib/api";
+import { getSession, getApplyHistory, undoApply, ApiError, type ApplyHistoryEntry } from "@/lib/api";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -52,13 +52,14 @@ export default function ApplyHistoryPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) { router.push("/login"); return; }
     if (!tripId || isNaN(tripId)) {
       setTimeout(() => { setError("Geçersiz gezi ID'si."); setLoading(false); }, 0);
       return;
     }
-    setTimeout(() => load(), 0);
+    getSession().then(session => {
+      if (!session) router.push("/login");
+      else load();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tripId, router]);
 

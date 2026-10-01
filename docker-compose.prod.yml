@@ -42,7 +42,10 @@ services:
       context: ./web
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-/api/web}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+        NEXT_PUBLIC_LEGAL_OPERATOR_NAME: ${LEGAL_OPERATOR_NAME:-}
+        NEXT_PUBLIC_LEGAL_CONTACT_EMAIL: ${LEGAL_CONTACT_EMAIL:-}
+        LEGAL_CONTENT_APPROVED: ${LEGAL_CONTENT_APPROVED:-false}
     container_name: tripclip-web
     restart: always
     environment:
@@ -70,7 +73,7 @@ services:
     cpus: 1.0
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-tripclip}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: ${POSTGRES_DB:-tripclip}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -100,7 +103,7 @@ services:
       --appendfsync everysec
       --save 900 1
       --save 300 10
-      --requirepass ${REDIS_PASSWORD}
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
     volumes:
       - redis_data:/data
     networks:
@@ -111,20 +114,23 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 10
       start_period: 10s
 
   mongodb:
-    image: mongo:7
+    image: mongo:7.0.14
     container_name: tripclip-mongo
     restart: always
     mem_limit: 1g
     cpus: 1.0
     volumes:
       - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:?MONGODB_ROOT_USERNAME must be set}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:?MONGODB_ROOT_PASSWORD must be set}
     networks:
       - app-network
     logging:
@@ -133,14 +139,14 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mongosh", "--quiet", "--username", "$$MONGODB_ROOT_USERNAME", "--password", "$$MONGODB_ROOT_PASSWORD", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
       interval: 15s
       timeout: 5s
       retries: 5
       start_period: 20s
 
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.7.4
     container_name: tripclip-qdrant
     restart: always
     volumes:
@@ -152,6 +158,12 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # ── Core API ──────────────────────────────────────────────────────────────────
   core-api:
@@ -175,20 +187,41 @@ services:
       redis:
         condition: service_healthy
       mongodb:
-        condition: service_started
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-tripclip}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tripclip}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
-      MONGODB_URL: mongodb://mongodb:27017/tripclip
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tripclip}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-tripclip}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      MONGODB_URL: mongodb://${MONGODB_ROOT_USERNAME:?MONGODB_ROOT_USERNAME must be set}:${MONGODB_ROOT_PASSWORD:?MONGODB_ROOT_PASSWORD must be set}@mongodb:27017/tripclip?authSource=admin
+      MONGODB_ROOT_USERNAME: ${MONGODB_ROOT_USERNAME:?MONGODB_ROOT_USERNAME must be set}
+      MONGODB_ROOT_PASSWORD: ${MONGODB_ROOT_PASSWORD:?MONGODB_ROOT_PASSWORD must be set}
       UPLOAD_DIR: /app/uploads/videos
+      RAW_UPLOAD_RETENTION_HOURS: ${RAW_UPLOAD_RETENTION_HOURS:-24}
+      FAILED_UPLOAD_RETENTION_HOURS: ${FAILED_UPLOAD_RETENTION_HOURS:-168}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET must be set}
       APP_ENV: production
+      PRIVACY_REVIEWED_PROVIDERS: ${PRIVACY_REVIEWED_PROVIDERS:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      ALLOWED_HOSTS: core-api,web-bff,mobile-bff,localhost,127.0.0.1,${ALLOWED_HOSTS:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-no-reply@tripclip.app}
+      PASSWORD_RESET_URL_BASE: ${PASSWORD_RESET_URL_BASE:-}
+      PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: ${PASSWORD_RESET_TOKEN_EXPIRE_MINUTES:-30}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_ALLOWED_REDIRECT_URIS: ${GOOGLE_ALLOWED_REDIRECT_URIS:-}
+      AI_ASSISTANT_PROVIDER: ${AI_ASSISTANT_PROVIDER:-gemini}
+      OLLAMA_URL: ${OLLAMA_URL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
+      ANALYTICS_ENABLED: ${ANALYTICS_ENABLED:-false}
       DAILY_UPLOAD_QUOTA_PER_USER: ${DAILY_UPLOAD_QUOTA_PER_USER:-20}
     volumes:
       - uploads_data:/app/uploads
@@ -231,21 +264,29 @@ services:
       redis:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-tripclip}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tripclip}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
-      MONGODB_URL: mongodb://mongodb:27017/tripclip
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tripclip}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-tripclip}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      MONGODB_URL: mongodb://${MONGODB_ROOT_USERNAME:?MONGODB_ROOT_USERNAME must be set}:${MONGODB_ROOT_PASSWORD:?MONGODB_ROOT_PASSWORD must be set}@mongodb:27017/tripclip?authSource=admin
       UPLOAD_DIR: /app/uploads/videos
+      RAW_UPLOAD_RETENTION_HOURS: ${RAW_UPLOAD_RETENTION_HOURS:-24}
+      FAILED_UPLOAD_RETENTION_HOURS: ${FAILED_UPLOAD_RETENTION_HOURS:-168}
       USE_GEMINI: ${USE_GEMINI:-true}
       USE_HYBRID: ${USE_HYBRID:-true}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
       USE_GOOGLE_VISION: ${USE_GOOGLE_VISION:-false}
       OLLAMA_URL: ${OLLAMA_URL:-}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
       APP_ENV: production
+      PRIVACY_REVIEWED_PROVIDERS: ${PRIVACY_REVIEWED_PROVIDERS:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
+      APNS_KEY_ID: ${APNS_KEY_ID:-}
+      APNS_TEAM_ID: ${APNS_TEAM_ID:-}
+      APNS_BUNDLE_ID: ${APNS_BUNDLE_ID:-}
+      APNS_AUTH_KEY: ${APNS_AUTH_KEY:-}
+      APNS_USE_SANDBOX: ${APNS_USE_SANDBOX:-false}
       PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
       OMP_NUM_THREADS: "1"
       MKL_NUM_THREADS: "1"
@@ -280,11 +321,12 @@ services:
         condition: service_healthy
     environment:
       CORE_API_URL: http://core-api:8000
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET must be set}
       APP_ENV: production
+      PRIVACY_REVIEWED_PROVIDERS: ${PRIVACY_REVIEWED_PROVIDERS:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      ALLOWED_HOSTS: core-api,web-bff,mobile-bff,localhost,127.0.0.1,${ALLOWED_HOSTS:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
     networks:
       - app-network
@@ -310,11 +352,12 @@ services:
         condition: service_healthy
     environment:
       CORE_API_URL: http://core-api:8000
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET must be set}
       APP_ENV: production
+      PRIVACY_REVIEWED_PROVIDERS: ${PRIVACY_REVIEWED_PROVIDERS:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
-      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+      ALLOWED_HOSTS: core-api,web-bff,mobile-bff,localhost,127.0.0.1,${ALLOWED_HOSTS:-}
       SENTRY_DSN: ${SENTRY_DSN:-}
     networks:
       - app-network
@@ -360,7 +403,7 @@ services:
     mem_limit: 512m
     cpus: 0.5
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro

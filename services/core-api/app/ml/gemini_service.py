@@ -21,6 +21,7 @@ import time
 from typing import List, Dict, Optional
 
 import requests as _requests
+from app.ml.request_budget import remaining_timeout, retry_wait
 
 logger = logging.getLogger(__name__)
 
@@ -206,6 +207,8 @@ class GeminiService:
         # bizzat gözlendi). Bu log Docker stdout'a, oradan da SENTRY_DSN
         # ayarlıysa Sentry'ye gidiyor. Header ile anahtar hiçbir hata
         # mesajında görünmez.
+        from app.core.privacy import require_reviewed_transfer
+        require_reviewed_transfer("gemini")
         url = self._endpoint
         generation_config: Dict = {
             # temperature=0 DENENDİ VE GERİ ALINDI.
@@ -234,7 +237,7 @@ class GeminiService:
             # DOĞRULANMADI: geriye kalan tek kontrolsüz değişken bütçenin
             # 8192 mi yoksa model varsayılanı mı olduğu. Kullanılmayan token
             # ücretlendirilmediği için bütçeyi cömert tutmanın maliyeti yok.
-            "maxOutputTokens": 32768,
+            "maxOutputTokens": 2048 if system_instruction or response_schema is _TRAVEL_TIPS_SCHEMA else 32768,
         }
         if response_schema is not None:
             generation_config["responseMimeType"] = "application/json"
@@ -254,7 +257,7 @@ class GeminiService:
         for attempt in range(max_retries):
             try:
                 resp = _requests.post(
-                    url, json=body, timeout=timeout,
+                    url, json=body, timeout=remaining_timeout(timeout),
                     headers={"x-goog-api-key": self.api_key},
                 )
                 if resp.status_code in (429, 500, 503) and attempt < max_retries - 1:
@@ -262,7 +265,7 @@ class GeminiService:
                     wait = [15, 30, 60][attempt] if resp.status_code == 429 else [1, 3, 7][attempt]
                     logger.warning("Gemini %d hatası, %ds sonra tekrar deneniyor... (%d/%d)",
                                    resp.status_code, wait, attempt + 1, max_retries)
-                    time.sleep(wait)
+                    retry_wait(wait)
                     continue
                 resp.raise_for_status()
                 data = resp.json()
@@ -272,7 +275,7 @@ class GeminiService:
                 if attempt < max_retries - 1:
                     wait = [2, 5][min(attempt, 1)]
                     logger.warning("Gemini bağlantı hatası, %ds sonra tekrar: %s", wait, e)
-                    time.sleep(wait)
+                    retry_wait(wait)
             except Exception as e:
                 last_exc = e
                 break

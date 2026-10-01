@@ -14,8 +14,10 @@ mevcutsa aktif" felsefesi SENTRY_DSN ve APNs istemcisiyle paylaşılıyor.
 """
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchAny, ScoredPoint
-from sentence_transformers import SentenceTransformer
 from typing import Dict, List, Optional
+from functools import lru_cache
+from threading import Lock
+import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -27,6 +29,20 @@ logger = logging.getLogger(__name__)
 # anlamsal aramasına da (search_place_ids) aynı üst sınır UYGULANIR: bu yalnızca
 # hiç var olmayan bir sınırsız-bekleme riskini KAPATIR, davranışı DEĞİŞTİRMEZ.
 _SEARCH_TIMEOUT_SECONDS = 5
+_MODEL_LOAD_LOCK = Lock()
+
+
+def _create_embedding_model():
+    # Optional native ML dependencies must not prevent the HTTP API from
+    # starting. Import failures are handled by upsert/search's fallback.
+    from sentence_transformers import SentenceTransformer
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+
+@lru_cache(maxsize=1)
+def _embedding_model():
+    """One embedding model per process, shared by request-scoped repositories."""
+    return _create_embedding_model()
 
 
 class QdrantService:
@@ -44,12 +60,16 @@ class QdrantService:
         """Qdrant istemcisini ve embedding modelini tembel yükler."""
         if self.client is None:
             logger.info("Connecting to Qdrant...")
-            self.client = QdrantClient(host="qdrant", port=6333)
+            self.client = QdrantClient(
+                url=os.getenv("QDRANT_URL", "http://qdrant:6333"),
+                timeout=_SEARCH_TIMEOUT_SECONDS,
+            )
             logger.info("✅ Qdrant connected")
 
         if self.model is None:
             logger.info("Loading sentence transformer model...")
-            self.model = SentenceTransformer("all-MiniLM-L6-v2")
+            with _MODEL_LOAD_LOCK:
+                self.model = _embedding_model()
             logger.info("✅ Sentence transformer loaded")
 
     def _ensure_collection(self):
@@ -79,17 +99,20 @@ class QdrantService:
         name: str,
         city: Optional[str] = None,
         category: Optional[str] = None,
-    ) -> None:
+        knowledge_text: str = "",
+    ) -> bool:
         """
         Bir Place'i embed edip Qdrant'a yazar. Hata durumunda (Qdrant erişilemez
-        vb.) sessizce loglar ve döner — çağıran tarafın (Place senkronizasyonu)
-        bu adıma bağımlı olmaması gerekir, tıpkı push bildirimi gibi best-effort.
+        vb.) loglar ve False döner; başarıda True döner. Durable worker bu
+        sonucu kullanarak başarısız indeks yazımını daha sonra yeniden dener.
         """
         try:
             self._load()
             self._ensure_collection()
 
             text = self._embedding_text(name, city, category)
+            if knowledge_text:
+                text += ". " + knowledge_text[:2400]
             vector = self.model.encode(text).tolist()
 
             point = PointStruct(
@@ -98,8 +121,10 @@ class QdrantService:
                 payload={"place_id": place_id, "name": name, "city": city, "category": category},
             )
             self.client.upsert(collection_name=self.collection_name, points=[point])
+            return True
         except Exception as exc:
             logger.warning("Qdrant place embed başarısız | place_id=%s | %s", place_id, exc)
+            return False
 
     def _search(self, query: str, place_ids: List[int], limit: int) -> List[ScoredPoint]:
         """Hem `search_place_ids` (Place kütüphanesi araması, M-öncesi) hem

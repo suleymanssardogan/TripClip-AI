@@ -2,51 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ============================================================
-   DESIGN TOKENS — dark is the default ground, .light overrides.
-   Stored as space-separated RGB triplets so Tailwind's
-   rgb(var(--x) / <alpha-value>) opacity modifiers keep working
-   (bg-accent/10, text-route/60, etc.), matching this app's
-   existing bg-neon/8-style usage throughout.
-   ============================================================ */
+/* TripClip: quiet, light surfaces and restrained blue accents.
+   RGB triplets preserve Tailwind opacity utilities in both appearances. */
 @layer base {
-  :root,
-  :root.dark {
-    --c-bg: 12 13 16;
-    --c-surface: 26 28 33;
-    --c-surface2: 34 37 43;
-    --c-border: 42 46 53;
-    --c-border-strong: 58 63 72;
-    --c-text: 243 241 236;
-    --c-text-secondary: 162 166 173;
-    --c-text-tertiary: 108 112 121;
-    --c-accent: 255 176 32;
-    --c-accent-hover: 255 195 82;
-    --c-accent-text: 255 176 32;
-    --c-on-accent: 26 18 6;
-    --c-route: 63 217 196;
-    --c-success: 52 199 89;
-    --c-warning: 224 162 51;
-    --c-destructive: 255 69 58;
+  :root, :root.light {
+    --c-bg: 248 250 252;
+    --c-surface: 255 255 255;
+    --c-surface2: 241 245 248;
+    --c-border: 226 232 238;
+    --c-border-strong: 197 207 216;
+    --c-text: 24 37 49;
+    --c-text-secondary: 84 101 115;
+    --c-text-tertiary: 100 117 129;
+    --c-accent: 26 103 185;
+    --c-accent-hover: 19 82 154;
+    --c-accent-text: 23 92 168;
+    --c-on-accent: 255 255 255;
+    --c-route: 28 112 125;
+    --c-success: 34 123 81;
+    --c-warning: 151 99 29;
+    --c-destructive: 186 54 60;
   }
 
-  :root.light {
-    --c-bg: 246 247 248;
-    --c-surface: 255 255 255;
-    --c-surface2: 237 238 240;
-    --c-border: 225 227 231;
-    --c-border-strong: 203 206 211;
-    --c-text: 20 22 26;
-    --c-text-secondary: 82 86 93;
-    --c-text-tertiary: 130 134 141;
-    --c-accent: 232 137 26;
-    --c-accent-hover: 214 125 18;
-    --c-accent-text: 168 82 0;
-    --c-on-accent: 26 18 6;
-    --c-route: 12 117 104;
-    --c-success: 31 122 53;
-    --c-warning: 154 91 0;
-    --c-destructive: 215 0 21;
+  :root.dark {
+    --c-bg: 18 27 34;
+    --c-surface: 27 38 47;
+    --c-surface2: 37 49 59;
+    --c-border: 60 76 87;
+    --c-border-strong: 85 103 115;
+    --c-text: 245 248 250;
+    --c-text-secondary: 183 196 205;
+    --c-text-tertiary: 148 165 177;
+    --c-accent: 120 184 255;
+    --c-accent-hover: 151 203 255;
+    --c-accent-text: 151 203 255;
+    --c-on-accent: 14 31 48;
+    --c-route: 122 207 203;
+    --c-success: 121 211 154;
+    --c-warning: 239 191 113;
+    --c-destructive: 255 135 140;
   }
 
   * { box-sizing: border-box; }
@@ -57,15 +51,12 @@
     color: rgb(var(--c-text));
     font-family: var(--font-general-sans), sans-serif;
     -webkit-font-smoothing: antialiased;
-    background-image:
-      linear-gradient(rgba(255,176,32,0.018) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255,176,32,0.018) 1px, transparent 1px);
-    background-size: 40px 40px;
+    background-image: none;
   }
 
   ::selection {
     background: rgb(var(--c-accent) / 0.3);
-    color: rgb(var(--c-on-accent));
+    color: rgb(var(--c-text));
   }
 
   ::-webkit-scrollbar { width: 5px; }
@@ -92,8 +83,8 @@
 @layer components {
 
   .tag {
-    background: rgb(var(--c-route) / 0.08);
-    border: 1px solid rgb(var(--c-route) / 0.20);
+    background: rgb(var(--c-route) / 0.1);
+    border: 1px solid rgb(var(--c-route) / 0.24);
     color: rgb(var(--c-route));
     font-size: 0.7rem;
     font-weight: 600;
@@ -106,14 +97,13 @@
     width: 7px; height: 7px;
     border-radius: 50%;
     background: rgb(var(--c-route));
-    box-shadow: 0 0 8px rgb(var(--c-route)), 0 0 16px rgb(var(--c-route) / 0.5);
-    animation: glow-pulse-route 2s ease-in-out infinite;
+    box-shadow: none;
   }
 }
 
 @keyframes glow-pulse-route {
-  0%,100% { box-shadow: 0 0 8px rgb(var(--c-route)), 0 0 16px rgb(var(--c-route) / 0.5); }
-  50%     { box-shadow: 0 0 12px rgb(var(--c-route)), 0 0 28px rgb(var(--c-route) / 0.7); }
+  0%,100% { opacity: 1; }
+  50%     { opacity: 0.6; }
 }
 
 .no-scrollbar::-webkit-scrollbar { display: none; }

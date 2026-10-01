@@ -67,3 +67,9 @@ class AbstractUserRepository(ABC):
         """APNs'in geçersiz/kayıt-dışı dediği bir token'ı temizle — aksi
         halde her push denemesi aynı ölü token'a boşuna gönderilmeye devam eder."""
         ...
+
+    @abstractmethod
+    def delete_account(self, user_id: int) -> list[str]:
+        """Kullanıcı ve kullanıcıya ait verileri tek transaction'da siler.
+        Silinen video dosyalarının yollarını temizlik için döndürür."""
+        ...

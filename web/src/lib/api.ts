@@ -1,112 +1,95 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8002/api/web";
+const BASE_URL = "/api/web";
 
-function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("token");
-}
-
-function getRefreshToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem("refresh_token");
-}
-
-function clearAuthStorage(): void {
+function clearLegacyAuthStorage(): void {
   if (typeof window === "undefined") return;
-  localStorage.removeItem("token");
-  localStorage.removeItem("refresh_token");
-  localStorage.removeItem("user_id");
-  localStorage.removeItem("email");
+  try {
+    localStorage.removeItem("token");
+    localStorage.removeItem("refresh_token");
+    localStorage.removeItem("user_id");
+    localStorage.removeItem("email");
+  } catch { /* Storage may be blocked; the cookie session still works. */ }
 }
 
-interface AuthTokens {
-  access_token: string;
-  refresh_token: string;
+export interface AuthSession {
   user_id: number;
   email: string;
 }
 
-/**
- * Login/register yanıtından gelen token çiftini localStorage'a yazar.
- * Tekrarlanan localStorage.setItem üçlüsü yerine tek bir yer.
- */
-export function saveAuthTokens(data: AuthTokens): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem("token", data.access_token);
-  localStorage.setItem("refresh_token", data.refresh_token);
-  localStorage.setItem("user_id", String(data.user_id));
-  localStorage.setItem("email", data.email);
-}
-
-/**
- * Sunucu tarafında refresh token'ı iptal etmeyi dener (best-effort), sonra
- * local storage'ı temizleyip /login'e yönlendirir.
- */
-export function logout(): void {
-  const refreshToken = getRefreshToken();
-  if (refreshToken) {
-    fetch(`${BASE_URL}/auth/logout`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    }).catch(() => { /* best-effort — client tarafı temizlik yine de yapılır */ });
+export async function logout(): Promise<void> {
+  clearLegacyAuthStorage();
+  try {
+    const res = await fetch(`${BASE_URL}/auth/logout`, { method: "POST", credentials: "include" });
+    if (!res.ok) throw new Error("Çıkış yapılamadı.");
+  } catch {
+    if (typeof window !== "undefined") window.alert("Çıkış yapılamadı. Bağlantınızı kontrol edip tekrar deneyin.");
+    return;
   }
-  clearAuthStorage();
   if (typeof window !== "undefined") {
     window.location.href = "/login";
   }
 }
 
-/**
- * Aynı anda devam eden TEK bir refresh çağrısı — `refreshAccessToken()`'ın
- * birden fazla eşzamanlı çağırıcısı (ör. bir sayfanın `Promise.all` ile
- * paralel ateşlediği iki authenticated istek, ikisi de aynı anda 401
- * alırsa — bkz. `app/trips/[id]/optimize/page.tsx`'in `Promise.all([...])`'ı)
- * AYNI Task'ı paylaşır, HER BİRİ KENDİ `/auth/refresh` isteğini ateşlemez.
- * Bu olmadan: iki eşzamanlı çağrı aynı (henüz rotate edilmemiş) refresh
- * token'ı okur, biri başarıyla yeni bir çift kalıcı hale getirir, diğeri
- * ise artık geçersiz olan AYNI eski token'ı kullanmaya çalışıp reddedilir
- * — ve o reddedilme koşulsuzca `clearAuthStorage()` çağırıp BİRAZ ÖNCE
- * başarıyla yenilenmiş GEÇERLİ oturumu siler, kullanıcıyı gereksiz yere
- * `/login`'e yönlendirir (M38 audit bulgusu — iOS'un `AuthEnvironment.
- * inFlightRefresh`'iyle AYNI kök neden/düzeltme, core-api'nin
- * `REFRESH_TOKEN_RACE_LOST` kodu tam da bu senaryoyu öngörüyor).
- */
-let inFlightRefresh: Promise<string | null> | null = null;
+export async function deleteAccount(): Promise<void> {
+  await request<{ status: string }>("/auth/account", { method: "DELETE" });
+  clearLegacyAuthStorage();
+}
+
+// One refresh per tab; Web Locks serializes refreshes across supported tabs.
+let inFlightRefresh: Promise<boolean> | null = null;
 
 /**
- * Access token süresi dolduğunda (401) çağrılır. Başarılıysa yeni token
- * çiftini kaydeder ve yeni access token'ı döner; başarısızsa storage'ı
- * temizler ve null döner. Recursive 401 handling'e girmemek için ham
+ * Access cookie süresi dolduğunda (401) çağrılır. Başarılıysa sunucu
+ * yeni HttpOnly cookie'leri ayarlar. Recursive 401 handling'e girmemek için ham
  * `fetch` kullanır (request() üzerinden gitmez).
  */
-async function refreshAccessToken(): Promise<string | null> {
+async function refreshSession(): Promise<boolean> {
   if (inFlightRefresh) return inFlightRefresh;
-
-  inFlightRefresh = performRefresh();
+  const refresh = async (): Promise<boolean> => {
+    if (typeof navigator === "undefined" || !navigator.locks) return performRefresh();
+    return await navigator.locks.request("tripclip-session-refresh", async () => {
+      // Another tab may have rotated the shared cookie while this tab waited.
+      try {
+        const current = await fetch(`${BASE_URL}/auth/session`, { credentials: "include", cache: "no-store" });
+        if (current.ok) return true;
+      } catch { return false; }
+      return performRefresh();
+    });
+  };
+  const pending = refresh();
+  inFlightRefresh = pending;
   try {
-    return await inFlightRefresh;
+    return await pending;
   } finally {
-    inFlightRefresh = null;
+    if (inFlightRefresh === pending) inFlightRefresh = null;
   }
 }
 
-async function performRefresh(): Promise<string | null> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) return null;
-
+async function performRefresh(): Promise<boolean> {
   try {
     const res = await fetch(`${BASE_URL}/auth/refresh`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: refreshToken }),
+      credentials: "include",
     });
     if (!res.ok) {
-      clearAuthStorage();
-      return null;
+      return false;
     }
-    const data: AuthTokens = await res.json();
-    saveAuthTokens(data);
-    return data.access_token;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function getSession(): Promise<AuthSession | null> {
+  clearLegacyAuthStorage();
+  try {
+    let res = await fetch(`${BASE_URL}/auth/session`, { credentials: "include", cache: "no-store" });
+    if (res.status === 401) {
+      const body = await res.json().catch(() => null);
+      if (body?.code === "SESSION_EXPIRED" && await refreshSession()) {
+        res = await fetch(`${BASE_URL}/auth/session`, { credentials: "include", cache: "no-store" });
+      }
+    }
+    return res.ok ? await res.json() as AuthSession : null;
   } catch {
     return null;
   }
@@ -181,26 +164,23 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, options: RequestInit = {}, _retried = false): Promise<T> {
-  const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(options.headers as Record<string, string>),
   };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
 
   let res: Response;
   try {
-    res = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+    res = await fetch(`${BASE_URL}${path}`, { ...options, headers, credentials: "include" });
   } catch {
     throw new Error("Sunucuya ulaşılamıyor. İnternet bağlantınızı veya servis durumunu kontrol edin.");
   }
 
   if (!res.ok) {
     // Token expiry: try a silent refresh once, then retry the original request.
-    // Auth endpoints (/auth/*) return 401 for wrong credentials — never refresh those.
-    if (res.status === 401 && token && !_retried && !path.startsWith("/auth")) {
-      const newToken = await refreshAccessToken();
-      if (newToken) {
+    // Login/reset failures are credential errors; account deletion can refresh.
+    if (res.status === 401 && !_retried && !["/auth/login", "/auth/register", "/auth/google", "/auth/forgot-password", "/auth/reset-password"].includes(path)) {
+      if (await refreshSession()) {
         return request<T>(path, options, true);
       }
       if (typeof window !== "undefined") {
@@ -223,14 +203,16 @@ async function request<T>(path: string, options: RequestInit = {}, _retried = fa
 // ─── Auth ──────────────────────────────────────────────────────────────────
 
 export async function login(email: string, password: string) {
-  return request<AuthTokens>(
+  clearLegacyAuthStorage();
+  return request<AuthSession>(
     "/auth/login",
     { method: "POST", body: JSON.stringify({ email, password }) }
   );
 }
 
 export async function register(email: string, password: string, username?: string) {
-  const result = await request<AuthTokens>(
+  clearLegacyAuthStorage();
+  const result = await request<AuthSession>(
     "/auth/register",
     { method: "POST", body: JSON.stringify({ email, password, username }) }
   );
@@ -271,8 +253,9 @@ export async function resetPassword(token: string, newPassword: string): Promise
  * olmalı (OAuth spec gereği) — core-api ayrıca kendi allowlist'ine göre
  * ayrıca doğrular.
  */
-export async function googleSignIn(code: string, redirectUri: string): Promise<AuthTokens> {
-  return request<AuthTokens>(
+export async function googleSignIn(code: string, redirectUri: string): Promise<AuthSession> {
+  clearLegacyAuthStorage();
+  return request<AuthSession>(
     "/auth/google",
     { method: "POST", body: JSON.stringify({ code, redirect_uri: redirectUri }) }
   );
@@ -286,7 +269,7 @@ export async function googleSignIn(code: string, redirectUri: string): Promise<A
  * Bir event'i ateşler. Kasıtlı olarak request() ÜZERİNDEN GİTMEZ: request()'in
  * 401 → refresh → /login yönlendirme mantığı bir analytics çağrısı için asla
  * tetiklenmemeli — best-effort bir arka plan isteği kullanıcıyı /login'e
- * göndermemeli. logout()/refreshAccessToken() ile aynı gerekçeyle ham fetch
+ * göndermemeli. logout()/refreshSession() ile aynı gerekçeyle ham fetch
  * kullanılıyor (bkz. yukarısı).
  */
 export function trackAnalyticsEvent(
@@ -295,13 +278,12 @@ export function trackAnalyticsEvent(
   source?: string,
   metadata?: Record<string, unknown>,
 ): void {
-  const token = getToken();
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
 
   fetch(`${BASE_URL}/analytics/events`, {
     method: "POST",
     headers,
+    credentials: "include",
     body: JSON.stringify({ event, trip_id: tripId, source, metadata }),
   }).catch(() => { /* best-effort — analytics hiçbir zaman kullanıcı deneyimini etkilemez */ });
 }
@@ -632,6 +614,14 @@ export interface AssistantRequest {
 export interface AssistantResponse {
   answer: string;
   references: AssistantReference[];
+  sources?: AssistantSource[];
+}
+
+export interface AssistantSource {
+  title: string;
+  url: string;
+  observed_at: string;
+  expires_at: string;
 }
 
 export async function askTripAssistant(tripId: number, body: AssistantRequest) {

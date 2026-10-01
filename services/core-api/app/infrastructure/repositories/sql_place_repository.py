@@ -34,6 +34,7 @@ class SqlPlaceRepository(AbstractPlaceRepository):
         # QdrantService kendi içinde best-effort (bkz. qdrant_service.py) —
         # burada ayrıca try/except'e gerek yok.
         self._qdrant = qdrant or QdrantService()
+        self._pending_embeddings: Dict[int, tuple] = {}
 
     @staticmethod
     def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
@@ -93,7 +94,9 @@ class SqlPlaceRepository(AbstractPlaceRepository):
                     # Embedding metni city/category içerdiği için (bkz.
                     # QdrantService._embedding_text) zenginleşme anlamsal
                     # aramanın kalitesini de etkiler — yeniden gömülmeli.
-                    self._qdrant.upsert_place(candidate.id, candidate.name, candidate.city, candidate.category)
+                    self._pending_embeddings[candidate.id] = (
+                        candidate.id, candidate.name, candidate.city, candidate.category
+                    )
                 return candidate
 
         place = Place(
@@ -109,7 +112,7 @@ class SqlPlaceRepository(AbstractPlaceRepository):
         )
         self._db.add(place)
         self._db.flush()  # id lazım (PlaceSave FK'ı için), henüz commit etme
-        self._qdrant.upsert_place(place.id, place.name, place.city, place.category)
+        self._pending_embeddings[place.id] = (place.id, place.name, place.city, place.category)
         return place
 
     def _save_for_user(self, user_id: int, place: Place, video_id: Optional[int]) -> None:
@@ -127,6 +130,7 @@ class SqlPlaceRepository(AbstractPlaceRepository):
         place.save_count = (place.save_count or 0) + 1
 
     def sync_from_video(self, video) -> None:
+        self._pending_embeddings.clear()
         if not video.user_id:
             return
 
@@ -151,7 +155,13 @@ class SqlPlaceRepository(AbstractPlaceRepository):
             )
             self._save_for_user(user_id=video.user_id, place=place, video_id=video.id)
 
+        from app.application.services.deferred_work import enqueue
+        for place_id in self._pending_embeddings:
+            enqueue(self._db, "place_index", place_id)
+        # The index events commit with their places; an unavailable broker or
+        # Qdrant cannot lose the update. Worker always reads current SQL data.
         self._db.commit()
+        self._pending_embeddings.clear()
 
     @staticmethod
     def _to_summary(place: Place, saved_at) -> Dict[str, Any]:

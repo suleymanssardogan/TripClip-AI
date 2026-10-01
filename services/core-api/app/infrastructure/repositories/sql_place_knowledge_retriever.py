@@ -9,6 +9,7 @@ bkz. app/ml/qdrant_service.py M30 eklentisi) kullanır — YENİ bir koleksiyon,
 istemci ya da embedding modeli İCAT EDİLMEZ (bkz. milestone Req 4).
 """
 import logging
+from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import or_
@@ -18,6 +19,7 @@ from app.domain.assistant.context_builder import TripContext
 from app.domain.assistant.place_knowledge import PlaceKnowledgeRetriever, RetrievedPlaceKnowledge
 from app.ml.qdrant_service import QdrantService
 from app.models.place import Place
+from app.models.place_knowledge_document import PlaceKnowledgeDocument
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +64,18 @@ class SqlPlaceKnowledgeRetriever(PlaceKnowledgeRetriever):
         if not hits:
             return []
 
+        # Defense in depth: a stale/misbehaving index cannot widen SQL scope.
+        hits = [h for h in hits if h.get("place_id") in candidate_ids][:max(1, min(limit, 4))]
         place_ids = [h["place_id"] for h in hits]
         places_by_id = {p.id: p for p in self._db.query(Place).filter(Place.id.in_(place_ids)).all()}
+        docs_by_place = {}
+        docs = self._db.query(PlaceKnowledgeDocument).filter(
+            PlaceKnowledgeDocument.place_id.in_(place_ids),
+            PlaceKnowledgeDocument.expires_at > datetime.utcnow(),
+        ).order_by(PlaceKnowledgeDocument.observed_at.desc(), PlaceKnowledgeDocument.id).limit(40).all()
+        for doc in docs:
+            if len(docs_by_place.get(doc.place_id, [])) < 2:
+                docs_by_place.setdefault(doc.place_id, []).append(doc)
 
         results: List[RetrievedPlaceKnowledge] = []
         for hit in hits:
@@ -73,12 +85,20 @@ class SqlPlaceKnowledgeRetriever(PlaceKnowledgeRetriever):
                 # sessizce atla, halüsinasyon üretme (bkz. context_builder'ın
                 # AYNI "silinmiş mekan" ilkesi).
                 continue
+            metadata = {"city": place.city, "category": place.category, "opening_hours": place.opening_hours}
+            if docs_by_place.get(place.id):
+                metadata["sources"] = [{"title": d.source_title, "url": d.source_url,
+                                        "observed_at": d.observed_at.isoformat(),
+                                        "expires_at": d.expires_at.isoformat(),
+                                        "origin": d.origin, "version": d.content_hash}
+                                       for d in docs_by_place[place.id]]
             results.append(RetrievedPlaceKnowledge(
                 place_id=place.id,
                 title=place.name,
-                content=self._bounded_content(place),
+                content=(" ".join(d.content for d in docs_by_place.get(place.id, []))[:self.MAX_CONTENT_LENGTH]
+                         if docs_by_place.get(place.id) else self._bounded_content(place)),
                 score=hit["score"],
-                metadata={"city": place.city, "category": place.category, "opening_hours": place.opening_hours},
+                metadata=metadata,
             ))
         return results
 

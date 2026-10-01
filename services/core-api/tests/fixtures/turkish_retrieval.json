@@ -1,0 +1,30 @@
+{
+  "synthetic": true,
+  "note": "Yalnızca değerlendirme için kurgusal mekanlar. Gerçek kaynak veya üretim içeriği değildir.",
+  "documents": [
+    {"id": 1, "name": "Arkeoloji Müzesi A", "city": "Gaziantep", "category": "Müze", "content": "Roma dönemine ait mozaiklerin sergilendiği arkeoloji müzesi."},
+    {"id": 2, "name": "Kent Parkı B", "city": "Ankara", "category": "Park", "content": "Ağaçların arasında yürüyüş yolları ve çocuk oyun alanı bulunan park."},
+    {"id": 3, "name": "Sahil C", "city": "Antalya", "category": "Plaj", "content": "Denize girilebilen, yüzme ve sahil yürüyüşü yapılan plaj."},
+    {"id": 4, "name": "Lokanta D", "city": "Gaziantep", "category": "Restoran", "content": "Yöresel yemekler ve kebap servis eden restoran."},
+    {"id": 5, "name": "Sanat Galerisi E", "city": "İstanbul", "category": "Galeri", "content": "Çağdaş resim ve heykel sergileri sunan sanat galerisi."},
+    {"id": 6, "name": "Orman Rotası F", "city": "Bolu", "category": "Doğa", "content": "Ormanda yürüyüş ve doğa gözlemi yapılabilen rota."},
+    {"id": 7, "name": "Tarihi Kale G", "city": "Ankara", "category": "Tarihi Alan", "content": "Şehir manzarası görülen tarihi kale ve surlar."},
+    {"id": 8, "name": "Kahve Evi H", "city": "İstanbul", "category": "Kafe", "content": "Kahve içip dinlenmek için oturma alanları bulunan kafe."}
+  ],
+  "queries": [
+    {"text": "Roma mozaiklerini nerede görebilirim?", "relevant_ids": [1]},
+    {"text": "Çocukla gidebileceğim bir park", "relevant_ids": [2]},
+    {"text": "Antalya'da denize girilecek yer", "relevant_ids": [3]},
+    {"text": "Antep'te kebap yemek istiyorum", "relevant_ids": [4]},
+    {"text": "Istanbul resim ve heykel sergisi", "relevant_ids": [5]},
+    {"text": "Ormanda doğa yürüyüşü", "relevant_ids": [6]},
+    {"text": "Ankara'nın tarihi surları", "relevant_ids": [7]},
+    {"text": "Bir kahve içip dinlenelim", "relevant_ids": [8]},
+    {"text": "Gaziantep'teki müzeler", "relevant_ids": [1]},
+    {"text": "Açık havada yürüyüş", "relevant_ids": [2, 6]},
+    {"text": "Pasaport başvurusu nasıl yapılır?", "relevant_ids": []},
+    {"text": "Uçuşumu iptal et", "relevant_ids": []},
+    {"text": "Döviz kuru bugün ne kadar?", "relevant_ids": []},
+    {"text": "Bu şehirde otel rezervasyonu", "relevant_ids": []}
+  ]
+}

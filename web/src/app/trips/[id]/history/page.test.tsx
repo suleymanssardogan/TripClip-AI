@@ -20,7 +20,7 @@ vi.mock("@/components/Navbar", () => ({ default: () => null }));
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, getItineraries: vi.fn(), deleteItinerary: vi.fn() };
+  return { ...actual, getSession: vi.fn(), getItineraries: vi.fn(), deleteItinerary: vi.fn() };
 });
 
 function summary(overrides: Partial<api.ItinerarySummary> = {}): api.ItinerarySummary {
@@ -34,7 +34,7 @@ function summary(overrides: Partial<api.ItinerarySummary> = {}): api.ItinerarySu
 
 beforeEach(() => {
   vi.clearAllMocks();
-  localStorage.setItem("token", "test-token");
+  vi.mocked(api.getSession).mockResolvedValue({ user_id: 1, email: "test@example.com" });
 });
 
 describe("ItineraryHistoryPage", () => {

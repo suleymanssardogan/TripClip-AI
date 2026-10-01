@@ -3,6 +3,7 @@ import type { Config } from "tailwindcss";
 const cssVar = (name: string) => `rgb(var(${name}) / <alpha-value>)`;
 
 const config: Config = {
+  darkMode: "class",
   content: [
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
@@ -32,7 +33,7 @@ const config: Config = {
       fontFamily: {
         display: ["var(--font-satoshi)", "sans-serif"],
         sans:    ["var(--font-general-sans)", "sans-serif"],
-        mono:    ["var(--font-jbmono)", "ui-monospace", "monospace"],
+        mono:    ["ui-monospace", "SFMono-Regular", "monospace"],
       },
       borderRadius: {
         xs:  "6px",
@@ -61,8 +62,8 @@ const config: Config = {
         // since @keyframes can't consume CSS custom properties cleanly
         // through Tailwind's config-time string interpolation.
         "glow-pulse": {
-          "0%,100%": { boxShadow: "0 0 20px rgba(255,176,32,0.15)" },
-          "50%":     { boxShadow: "0 0 40px rgba(255,176,32,0.4), 0 0 80px rgba(255,176,32,0.1)" },
+          "0%,100%": { boxShadow: "0 0 20px rgba(26,103,185,0.12)" },
+          "50%":     { boxShadow: "0 0 40px rgba(26,103,185,0.25)" },
         },
         "slide-up": {
           from: { opacity: "0", transform: "translateY(24px)" },
@@ -81,13 +82,13 @@ const config: Config = {
           "100%": { backgroundPosition: "0 0" },
         },
         "pulse-ring": {
-          "0%":   { boxShadow: "0 0 0 0 rgba(255,176,32,0.5)" },
-          "70%":  { boxShadow: "0 0 0 8px rgba(255,176,32,0)" },
-          "100%": { boxShadow: "0 0 0 0 rgba(255,176,32,0)" },
+          "0%":   { boxShadow: "0 0 0 0 rgba(26,103,185,0.35)" },
+          "70%":  { boxShadow: "0 0 0 8px rgba(26,103,185,0)" },
+          "100%": { boxShadow: "0 0 0 0 rgba(26,103,185,0)" },
         },
       },
       boxShadow: {
-        card: "0 4px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)",
+        card: "0 12px 30px -20px rgba(24,37,49,0.18)",
       },
     },
   },

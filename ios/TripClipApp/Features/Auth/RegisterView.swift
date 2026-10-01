@@ -13,17 +13,17 @@ struct RegisterView: View {
             AppColors.background.ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 32) {
+                VStack(alignment: .leading, spacing: 28) {
                     // ── Header ──────────────────────────────────────────────
-                    VStack(spacing: 8) {
-                        Image(systemName: "person.badge.plus.fill")
-                            .font(.system(size: 52))
-                            .foregroundStyle(AppColors.accentText)
-                        Text("Hesap Oluştur")
-                            .font(.system(size: 28, weight: .bold))
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Yola çıkalım.")
+                            .font(.system(.largeTitle, design: .rounded, weight: .bold))
                             .foregroundStyle(AppColors.text)
+                        Text("Keşfettiğin yerleri kaydetmek için bir hesap oluştur.")
+                            .font(.body)
+                            .foregroundStyle(AppColors.textSecondary)
                     }
-                    .padding(.top, 40)
+                    .padding(.top, 26)
 
                     // ── Fields ──────────────────────────────────────────────
                     VStack(spacing: 14) {
@@ -71,22 +71,25 @@ struct RegisterView: View {
                         Task { await vm.register(auth: auth) }
                     } label: {
                         Group {
-                            if vm.isLoading {
-                                ProgressView().tint(AppColors.onAccent)
-                            } else {
-                                Text("Kayıt Ol")
-                                    .font(.system(size: 16, weight: .semibold))
-                            }
+                            if vm.isLoading { ProgressView() }
+                            else { Text("Hesap oluştur").font(.headline) }
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(vm.canSubmit ? AppColors.accent : AppColors.accent.opacity(0.35))
-                        .foregroundStyle(AppColors.onAccent)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
                     }
-                    .buttonStyle(PressableButtonStyle())
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(AppColors.accent)
                     .disabled(!vm.canSubmit)
                     .accessibilityLabel(vm.isLoading ? "Kayıt olunuyor" : "Kayıt Ol")
+
+                    VStack(spacing: 3) {
+                        Text("Kişisel verilerin işlenmesi hakkında")
+                            .foregroundStyle(AppColors.textSecondary)
+                        Link("Gizlilik ve Kişisel Veriler", destination: URL(string: "https://tripclip.app/privacy")!)
+                            .foregroundStyle(AppColors.accentText)
+                    }
+                    .font(.system(size: 12))
+                    .frame(maxWidth: .infinity)
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 48)

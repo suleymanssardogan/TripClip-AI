@@ -15,7 +15,7 @@ vi.mock("@/components/Navbar", () => ({ default: () => null }));
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, getTrip: vi.fn(), askTripAssistant: vi.fn() };
+  return { ...actual, getSession: vi.fn(), getTrip: vi.fn(), askTripAssistant: vi.fn() };
 });
 
 function trip(overrides: Partial<api.TripDetail> = {}): api.TripDetail {
@@ -33,11 +33,25 @@ function trip(overrides: Partial<api.TripDetail> = {}): api.TripDetail {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  localStorage.setItem("token", "test-token");
+  vi.mocked(api.getSession).mockResolvedValue({ user_id: 1, email: "test@example.com" });
   sessionStorage.clear();
 });
 
 describe("TripAssistantPage", () => {
+  it("shows server-provided source links and their review dates", async () => {
+    vi.mocked(api.getTrip).mockResolvedValue(trip());
+    vi.mocked(api.askTripAssistant).mockResolvedValue({ answer: "Kaynaklı cevap", references: [], sources: [{
+      title: "Müze kaynağı", url: "https://example.org/museum",
+      observed_at: "2026-09-30T00:00:00", expires_at: "2026-10-30T00:00:00",
+    }] });
+    render(<TripAssistantPage />);
+    await waitFor(() => expect(screen.getByText("Bugünü özetle")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Bugünü özetle"));
+    const link = await screen.findByRole("link", { name: "Müze kaynağı · İnceleme: 2026-09-30" });
+    expect(link).toHaveAttribute("href", "https://example.org/museum");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  });
+
   it("shows suggested prompts before any message is sent", async () => {
     vi.mocked(api.getTrip).mockResolvedValue(trip());
     render(<TripAssistantPage />);

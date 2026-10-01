@@ -6,6 +6,8 @@ import os
 
 _DEFAULT_SECRET = "tripclip-secret-change-in-production"
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", _DEFAULT_SECRET)
+if os.getenv("APP_ENV") == "production" and len(SECRET_KEY) < 32:
+    raise RuntimeError("JWT_SECRET_KEY must contain at least 32 characters in production.")
 ALGORITHM = "HS256"
 
 if SECRET_KEY == _DEFAULT_SECRET:

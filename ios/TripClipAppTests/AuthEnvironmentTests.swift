@@ -312,4 +312,23 @@ final class AuthEnvironmentTests: XCTestCase {
 
         XCTAssertFalse(auth.isAuthenticated)
     }
+
+    func test_deleteAccount_callsAuthenticatedEndpointAndClearsSession() async throws {
+        let fake = FakeAPIClient()
+        fake.result = .success(StatusResponse(status: "deleted"))
+        let auth = AuthEnvironment(apiClient: fake)
+        // JWT.isExpired() güvenli tarafta çözülemeyen token'ı süresi geçmiş
+        // saydığı için testte gelecekte sona eren minimal bir payload kullan.
+        let validAccessToken = "e30.eyJleHAiOjQxMDI0NDQ0MDB9.sig"
+        auth.setUserForTesting(AuthUser(id: 12, email: "delete@test.com", token: validAccessToken))
+
+        try await auth.deleteAccount()
+
+        XCTAssertFalse(auth.isAuthenticated)
+        guard case .deleteAccount? = fake.lastEndpoint else {
+            XCTFail("Hesap silme endpoint'i çağrılmadı")
+            return
+        }
+        XCTAssertEqual(fake.lastToken, validAccessToken)
+    }
 }

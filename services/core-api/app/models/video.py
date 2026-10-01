@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Enum, ForeignKey, Float, JSON, Index
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, Enum, ForeignKey, Float, JSON, Index
 from app.core.database import Base
 from datetime import datetime
 import enum
@@ -17,6 +17,9 @@ class Video(Base):
 
     # — Ownership & metadata —
     user_id    = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    source_url = Column(String(2048), nullable=True)
+    source_platform = Column(String(64), nullable=True)
+    is_public = Column(Boolean, nullable=False, default=False, server_default="false")
     filename   = Column(String, nullable=False)
     file_path  = Column(String, nullable=False)
     status     = Column(Enum(VideoStatus), default=VideoStatus.UPLOADED, index=True)

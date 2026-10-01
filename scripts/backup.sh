@@ -26,6 +26,7 @@ RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-14}"
 # shellcheck disable=SC1091
 source .env
 [[ -n "${POSTGRES_PASSWORD:-}" ]] || { echo "ERROR: POSTGRES_PASSWORD not set in .env"; exit 1; }
+[[ -n "${MONGODB_ROOT_USERNAME:-}" && -n "${MONGODB_ROOT_PASSWORD:-}" ]] || { echo "ERROR: MONGODB_ROOT_USERNAME and MONGODB_ROOT_PASSWORD must be set in .env"; exit 1; }
 
 mkdir -p "$BACKUP_DIR"
 
@@ -40,7 +41,7 @@ echo "==> Backing up MongoDB..."
 # container sharing the mongodb container's network namespace instead,
 # mirroring the certbot/certbot pattern used for SSL.
 docker run --rm --network container:tripclip-mongo mongodb/mongodb-database-tools \
-    mongodump --host=127.0.0.1 --port=27017 --archive --db=tripclip \
+    mongodump --host=127.0.0.1 --port=27017 --username="$MONGODB_ROOT_USERNAME" --password="$MONGODB_ROOT_PASSWORD" --authenticationDatabase=admin --archive --db=tripclip \
     | gzip > "$BACKUP_DIR/mongo-$TIMESTAMP.archive.gz"
 echo "    -> $BACKUP_DIR/mongo-$TIMESTAMP.archive.gz ($(du -h "$BACKUP_DIR/mongo-$TIMESTAMP.archive.gz" | cut -f1))"
 

@@ -11,6 +11,20 @@ import pytest
 from app.ml.qdrant_service import QdrantService
 
 
+def test_embedding_model_is_reused_across_repositories():
+    from app.ml.qdrant_service import _embedding_model
+
+    _embedding_model.cache_clear()
+    try:
+        with mock.patch("app.ml.qdrant_service._create_embedding_model") as factory:
+            first = _embedding_model()
+            second = _embedding_model()
+        assert first is second
+        factory.assert_called_once_with()
+    finally:
+        _embedding_model.cache_clear()
+
+
 @pytest.fixture
 def service():
     svc = QdrantService()

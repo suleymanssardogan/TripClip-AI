@@ -124,3 +124,6 @@ nginx/ssl/
 nginx/certbot-webroot/*
 !nginx/certbot-webroot/.gitkeep
 backups/
+
+# Disposable infrastructure test reports
+integration-reports/

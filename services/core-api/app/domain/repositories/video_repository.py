@@ -8,7 +8,7 @@ from typing import Optional, List, Dict, Any
 class AbstractVideoRepository(ABC):
 
     @abstractmethod
-    def create(self, filename: str, file_path: str, user_id: int):
+    def create(self, filename: str, file_path: str, user_id: int, source_url: Optional[str] = None, source_platform: Optional[str] = None):
         """Yeni video kaydı oluştur. Video nesnesini döner."""
         ...
 

@@ -24,13 +24,16 @@ from app.core.middleware import RequestLoggingMiddleware
 
 # Sentry — yalnızca DSN tanımlanmışsa etkinleştir (prod ortamında .env ile verilir)
 _sentry_dsn = os.getenv("SENTRY_DSN")
-if _sentry_dsn:
+if _sentry_dsn and "sentry" in {v.strip().lower() for v in os.getenv("PRIVACY_REVIEWED_PROVIDERS", "").split(",")}:
     import sentry_sdk
+    from app.core.privacy import scrub_error_event
     sentry_sdk.init(
         dsn=_sentry_dsn,
-        send_default_pii=True,
-        traces_sample_rate=float(os.getenv("SENTRY_TRACES_RATE", "1.0")),
-        profile_session_sample_rate=1.0,
+        send_default_pii=False,
+        include_local_variables=False,
+        before_send=scrub_error_event,
+        traces_sample_rate=float(os.getenv("SENTRY_TRACES_RATE", "0.0")),
+        profile_session_sample_rate=0.0,
         profile_lifecycle="trace",
     )
 
@@ -70,9 +73,34 @@ async def lifespan(app: FastAPI):
 
     metrics_task = asyncio.create_task(_queue_depth_loop())
 
+    async def _deferred_work_loop():
+        from app.application.services.deferred_work import dispatch_pending_work
+        while True:
+            try:
+                await asyncio.to_thread(dispatch_pending_work)
+            except Exception as exc:
+                logger.warning("Deferred work dispatcher: %s", type(exc).__name__)
+            await asyncio.sleep(15)
+
+    deferred_task = asyncio.create_task(_deferred_work_loop())
+
+    async def _retention_loop():
+        from app.application.services.privacy_retention import sweep_upload_retention
+        while True:
+            try:
+                await asyncio.to_thread(sweep_upload_retention)
+            except Exception as exc:
+                logger.warning("Upload retention: %s", type(exc).__name__)
+            await asyncio.sleep(900)
+
+    retention_task = asyncio.create_task(_retention_loop())
+
     yield  # ← uygulama burada çalışır
 
     metrics_task.cancel()
+    deferred_task.cancel()
+    retention_task.cancel()
+    await asyncio.gather(metrics_task, deferred_task, retention_task, return_exceptions=True)
 
 
 # Rate limiter — IP başına istek limiti

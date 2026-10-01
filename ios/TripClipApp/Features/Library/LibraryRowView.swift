@@ -9,31 +9,17 @@ struct LibraryRowView: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(AppColors.route.opacity(0.1))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.route.opacity(0.2)))
-                Image(systemName: "mappin.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(AppColors.route)
-            }
-            .frame(width: 50, height: 50)
-
             VStack(alignment: .leading, spacing: 4) {
                 Text(place.name)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.headline)
                     .foregroundStyle(AppColors.text)
                     .lineLimit(1)
 
                 HStack(spacing: 8) {
                     if let category = place.category, !category.isEmpty {
                         Text(category)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(AppColors.route)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(AppColors.route.opacity(0.1))
-                            .clipShape(Capsule())
+                            .font(.subheadline)
+                            .foregroundStyle(AppColors.textSecondary)
                     }
                     if let city = place.city, !city.isEmpty {
                         Text(city)
@@ -65,9 +51,9 @@ struct LibraryRowView: View {
         }
         .padding(14)
         .background(AppColors.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(isSelected == true ? AppColors.accentText.opacity(0.5) : AppColors.border, lineWidth: 1)
         )
         // Seçim modu açıkken (isSelected != nil), seçili durum daireyi

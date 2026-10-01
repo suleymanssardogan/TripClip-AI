@@ -154,6 +154,8 @@ TripClip-AI/
 
 ---
 
+Üretim hazırlığı ve tamamlanmamış yayın kapıları: [Production yol haritası](docs/production-roadmap.md).
+
 ## Hızlı Başlangıç
 
 ### Gereksinimler

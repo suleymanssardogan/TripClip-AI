@@ -130,6 +130,17 @@ async def logout(request: Request, body: RefreshRequest):
     return await _forward("/internal/auth/logout", body.model_dump(), rid)
 
 
+@router.delete("/account")
+async def delete_account(request: Request, user_id: int = Depends(get_current_user_id)):
+    rid = str(uuid.uuid4())[:8]
+    async with mobile_error_wrapper(request_id=rid):
+        async with internal_client(15.0) as client:
+            resp = await client.delete(f"{CORE_API_URL}/internal/auth/account", headers={"x-user-id": str(user_id)})
+        if resp.status_code >= 400:
+            raise_from_response(resp, request_id=rid)
+    return resp.json()
+
+
 @router.put("/device-token")
 async def register_device_token(
     request: Request,

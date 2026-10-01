@@ -125,19 +125,27 @@ class AuthService:
         if stored and stored.revoked_at is None:
             self._refresh_repo.revoke(stored.id)
 
+    def delete_account(self, user_id: int) -> list[str]:
+        """Kullanıcı verilerini kalıcı olarak siler; çağıran dosyaları temizler."""
+        return self._repo.delete_account(user_id)
+
     # ── Email/Password ────────────────────────────────────────────────────────
 
     def register(self, email: str, password: str, username: str | None = None) -> AuthResponse:
-        if self._repo.get_by_email(email):
-            raise DuplicateEmailException(email)
+        # Login trims/lowercases emails; registration must use the same
+        # canonical form or PostgreSQL's case-sensitive unique constraint can
+        # allow duplicate accounts such as User@Example.com/user@example.com.
+        normalized_email = (email or "").strip().lower()
+        if self._repo.get_by_email(normalized_email):
+            raise DuplicateEmailException(normalized_email)
 
-        resolved_username = username or email.split("@")[0]
+        resolved_username = (username or normalized_email.split("@")[0]).strip()
         if self._repo.get_by_username(resolved_username):
             raise DuplicateUsernameException(resolved_username)
 
         try:
             user = self._repo.create(
-                email=email,
+                email=normalized_email,
                 username=resolved_username,
                 hashed_password=hash_password(password),
             )

@@ -13,17 +13,17 @@ struct LoginView: View {
             AppColors.background.ignoresSafeArea()
 
             ScrollView {
-                VStack(spacing: 32) {
+                VStack(alignment: .leading, spacing: 28) {
                     // ── Header ──────────────────────────────────────────────
-                    VStack(spacing: 8) {
-                        Image(systemName: "person.circle.fill")
-                            .font(.system(size: 52))
-                            .foregroundStyle(AppColors.accentText)
-                        Text("Giriş Yap")
-                            .font(.system(size: 28, weight: .bold))
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Tekrar hoş geldin.")
+                            .font(.system(.largeTitle, design: .rounded, weight: .bold))
                             .foregroundStyle(AppColors.text)
+                        Text("Gezilerine kaldığın yerden devam et.")
+                            .font(.body)
+                            .foregroundStyle(AppColors.textSecondary)
                     }
-                    .padding(.top, 40)
+                    .padding(.top, 26)
 
                     // ── Fields ──────────────────────────────────────────────
                     VStack(spacing: 14) {
@@ -70,20 +70,14 @@ struct LoginView: View {
                         Task { await vm.login(auth: auth) }
                     } label: {
                         Group {
-                            if vm.isLoading {
-                                ProgressView().tint(AppColors.onAccent)
-                            } else {
-                                Text("Giriş Yap")
-                                    .font(.system(size: 16, weight: .semibold))
-                            }
+                            if vm.isLoading { ProgressView() }
+                            else { Text("Giriş yap").font(.headline) }
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 16)
-                        .background(vm.canSubmit ? AppColors.accent : AppColors.accent.opacity(0.35))
-                        .foregroundStyle(AppColors.onAccent)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
                     }
-                    .buttonStyle(PressableButtonStyle())
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(AppColors.accent)
                     .disabled(!vm.canSubmit)
                     // Yüklenirken `Text` içeriği bir `ProgressView`e dönüşüyordu
                     // ve VoiceOver'a hiçbir okunabilir etiket kalmıyordu (M36
@@ -112,10 +106,8 @@ struct AuthTextField: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 12, weight: .medium))
+                .font(.subheadline.weight(.medium))
                 .foregroundStyle(AppColors.textSecondary)
-                .textCase(.uppercase)
-                .tracking(1)
 
             Group {
                 if isSecure {
@@ -132,12 +124,7 @@ struct AuthTextField: View {
             .foregroundStyle(AppColors.text)
             .padding(.horizontal, 14)
             .padding(.vertical, 14)
-            .background(AppColors.surface2)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(AppColors.borderStrong, lineWidth: 1)
-            )
+            .background(AppColors.surface2, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 }

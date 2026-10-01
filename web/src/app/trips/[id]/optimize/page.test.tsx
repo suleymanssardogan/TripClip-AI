@@ -46,7 +46,7 @@ vi.mock("@/components/optimizer/OptimizerResult", () => ({
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, getTrip: vi.fn(), getItinerary: vi.fn(), optimizeTrip: vi.fn() };
+  return { ...actual, getSession: vi.fn(), getTrip: vi.fn(), getItinerary: vi.fn(), optimizeTrip: vi.fn() };
 });
 
 function tripDetail(overrides: Partial<TripDetail> = {}): TripDetail {
@@ -72,7 +72,7 @@ function itinerary(overrides: Partial<Itinerary> = {}): Itinerary {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  localStorage.setItem("token", "test-token");
+  vi.mocked(api.getSession).mockResolvedValue({ user_id: 1, email: "test@example.com" });
   itineraryIdParam = null;
 });
 

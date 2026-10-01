@@ -12,7 +12,7 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, login: vi.fn(), saveAuthTokens: vi.fn() };
+  return { ...actual, login: vi.fn() };
 });
 
 beforeEach(() => {
@@ -42,7 +42,7 @@ describe("LoginPage", () => {
     fireEvent.click(button);
     fireEvent.click(button);
 
-    resolveLogin({ access_token: "t", refresh_token: "r", user_id: 1, email: "u@test.com" });
+    resolveLogin({ user_id: 1, email: "u@test.com" });
     await waitFor(() => expect(api.login).toHaveBeenCalledTimes(1));
   });
 

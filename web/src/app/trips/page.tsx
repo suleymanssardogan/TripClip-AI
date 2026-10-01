@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { MapPin, ChevronRight, Loader2, AlertTriangle, RotateCcw, Map as MapIcon } from "lucide-react";
+import { MapPin, ChevronRight, Loader2, AlertTriangle, RotateCcw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
-import { getTrips, type TripSummary } from "@/lib/api";
+import { getSession, getTrips, type TripSummary } from "@/lib/api";
 import { Card } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -27,18 +27,15 @@ function TripCard({ trip, index }: { trip: TripSummary; index: number }) {
       <Card
         hover
         onClick={() => router.push(`/trips/${trip.id}`)}
-        className="group cursor-pointer"
+        className="group cursor-pointer focus-visible:outline-2 focus-visible:outline-route"
         role="link"
         tabIndex={0}
-        onKeyDown={(e) => { if (e.key === "Enter") router.push(`/trips/${trip.id}`); }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); router.push(`/trips/${trip.id}`); } }}
         aria-label={`${trip.title} gezisini aç`}
       >
-        <div className="h-16 flex items-center justify-center bg-surface2">
-          <MapIcon className="w-6 h-6 text-text-tertiary" />
-        </div>
-        <div className="p-4">
+        <div className="p-5">
           <div className="flex items-start justify-between gap-2 mb-2">
-            <h3 className="font-display font-bold text-text text-sm leading-snug">{trip.title}</h3>
+            <h3 className="font-display text-lg font-bold leading-snug text-text">{trip.title}</h3>
             <Badge variant={trip.role === "owner" ? "route" : "neutral"} className="shrink-0">
               {ROLE_LABELS[trip.role] ?? trip.role}
             </Badge>
@@ -83,9 +80,10 @@ export default function TripsPage() {
   }
 
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) { router.push("/login"); return; }
-    setTimeout(() => load(), 0);
+    getSession().then(session => {
+      if (!session) router.push("/login");
+      else load();
+    });
   }, [router]);
 
   if (loading) {
@@ -102,7 +100,7 @@ export default function TripsPage() {
         <Navbar />
         <div className="pt-32 pb-20 px-6 max-w-screen-xl mx-auto flex flex-col items-center justify-center gap-4 text-center">
           <AlertTriangle className="w-10 h-10 text-destructive" />
-          <h2 className="font-display text-2xl font-black tracking-tight text-text">Geziler yüklenemedi</h2>
+          <h2 className="font-display text-2xl font-bold tracking-tight text-text">Geziler yüklenemedi</h2>
           <p className="text-text-secondary text-sm max-w-sm">Sunucuya ulaşılamadı. İnternet bağlantınızı kontrol edip tekrar deneyin.</p>
           <Button onClick={load}>
             <RotateCcw className="w-4 h-4" /> Tekrar Dene
@@ -115,19 +113,19 @@ export default function TripsPage() {
   return (
     <div className="min-h-screen bg-bg pb-24">
       <Navbar />
-      <div className="pt-28 px-4 md:px-8 max-w-6xl mx-auto">
+      <div className="mx-auto max-w-7xl px-5 pt-28 sm:px-8">
         <motion.header
           initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }}
           className="mb-8"
         >
-          <p className="font-mono text-xs text-text-tertiary tracking-widest uppercase mb-1">Trip Builder</p>
-          <h1 className="font-display font-black text-3xl text-text">Gezilerim</h1>
+          <p className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-accent-text">Yolculukların</p>
+          <h1 className="font-display text-[clamp(2.5rem,4.5vw,4rem)] font-bold tracking-[-0.055em] text-text">Gezilerin.</h1>
+          <p className="mt-4 max-w-xl text-sm leading-7 text-text-secondary">Kaydettiğin duraklar ve oluşturduğun rotalar bir arada.</p>
         </motion.header>
 
         {trips.length === 0 ? (
-          <div className="text-center py-20 rounded-lg border border-border-strong border-dashed">
-            <div className="text-5xl mb-4">🗺️</div>
-            <p className="text-text font-semibold mb-2">Henüz gezi yok</p>
+          <div className="rounded-xl border border-border bg-surface px-6 py-16 text-center">
+            <p className="mb-2 font-display text-xl font-bold text-text">Henüz gezi yok</p>
             <p className="text-text-secondary text-sm max-w-sm mx-auto">
               Gezilerini TripClip iOS uygulamasından oluştur — burada görüntüleyip AI ile
               optimize edebilirsin.

@@ -32,6 +32,8 @@ check_status "Web app loads"                  GET "$BASE/"                    20
 check_status "Web BFF health (via nginx)"     GET "$BASE/health"              200
 check_status "Mobile BFF health (via nginx)"  GET "$BASE/health/mobile"       200
 
+check_status "Database and broker ready" GET "$BASE/health/ready" 200
+
 # Hitting a real route with a deliberately empty body proves the request makes
 # it all the way through nginx -> BFF -> FastAPI routing (422, not 502/404).
 check_status "Web BFF routes live"    POST "$BASE/api/web/auth/login"    422

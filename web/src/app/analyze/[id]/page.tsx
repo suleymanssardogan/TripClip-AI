@@ -164,7 +164,7 @@ export default function AnalysisResultPage() {
 
   /* Polling — only when processing */
   useEffect(() => {
-    if (!video || video.status !== "processing") return;
+    if (video?.status !== "processing") return;
     const id = Number(params.id);
 
     elapsedRef.current = setInterval(() => setElapsed(p => p + 1), 1000);

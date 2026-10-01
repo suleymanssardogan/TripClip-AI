@@ -24,6 +24,7 @@ settings:
     # googleClientID'si, web'in NEXT_PUBLIC_GOOGLE_CLIENT_ID'iyle AYNI
     # "optional infra degrades gracefully" deseni).
     GOOGLE_CLIENT_ID: ""
+    APS_ENVIRONMENT: development
   configs:
     Debug:
       SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
@@ -35,6 +36,7 @@ settings:
       DEV_API_HOST[sdk=iphoneos*]: "192.168.1.103"
     Release:
       SWIFT_OPTIMIZATION_LEVEL: "-O"
+      APS_ENVIRONMENT: production
 
 targets:
 

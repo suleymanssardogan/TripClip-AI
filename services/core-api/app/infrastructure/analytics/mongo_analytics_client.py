@@ -26,7 +26,7 @@ class MongoAnalyticsClient:
         self._collection = None
         # Operasyonel kill-switch — deploy gerektirmeden kapatılabilir
         # (bkz. SENTRY_DSN/APNS_* ile aynı "yalnızca yapılandırılmışsa aktif" deseni).
-        self.enabled = os.getenv("ANALYTICS_ENABLED", "true").lower() == "true"
+        self.enabled = os.getenv("ANALYTICS_ENABLED", "false").lower() == "true"
 
     def _load(self):
         if self._collection is not None:

@@ -149,7 +149,7 @@ Core-API uses `TripClipException` → `tripclip_exception_handler` for structure
 | `SENTRY_DSN` | core-api | Optional; Sentry only activates when set |
 | `YT_DLP_COOKIES` | celery-worker | Path to cookies.txt for private Instagram Reels |
 | `APNS_KEY_ID` / `APNS_TEAM_ID` / `APNS_BUNDLE_ID` / `APNS_AUTH_KEY` | celery-worker | Optional; push (processing complete/failed) only activates when all four are set |
-| `APNS_USE_SANDBOX` | celery-worker | `true` for TestFlight/dev builds, `false` for App Store. Default: `true` |
+| `APNS_USE_SANDBOX` | celery-worker | `true` for development builds, `false` for TestFlight/App Store. Default: `true` |
 | `ANALYTICS_ENABLED` | core-api | Kill switch for shared-trip event writes. Default: `true` |
 | `AI_ASSISTANT_PROVIDER` | core-api | Trip Assistant LLM provider: `gemini` (default) or `ollama`. See `docs/trip-assistant.md` |
 | `OLLAMA_URL` / `OLLAMA_MODEL` | celery-worker (travel tips), core-api (Trip Assistant, when `AI_ASSISTANT_PROVIDER=ollama`) | Ollama not part of Docker stack; both features degrade gracefully when unset. Default model: `mistral` |

@@ -18,16 +18,24 @@ class SqlVideoRepository(AbstractVideoRepository):
     def __init__(self, db: Session):
         self._db = db
 
-    def create(self, filename: str, file_path: str, user_id: int) -> Video:
+    def create(self, filename: str, file_path: str, user_id: int, source_url: Optional[str] = None, source_platform: Optional[str] = None) -> Video:
         video = Video(
             filename=filename,
             file_path=file_path,
             status=VideoStatus.UPLOADED,
             user_id=user_id,
+            source_url=source_url,
+            source_platform=source_platform,
         )
-        self._db.add(video)
-        self._db.commit()
-        self._db.refresh(video)
+        try:
+            self._db.add(video)
+            self._db.flush()
+            from app.application.services.deferred_work import enqueue
+            enqueue(self._db, "video_analysis", video.id)
+            self._db.commit()
+        except Exception:
+            self._db.rollback()
+            raise
         return video
 
     def get_by_id(self, video_id: int) -> Optional[Video]:
@@ -56,12 +64,12 @@ class SqlVideoRepository(AbstractVideoRepository):
         locs = visible_locations(v)
         return {
             "id": v.id,
-            "filename": v.filename,
+            "filename": "Gezi planı" if v.is_public else v.filename,
             "duration": v.duration,
             "created_at": v.created_at.isoformat() if v.created_at else None,
             "locations_count": len(locs),
             "top_location": locs[0]["original_name"] if locs else None,
-            "ocr_preview": (v.extracted_texts or [])[:3],
+            "ocr_preview": [] if v.is_public else (v.extracted_texts or [])[:3],
             "processing_time": v.processing_time,
         }
 
@@ -74,7 +82,7 @@ class SqlVideoRepository(AbstractVideoRepository):
         limit  = max(1, min(limit, self._MAX_PUBLIC_PAGE_SIZE))
         offset = max(0, offset)
 
-        base_query = self._db.query(Video).filter(Video.status == VideoStatus.COMPLETED)
+        base_query = self._db.query(Video).filter(Video.status == VideoStatus.COMPLETED, Video.is_public.is_(True))
 
         if not city:
             # Şehir filtresi yoksa (en sık kullanılan yol) sayfalama tamamen
@@ -154,7 +162,10 @@ class SqlVideoRepository(AbstractVideoRepository):
         video.travel_tips       = results.get("travel_tips")
         video.ocr_pois          = results.get("ocr_pois")
         video.degradation       = results.get("degradation")
+        video.source_url = None
         video.status            = VideoStatus.COMPLETED
+        from app.application.services.deferred_work import enqueue
+        enqueue(self._db, "travel_tips", video_id)
         self._db.commit()
 
         # Bu video artık videolar-arası Place kütüphanesine işlenir — tek bir
@@ -166,6 +177,10 @@ class SqlVideoRepository(AbstractVideoRepository):
         try:
             SqlPlaceRepository(self._db).sync_from_video(video)
         except Exception:
+            # A failed optional sync can leave the shared Session in a failed
+            # transaction. Restore it before push/analytics read the video.
+            # The completed video was committed in the preceding transaction.
+            self._db.rollback()
             logger.exception("⚠️ Place senkronizasyonu başarısız | video_id=%s", video_id)
 
     def save_travel_tips(self, video_id: int, tips: Dict[str, Any]) -> None:
@@ -211,6 +226,10 @@ class SqlVideoRepository(AbstractVideoRepository):
         if not video or video.user_id != user_id:
             return None
         file_path = video.file_path
+        from app.models.privacy_erasure_record import PendingFileErasure, PrivacyErasureRecord
+        if file_path:
+            self._db.add(PendingFileErasure(file_path=file_path))
+        self._db.add(PrivacyErasureRecord(action="delete", category="video_analysis", count=1))
         self._db.delete(video)
         self._db.commit()
         return file_path

@@ -41,7 +41,7 @@ vi.mock("@/components/OptimizerRouteMap", async () => {
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, getTrip: vi.fn() };
+  return { ...actual, getSession: vi.fn(), getTrip: vi.fn() };
 });
 
 function trip(overrides: Partial<api.TripDetail> = {}): api.TripDetail {
@@ -59,7 +59,7 @@ function trip(overrides: Partial<api.TripDetail> = {}): api.TripDetail {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  localStorage.setItem("token", "test-token");
+  vi.mocked(api.getSession).mockResolvedValue({ user_id: 1, email: "test@example.com" });
   searchParamsMap = new Map();
 });
 

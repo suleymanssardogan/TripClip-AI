@@ -19,6 +19,7 @@ enum Endpoint {
     case resetPassword(token: String, newPassword: String)
     case refresh(refreshToken: String)
     case logout(refreshToken: String)
+    case deleteAccount
     case registerDeviceToken(token: String)
 
     // Videos
@@ -99,6 +100,7 @@ extension Endpoint {
         case .resetPassword:                return "/api/mobile/auth/reset-password"
         case .refresh:                      return "/api/mobile/auth/refresh"
         case .logout:                       return "/api/mobile/auth/logout"
+        case .deleteAccount:                return "/api/mobile/auth/account"
         case .registerDeviceToken:          return "/api/mobile/auth/device-token"
         case .userVideos:                   return "/api/mobile/videos"
         case .videoDetail(let id):          return "/api/mobile/videos/\(id)"
@@ -131,6 +133,7 @@ extension Endpoint {
     var method: HTTPMethod {
         switch self {
         case .login, .register, .appleSignIn, .googleSignIn, .forgotPassword, .resetPassword, .refresh, .logout, .queueUrl, .createTrip, .optimizeTrip, .applyItinerary, .undoApplyHistory, .assistant, .trackAnalyticsEvent: return .post
+        case .deleteAccount: return .delete
         case .registerDeviceToken: return .put
         case .updateStopOrder, .updateTripStopOrder: return .patch
         case .deletePlan, .deleteTrip, .deleteItinerary: return .delete

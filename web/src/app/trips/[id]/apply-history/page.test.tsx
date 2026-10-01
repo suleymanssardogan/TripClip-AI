@@ -21,7 +21,7 @@ vi.mock("@/components/Navbar", () => ({ default: () => null }));
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, getApplyHistory: vi.fn(), undoApply: vi.fn() };
+  return { ...actual, getSession: vi.fn(), getApplyHistory: vi.fn(), undoApply: vi.fn() };
 });
 
 function entry(overrides: Partial<api.ApplyHistoryEntry> = {}): api.ApplyHistoryEntry {
@@ -35,7 +35,7 @@ function entry(overrides: Partial<api.ApplyHistoryEntry> = {}): api.ApplyHistory
 
 beforeEach(() => {
   vi.clearAllMocks();
-  localStorage.setItem("token", "test-token");
+  vi.mocked(api.getSession).mockResolvedValue({ user_id: 1, email: "test@example.com" });
 });
 
 describe("ApplyHistoryPage", () => {

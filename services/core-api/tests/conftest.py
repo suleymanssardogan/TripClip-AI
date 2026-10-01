@@ -102,6 +102,13 @@ def _no_real_qdrant(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_outbox_dispatch(monkeypatch):
+    # API lifecycle tests must not publish actual Celery work. Durable job
+    # tests call dispatch_due/execute_job directly with controlled handlers.
+    monkeypatch.setattr("app.application.services.deferred_work.dispatch_pending_work", lambda: 0)
+
+
+@pytest.fixture(autouse=True)
 def reset_rate_limiters():
     """Her testten önce rate limiter sayaçlarını sıfırla.
 

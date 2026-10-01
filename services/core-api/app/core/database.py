@@ -28,6 +28,7 @@ def get_db():
         db.close()
 
 from app.models import user, video, place, place_save, trip, trip_stop, trip_share, share_token, trip_collaborator, trip_itinerary, trip_itinerary_stop, trip_itinerary_apply_history
+from app.models import deferred_job, place_knowledge_document, privacy_erasure_record
 
 def create_table():
     Base.metadata.create_all(bind=engine)

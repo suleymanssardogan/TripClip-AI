@@ -24,6 +24,8 @@ struct HomeView: View {
     /// (M34 audit bulgusu: çıkış tek dokunuşla ANINDA gerçekleşiyordu, bu
     /// ekrandaki diğer geri-alınamaz işlemlerle tutarsızdı).
     @State private var showLogoutConfirmation = false
+    @State private var showDeleteAccountConfirmation = false
+    @State private var accountDeleteError: String?
 
     private enum UploadState {
         case idle
@@ -49,7 +51,7 @@ struct HomeView: View {
                     header
                         .padding(.horizontal, 20)
                         .padding(.top, 16)
-                        .padding(.bottom, 12)
+                        .padding(.bottom, 22)
 
                     // Upload progress overlay when active
                     if case .loading = uploadState {
@@ -72,7 +74,33 @@ struct HomeView: View {
                     }
                 }
             }
-            .navigationBarHidden(true)
+            .navigationTitle("TripClip")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    NavigationLink(destination: HistoryView()) {
+                        Image(systemName: "clock.arrow.circlepath")
+                    }
+                    .accessibilityLabel("Geçmiş")
+
+                    Menu {
+                        Button {
+                            (UIApplication.shared.delegate as? AppDelegate)?.requestNotificationPermission()
+                        } label: {
+                            Label("Bildirimleri aç", systemImage: "bell")
+                        }
+                        Button { showLogoutConfirmation = true } label: {
+                            Label("Çıkış Yap", systemImage: "rectangle.portrait.and.arrow.right")
+                        }
+                        Button(role: .destructive) { showDeleteAccountConfirmation = true } label: {
+                            Label("Hesabı Sil", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "person.crop.circle")
+                    }
+                    .accessibilityLabel("Hesap menüsü")
+                }
+            }
             .navigationDestination(for: PlanSummary.self) { plan in
                 if plan.isCompleted {
                     ResultsView(planID: plan.id)
@@ -111,6 +139,29 @@ struct HomeView: View {
             Button("Vazgeç", role: .cancel) { planPendingDeletion = nil }
         } message: {
             Text("Plan ve yüklenen video kalıcı olarak silinir. Bu işlem geri alınamaz.")
+        }
+        .confirmationDialog(
+            "Hesabını silmek istiyor musun?",
+            isPresented: $showDeleteAccountConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Hesabı Kalıcı Olarak Sil", role: .destructive) {
+                Task {
+                    do { try await auth.deleteAccount() }
+                    catch { accountDeleteError = error.localizedDescription }
+                }
+            }
+            Button("Vazgeç", role: .cancel) {}
+        } message: {
+            Text("Tüm videoların, planların ve gezilerin kalıcı olarak silinir. Bu işlem geri alınamaz.")
+        }
+        .alert("Hesap silinemedi", isPresented: Binding(
+            get: { accountDeleteError != nil },
+            set: { if !$0 { accountDeleteError = nil } }
+        )) {
+            Button("Tamam", role: .cancel) { accountDeleteError = nil }
+        } message: {
+            Text(accountDeleteError ?? "Lütfen tekrar deneyin.")
         }
         .confirmationDialog(
             "Çıkış yapmak istiyor musun?",
@@ -239,56 +290,42 @@ struct HomeView: View {
     // MARK: - Subviews
 
     private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Gezi Planlarım")
-                    .font(.system(size: 26, weight: .black, design: .rounded))
-                    .foregroundStyle(AppColors.text)
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
                 if let email = auth.user?.email, !email.isEmpty {
-                    Text(email.components(separatedBy: "@").first ?? email)
-                        .font(.system(size: 13))
+                    Text("Merhaba, \(email.components(separatedBy: "@").first ?? email)")
+                        .font(.subheadline)
                         .foregroundStyle(AppColors.textSecondary)
                 }
+                Text("Bir video, yeni bir rota.")
+                    .font(.system(.title2, design: .rounded, weight: .bold))
+                    .foregroundStyle(AppColors.text)
             }
-            Spacer()
 
-            // Camera Roll upload button
-            PhotosPicker(
-                selection: $pickerItem,
-                matching: .videos,
-                photoLibrary: .shared()
-            ) {
-                Image(systemName: "video.badge.plus")
-                    .font(.system(size: 20))
-                    .foregroundStyle(uploadState.isActive ? AppColors.textTertiary : AppColors.accentText)
-            }
-            .disabled(uploadState.isActive)
-            .padding(.trailing, 8)
-
-            // Kütüphane — tüm videolardan birikmiş, tekilleştirilmiş mekanlar
-            NavigationLink(destination: LibraryView()) {
-                Image(systemName: "books.vertical")
-                    .font(.system(size: 18))
+            VStack(alignment: .leading, spacing: 15) {
+                Text("Beğendiğin videodaki yerleri keşfet")
+                    .font(.headline)
+                    .foregroundStyle(AppColors.text)
+                Text("Gezi videosunu yükle; durakları bulup senin için düzenleyelim.")
+                    .font(.subheadline)
                     .foregroundStyle(AppColors.textSecondary)
-            }
-            .padding(.trailing, 12)
+                    .fixedSize(horizontal: false, vertical: true)
 
-            // Offline history
-            NavigationLink(destination: HistoryView()) {
-                Image(systemName: "clock.arrow.trianglehead.counterclockwise.rotate.90")
-                    .font(.system(size: 18))
-                    .foregroundStyle(AppColors.textSecondary)
+                PhotosPicker(selection: $pickerItem, matching: .videos, photoLibrary: .shared()) {
+                    Label("Video seç", systemImage: "plus")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(AppColors.accent)
+                .disabled(uploadState.isActive)
+                .accessibilityLabel("Gezi videosu yükle")
             }
-            .padding(.trailing, 12)
-
-            Button {
-                showLogoutConfirmation = true
-            } label: {
-                Image(systemName: "rectangle.portrait.and.arrow.right")
-                    .font(.system(size: 18))
-                    .foregroundStyle(AppColors.textSecondary)
-            }
-            .accessibilityLabel("Çıkış yap")
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(AppColors.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous).stroke(AppColors.border))
         }
     }
 
@@ -321,7 +358,7 @@ struct HomeView: View {
             Text(label)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(AppColors.text)
-            Text("Sayfa kapatılmayın")
+            Text("Sayfayı kapatmayın")
                 .font(.caption)
                 .foregroundStyle(AppColors.textSecondary)
             Spacer()
@@ -350,7 +387,17 @@ struct HomeView: View {
 
     private var planList: some View {
         ScrollView {
-            LazyVStack(spacing: 10) {
+            LazyVStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Text("Planların")
+                        .font(.system(size: 21, weight: .bold, design: .rounded))
+                        .foregroundStyle(AppColors.text)
+                    Spacer()
+                    Text("\(vm.plans.count) gezi")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(AppColors.textSecondary)
+                }
+                .padding(.bottom, 3)
                 ForEach(vm.plans) { plan in
                     Button {
                         navPath.append(plan)
@@ -370,7 +417,7 @@ struct HomeView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
             .padding(.bottom, 24)
         }
         .refreshable { await vm.load(auth: auth) }
@@ -379,34 +426,16 @@ struct HomeView: View {
     private var emptyState: some View {
         VStack(spacing: 16) {
             Spacer()
-            Image(systemName: "map")
-                .font(.system(size: 56))
-                .foregroundStyle(AppColors.textTertiary)
-            Text("Henüz gezi yok")
-                .font(.system(size: 20, weight: .bold))
+            Text("İlk rotan burada başlayacak")
+                .font(.system(size: 21, weight: .bold, design: .rounded))
                 .foregroundStyle(AppColors.text)
-            Text("Instagram'da bir video paylaşarak\nveya kamera rolünden yükleyerek\nilk gezini oluştur.")
+            Text("Beğendiğin bir gezi videosunu paylaş veya yukarıdan yükle. Durakları senin için bulalım.")
                 .font(.system(size: 15))
                 .foregroundStyle(AppColors.textSecondary)
                 .multilineTextAlignment(.center)
-            // Camera roll shortcut in empty state
-            PhotosPicker(
-                selection: $pickerItem,
-                matching: .videos,
-                photoLibrary: .shared()
-            ) {
-                Label("Video Yükle", systemImage: "video.badge.plus")
-                    .font(.system(size: 15, weight: .semibold))
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .background(AppColors.accent.opacity(0.12))
-                    .foregroundStyle(AppColors.accentText)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(AppColors.accent.opacity(0.3)))
-            }
-            .buttonStyle(PressableButtonStyle())
             Spacer()
         }
+        .padding(.horizontal, 38)
     }
 
     private func errorState(_ error: APIError) -> some View {

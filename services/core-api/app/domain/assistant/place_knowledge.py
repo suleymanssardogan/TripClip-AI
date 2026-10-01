@@ -58,7 +58,10 @@ class RetrievedPlaceKnowledge:
         """Modele gönderilen (system prompt içindeki) minimal şekil —
         `score`/`metadata` LLM'e ANLAMSIZ/gereksiz olduğu için DIŞARIDA
         bırakılır (bkz. TripAssistantService._build_system_prompt)."""
-        return {"place_id": self.place_id, "title": self.title, "content": self.content}
+        result = {"place_id": self.place_id, "title": self.title, "content": self.content}
+        if self.metadata.get("sources"):
+            result["sources"] = self.metadata["sources"]
+        return result
 
 
 class PlaceKnowledgeRetriever(ABC):
