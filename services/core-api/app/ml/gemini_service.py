@@ -20,7 +20,7 @@ import logging
 import time
 from typing import List, Dict, Optional
 
-import requests as _requests
+from app.core import http_pool as _requests
 from app.ml.request_budget import remaining_timeout, retry_wait
 
 logger = logging.getLogger(__name__)
@@ -253,9 +253,14 @@ class GeminiService:
         # generate_travel_tips) bunu hiç GEÇMİYOR, geriye dönük UYUMLU.
         if system_instruction:
             body["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+        from app.ml.provider_usage import REQUESTS, record_gemini_usage
+        operation = ("assistant" if response_schema is _ASSISTANT_SCHEMA else
+                     "locations" if response_schema is _LOCATIONS_SCHEMA else
+                     "tips" if response_schema is _TRAVEL_TIPS_SCHEMA else "other")
         last_exc = None
         for attempt in range(max_retries):
             try:
+                REQUESTS.labels("gemini", operation).inc()
                 resp = _requests.post(
                     url, json=body, timeout=remaining_timeout(timeout),
                     headers={"x-goog-api-key": self.api_key},
@@ -269,6 +274,7 @@ class GeminiService:
                     continue
                 resp.raise_for_status()
                 data = resp.json()
+                record_gemini_usage(self.model, operation, data)
                 return data["candidates"][0]["content"]["parts"][0]["text"]
             except (_requests.exceptions.Timeout, _requests.exceptions.ConnectionError) as e:
                 last_exc = e

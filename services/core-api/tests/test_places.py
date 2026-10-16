@@ -60,13 +60,15 @@ def test_save_results_populates_library(client, bff_headers, registered_user):
     """Video tamamlanınca kütüphane otomatik dolmalı — backfill'e gerek kalmadan."""
     uid = registered_user["user_id"]
     vid = _make_video(uid)
-    _save_results(vid, [_loc("Kaputaş Plajı", 36.1500, 29.4500)])
+    import uuid
+    place_name = f"Kaputaş Plajı {uuid.uuid4().hex}"
+    _save_results(vid, [_loc(place_name, 36.1500, 29.4500)])
 
     resp = client.get("/internal/places", headers=bff_headers)
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 1
-    assert data["places"][0]["name"] == "Kaputaş Plajı"
+    assert data["places"][0]["name"] == place_name
     assert data["places"][0]["save_count"] == 1
 
 

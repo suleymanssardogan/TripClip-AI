@@ -23,7 +23,7 @@ import os
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
-import requests
+from app.core import http_pool as requests
 
 logger = logging.getLogger(__name__)
 

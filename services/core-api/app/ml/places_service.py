@@ -1,4 +1,4 @@
-import requests
+from app.core import http_pool as requests
 from difflib import SequenceMatcher
 from typing import List, Dict, Optional, Tuple
 from math import radians, sin, cos, sqrt, atan2

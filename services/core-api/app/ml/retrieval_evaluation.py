@@ -3,6 +3,7 @@ import math
 import time
 import unicodedata
 from collections import Counter
+from app.ml.benchmark_evaluation import validate_retrieval
 
 
 def _ngrams(text):
@@ -23,12 +24,17 @@ def lexical_scores(query, texts):
 
 
 def evaluate(dataset, score_query, k=3, threshold=0):
+    validate_retrieval(dataset)
+    if type(k) is not int or k < 1 or not math.isfinite(threshold):
+        raise ValueError("Invalid k or threshold")
     ids = [d["id"] for d in dataset["documents"]]
     details = []
     for row in dataset["queries"]:
         start = time.perf_counter()
-        scores = score_query(row["text"])
-        ranking = sorted(zip(ids, scores), key=lambda p: (-p[1], p[0]))
+        scores = list(score_query(row["text"]))
+        if len(scores) != len(ids) or any(not math.isfinite(v) for v in scores):
+            raise ValueError("Scores must be finite and cover every document")
+        ranking = sorted(zip(ids, scores), key=lambda p: (-p[1], str(p[0])))
         ranked = [pid for pid, score in ranking if score >= threshold][:k]
         gold = set(row["relevant_ids"])
         hits = len(gold.intersection(ranked))

@@ -2,6 +2,7 @@ import argparse
 import json
 from pathlib import Path
 from app.ml.retrieval_evaluation import evaluate, lexical_scores
+from app.ml.benchmark_evaluation import dataset_identity, validate_retrieval
 
 
 def main():
@@ -14,6 +15,8 @@ def main():
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     data = json.loads(args.dataset.read_text())
+    identity = dataset_identity(data)
+    validate_retrieval(data)
     texts = [", ".join(p for p in (d["name"], d.get("city"), d.get("category")) if p)
              + (". " + d["content"] if d.get("content") else "") for d in data["documents"]]
     if args.backend == "embedding":
@@ -24,7 +27,7 @@ def main():
     else:
         score = lambda q: lexical_scores(q, texts)
     report = {"backend": args.backend, "model": args.model if args.backend == "embedding" else None,
-              "synthetic_dataset": data.get("synthetic", False),
+              **identity, "evaluation_scope": "offline_retrieval",
               **evaluate(data, score, args.k, args.threshold)}
     rendered = json.dumps(report, ensure_ascii=False, indent=2)
     if args.output:

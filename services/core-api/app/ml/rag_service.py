@@ -1,6 +1,6 @@
 import json
 import os
-import requests
+from app.core import http_pool as requests
 import time
 from typing import List, Dict, Optional
 import logging

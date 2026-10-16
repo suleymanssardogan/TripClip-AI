@@ -72,7 +72,7 @@ KVKK teknik kontrolleri, ham dosya saklama/imha işleri ve üretimde sağlayıc�
 
 ## Ana video analizi için kalıcı iş akışı
 
-Dosya yükleme ve URL paylaşımı `SqlVideoRepository.create` içinde video ile `video_analysis` işini aynı SQL commit'inde oluşturur. URL ve kaynak adı videoda tutulur; broker mesajı yalnızca iş ID'sini taşır. Başarılı analizde URL temizlenir. API başarılı kayıt ardından gönderimi arka planda tetikler; broker arızasında video silinmez. Mevcut 15 saniyelik dispatcher gönderimi tekrar dener; API yeniden açıldığında da pending işler okunur.
+Dosya yükleme ve URL paylaşımı `SqlVideoRepository.create` içinde video ile `video_analysis` işini aynı SQL commit'inde oluşturur. URL ve kaynak adı videoda tutulur; broker mesajı yalnızca iş ID'sini taşır. Başarılı analizde URL temizlenir. API yalnızca video ve iş kaydını oluşturur; broker arızasında video silinmez. Bağımsız maintenance servisi varsayılan 5 saniyelik aralıkla pending işleri gönderir. API kapalıyken de gönderim sürer.
 
 Ana işler `durable_analysis_task` üzerinden çalışır: 720/780 saniye soft/hard süre, 900 saniye SQL sahiplik süresi, en fazla sekiz deneme ve 30–3600 saniye artan bekleme. Worker kaybında broker'ın sınırsız anında yeniden teslimi yerine SQL sahiplik süresinin dolmasıyla yeniden gönderilir. Son denemede worker kaybı da SQL video durumuna `failed` olarak yansıtılır. Eski `process_video_task` ve `process_url_task` mesajları desteklenir ve aynı video kilidini kullanır.
 
@@ -85,3 +85,21 @@ Doğrulama: video/outbox rollback, broker arızası ve tekrar yayınlama, URL gi
 ## Gerçek altyapı test paketi
 
 PostgreSQL/Redis/Celery/Qdrant için izole Compose test ortamı ve CI işi eklendi. Senaryolar, sentetik AI sınırı ve çalıştırma talimatları: [integration-tests.md](integration-tests.md). Test paketinin oluşturulması gerçek arıza deneylerinin geçtiği anlamına gelmez; sonuçlar CI JUnit raporundan doğrulanmalıdır.
+
+## Pipeline aşamaları ve ölçüm
+
+`core/services/pipeline` altında medya hazırlama, paralel inference, OCR/konum doğrulama ve sonuç/fallback sözleşmesi ayrıldı. Mevcut `VideoProcessingService` çağrı arayüzü korunur. Ana dosya 1472 satırdan 818 satıra indirildi; sonraki aşamalar aynı sınırlar üzerinden ayrılabilir. Bu değişiklik thread'leri ayrı işletim sistemi süreçlerine dönüştürmez.
+
+Paralel aşamalar kendi fonksiyon çalışma sürelerini ölçer. Bekleme deadline'ı submit anından hesaplanır; önceki aşamayı beklemek sonraki aşamaya yeni bir tam timeout vermez. Geç biten sonuç deadline sonunda fallback kabul edilir. ThreadPool kapanışı çalışan thread'leri bekleyebilir; Celery hard limit dış sınır olarak kalır.
+
+`video_analysis_stage_seconds` ve `video_analysis_stage_runs_total` Prometheus metrikleri aşama/outcome kırılımındadır. Kullanıcı, dosya, konum veya soru metni label yapılmaz. Analiz sonucundaki `degradation.stages` başarılı/fallback aşama ve sürelerini saklar; medya aşamaları ayrıca metriklerle izlenir.
+
+Gemini'de her gerçek HTTP denemesi `ai_provider_requests_total`, sağlayıcının bildirdiği input/output/cached/thinking tokenları `ai_provider_tokens_total` ile izlenir. Cache hit yeni HTTP tüketimi sayılmaz. `AI_PRICING_JSON` tam model adına göre USD/milyon-token `input`, `output`, gerektiğinde `cached_input` fiyatı alır. Geçerli fiyat ve token bilgisi varsa tahmin `ai_provider_estimated_cost_usd_total` metriğine eklenir. Eksik veri/fiyat `ai_provider_unpriced_responses_total` ile görünür; sıfır maliyet varsayılmaz. Tahmin fatura, ücretsiz kota veya yerel Ollama sunucu maliyeti değildir. Bu çalışma gerçek fiyat veya gerçek video doğruluk benchmark'ı çalıştırmaz.
+
+## Offline gerçek veri değerlendirme altyapısı
+
+RAG evaluator artık eksik/tekrarlı kimlikleri, gold dışında belge referanslarını, eksik veya sonlu olmayan skorları reddeder. Veri kümesi sentetik/gerçek ayrımını açık belirtir; gerçek korpusta inceleme, kullanım izni ve anonimleştirme beyanı gerekir. Video evaluator kaydedilmiş tahminleri gold yer kimlikleriyle karşılaştırır; precision/recall/F1, tam eşleşme ve yanlış pozitif/negatif üretir. Dataset/tahmin hashleri tekrar üretilebilirlik sağlar. Format ve kapsam: [benchmark-evaluation.md](benchmark-evaluation.md). Gerçek korpus henüz sağlanmadığından gerçek doğruluk benchmark'ı tamamlanmış değildir.
+
+## Liste/API ve HTTP bağlantı yönetimi
+
+Kullanıcı video/gezi listelerinde SQL sayfalama, istemcide sonraki sayfa yükleme, ortak sayfa metadata sözleşmesi ve BFF/provider HTTP havuzları eklendi. Kapsam ve sınırlar: [api-pagination-and-pooling.md](api-pagination-and-pooling.md).
