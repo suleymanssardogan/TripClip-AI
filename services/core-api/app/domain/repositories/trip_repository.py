@@ -32,9 +32,12 @@ class AbstractTripRepository(ABC):
         ...
 
     @abstractmethod
-    def list_trips(self, user_id: int) -> List[Dict[str, Any]]:
-        """Kullanıcının sahip olduğu VE collaborator olarak eklendiği tüm trip'ler."""
+    def list_trips(self, user_id: int, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
+        """Kullanıcının sahip olduğu VE collaborator olduğu gezilerin istenen sayfası."""
         ...
+
+    def count_trips(self, user_id: int) -> int:
+        raise NotImplementedError
 
     @abstractmethod
     def update_stop_order(self, trip_id: int, user_id: int, order: List[List[int]]) -> str:

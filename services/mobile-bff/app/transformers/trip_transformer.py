@@ -42,4 +42,5 @@ def to_mobile_trip_summary(raw: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def to_mobile_trip_list(raw: Dict[str, Any]) -> Dict[str, Any]:
-    return {"trips": [to_mobile_trip_summary(t) for t in raw.get("trips", [])]}
+    return {**{k: raw[k] for k in ("total", "limit", "offset", "has_more") if k in raw},
+            "trips": [to_mobile_trip_summary(t) for t in raw.get("trips", [])]}

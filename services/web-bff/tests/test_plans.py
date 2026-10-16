@@ -181,3 +181,23 @@ def test_update_plan_order_invalid_payload(client, auth_headers):
         resp = client.patch("/api/web/plans/1/order", json={}, headers=auth_headers)
     assert resp.status_code == 422
     mock_patch.assert_not_awaited()
+
+
+import pytest
+
+
+@pytest.mark.parametrize('suffix', ['', '/analyze', '/editor', '/share'])
+def test_private_plan_views_forward_cookie_subject(client, auth_headers, mock_core_api, make_response, suffix):
+    token = auth_headers['Authorization'].removeprefix('Bearer ')
+    client.cookies.set('tripclip_access', token)
+    mock_core_api.get.return_value = make_response(200, {'id': 48, 'ai_results': {}})
+    response = client.get(f'/api/web/plans/48{suffix}')
+    assert response.status_code == 200
+    assert mock_core_api.get.call_args.kwargs['headers'] == {'x-user-id': '1'}
+
+
+def test_anonymous_detail_does_not_invent_owner(client, mock_core_api, make_response):
+    mock_core_api.get.return_value = make_response(403, {'error': {'code': 'PERMISSION_DENIED', 'message': 'Private'}})
+    response = client.get('/api/web/plans/48')
+    assert response.status_code == 403
+    assert mock_core_api.get.call_args.kwargs['headers'] == {}

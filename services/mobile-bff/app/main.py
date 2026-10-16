@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request
+from app.core.internal_client import client_lifespan
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
@@ -66,6 +67,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(
+    lifespan=client_lifespan,
     title="TripClip AI - Mobile BFF",
     description="Backend for Frontend - iOS",
     version="0.1.0"

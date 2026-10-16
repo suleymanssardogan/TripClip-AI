@@ -104,6 +104,10 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<PlatformStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pageError, setPageError] = useState(false);
   const [email, setEmail] = useState("");
   const [deleting, setDeleting] = useState(false);
   const username = email.split("@")[0];
@@ -116,6 +120,8 @@ export default function DashboardPage() {
         setTimeout(() => {
           setEmail(session.email);
           setPlans(up.plans);
+          setNextOffset(up.plans.length);
+          setHasMore(up.has_more ?? up.plans.length < up.total);
           setStats(st);
           setLoading(false);
         }, 0);
@@ -128,6 +134,28 @@ export default function DashboardPage() {
         }, 0);
       });
   }, [router]);
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    setPageError(false);
+    try {
+      const session = await getSession();
+      if (!session) { router.push("/login"); return; }
+      const res = await getUserPlans(session.user_id, 20, nextOffset);
+      setPlans(current => {
+        const ids = new Set(current.map(item => item.id));
+        return [...current, ...res.plans.filter(item => !ids.has(item.id))];
+      });
+      const next = nextOffset + res.plans.length;
+      setNextOffset(next);
+      setHasMore(res.plans.length > 0 && (res.has_more ?? next < (res.total ?? next)));
+    } catch {
+      setPageError(true);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   function retry() {
     setLoading(true);
@@ -248,6 +276,8 @@ export default function DashboardPage() {
               ))}
             </div>
           )}
+        {pageError && <p role="alert" className="mt-4 text-sm text-destructive">Yükleme başarısız. Tekrar deneyebilirsin.</p>}
+        {hasMore && <div className="mt-6 flex justify-center"><Button onClick={loadMore} disabled={loadingMore}>{loadingMore ? "Yükleniyor…" : "Daha fazla yükle"}</Button></div>}
         </section>
 
       </div>

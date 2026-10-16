@@ -1,6 +1,7 @@
 """
 Trip DTO'ları — API request/response şemaları.
 """
+from app.application.dto.pagination import PageResponse
 from pydantic import BaseModel
 from typing import Optional, List
 
@@ -54,5 +55,5 @@ class TripSummaryResponse(BaseModel):
     role: str
 
 
-class TripListResponse(BaseModel):
+class TripListResponse(PageResponse):
     trips: List[TripSummaryResponse]

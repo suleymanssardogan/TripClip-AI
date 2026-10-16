@@ -15,7 +15,7 @@ tam bir Trip Builder web modülü değil).
 yanıtı olduğu gibi iletiliyor, `trip_optimization.py`'nin zaten yaptığı gibi.
 Hiçbir iş mantığı YOK.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 import os
 import uuid
 
@@ -29,6 +29,8 @@ CORE_API_URL = os.getenv("CORE_API_URL", "http://core-api:8000")
 
 @router.get("")
 async def list_trips(
+    limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0),
     user_id: int = Depends(get_current_user_id),
 ):
     """Kullanıcının sahibi olduğu VE collaborator olduğu tüm trip'ler
@@ -38,6 +40,7 @@ async def list_trips(
         async with internal_client(15.0) as client:
             resp = await client.get(
                 f"{CORE_API_URL}/internal/trips",
+                params={"limit": limit, "offset": offset},
                 headers={"x-user-id": str(user_id)},
             )
         if resp.status_code >= 400:

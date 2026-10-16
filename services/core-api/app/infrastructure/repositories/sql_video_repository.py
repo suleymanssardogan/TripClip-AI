@@ -41,13 +41,17 @@ class SqlVideoRepository(AbstractVideoRepository):
     def get_by_id(self, video_id: int) -> Optional[Video]:
         return self._db.query(Video).filter(Video.id == video_id).first()
 
-    def get_by_user(self, user_id: int) -> List[Video]:
+    def get_by_user(self, user_id: int, limit: int = 20, offset: int = 0) -> List[Video]:
         return (
             self._db.query(Video)
             .filter(Video.user_id == user_id)
-            .order_by(Video.created_at.desc())
+            .order_by(Video.created_at.desc(), Video.id.desc())
+            .offset(offset).limit(max(1, min(limit, 50)))
             .all()
         )
+
+    def count_by_user(self, user_id: int) -> int:
+        return self._db.query(func.count(Video.id)).filter(Video.user_id == user_id).scalar()
 
     # Public feed'de tek bir istekte ne kadar veri döneceğimizin üst sınırı —
     # istemci limit=999999 gibi bir değer gönderse bile amplification'ı önler.
@@ -89,14 +93,14 @@ class SqlVideoRepository(AbstractVideoRepository):
             # SQL'de yapılır — tüm tamamlanan videoları belleğe yüklemeden.
             total = base_query.with_entities(func.count(Video.id)).scalar()
             videos = (
-                base_query.order_by(Video.created_at.desc())
+                base_query.order_by(Video.created_at.desc(), Video.id.desc())
                 .offset(offset).limit(limit)
                 .all()
             )
             return {"plans": [self._to_plan_dict(v) for v in videos], "total": total}
 
         candidates = (
-            base_query.order_by(Video.created_at.desc())
+            base_query.order_by(Video.created_at.desc(), Video.id.desc())
             .limit(self._CITY_FILTER_SCAN_CAP)
             .all()
         )

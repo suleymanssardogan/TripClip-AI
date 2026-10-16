@@ -3,7 +3,7 @@ Presentation katmanı — Video route handler'ları.
 Sadece: input al → service çağır → response döndür.
 DB sorguları, ML pipeline, json dönüşümleri burada YOK.
 """
-from fastapi import APIRouter, UploadFile, File, Depends, Header, Request, Query, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Depends, Header, Request, Query
 from fastapi.responses import JSONResponse
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, HttpUrl, field_validator
@@ -80,7 +80,6 @@ def _enforce_daily_quota(user_id: int) -> None:
 @limiter.limit("10/minute")
 async def process_video(
     request: Request,
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     service: VideoService = Depends(get_video_service),
     x_user_id: Optional[int] = Header(default=None),
@@ -115,18 +114,9 @@ async def process_video(
         user_id=x_user_id,
     )
 
-    # The job is already committed with the video; publication can be retried.
-    background_tasks.add_task(_dispatch_analysis_work)
+    # The independent maintenance service publishes the committed SQL job.
 
     return service.build_upload_response(video_id, file.filename)
-
-
-def _dispatch_analysis_work() -> None:
-    from app.application.services.deferred_work import dispatch_pending_work
-    try:
-        dispatch_pending_work()
-    except Exception as exc:
-        logger.warning("Analysis dispatch deferred: %s", type(exc).__name__)
 
 
 @router.get("/{video_id}/progress", response_model=ProgressResponse)
@@ -155,9 +145,11 @@ def get_public_plans(
 @router.get("/user/{user_id}", response_model=PlanListResponse)
 def get_user_videos(
     user_id: int,
+    limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0),
     service: VideoService = Depends(get_video_service),
 ):
-    return service.get_user_videos(user_id)
+    return service.get_user_videos(user_id, limit=limit, offset=offset)
 
 
 @router.get("/{video_id}", response_model=VideoDetailResponse)
@@ -259,7 +251,6 @@ class URLQueueRequest(BaseModel):
 @limiter.limit("20/minute")
 def queue_url(
     request: Request,
-    background_tasks: BackgroundTasks,
     body: URLQueueRequest,
     service: VideoService = Depends(get_video_service),
     x_user_id: Optional[int] = Header(default=None),
@@ -295,7 +286,6 @@ def queue_url(
         source_platform=body.source,
     )
 
-    background_tasks.add_task(_dispatch_analysis_work)
 
     return {
         "id":      video_id,

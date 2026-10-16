@@ -63,6 +63,10 @@ export default function TripsPage() {
   const [trips, setTrips] = useState<TripSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState(0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pageError, setPageError] = useState(false);
 
   function load() {
     setLoading(true);
@@ -70,6 +74,8 @@ export default function TripsPage() {
     getTrips()
       .then((res) => {
         setTrips(res.trips);
+        setNextOffset(res.trips.length);
+        setHasMore(res.has_more ?? res.trips.length < (res.total ?? res.trips.length));
         setLoading(false);
       })
       .catch((err) => {
@@ -77,6 +83,26 @@ export default function TripsPage() {
         setError(true);
         setLoading(false);
       });
+  }
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    setPageError(false);
+    try {
+      const res = await getTrips(20, nextOffset);
+      setTrips(current => {
+        const ids = new Set(current.map(item => item.id));
+        return [...current, ...res.trips.filter(item => !ids.has(item.id))];
+      });
+      const next = nextOffset + res.trips.length;
+      setNextOffset(next);
+      setHasMore(res.trips.length > 0 && (res.has_more ?? next < (res.total ?? next)));
+    } catch {
+      setPageError(true);
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   useEffect(() => {
@@ -138,6 +164,8 @@ export default function TripsPage() {
             ))}
           </div>
         )}
+        {pageError && <p role="alert" className="mt-4 text-sm text-destructive">Yükleme başarısız. Tekrar deneyebilirsin.</p>}
+        {hasMore && <div className="mt-6 flex justify-center"><Button onClick={loadMore} disabled={loadingMore}>{loadingMore ? "Yükleniyor…" : "Daha fazla yükle"}</Button></div>}
       </div>
     </div>
   );

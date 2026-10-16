@@ -42,9 +42,11 @@ class TripService:
             raise TripNotFoundException(trip_id)
         return TripDetailResponse(**trip)
 
-    def list_trips(self, user_id: int) -> TripListResponse:
-        trips = self._repo.list_trips(user_id)
-        return TripListResponse(trips=[TripSummaryResponse(**t) for t in trips])
+    def list_trips(self, user_id: int, limit: int = 20, offset: int = 0) -> TripListResponse:
+        trips = self._repo.list_trips(user_id, limit=limit, offset=offset)
+        total = self._repo.count_trips(user_id)
+        return TripListResponse(trips=[TripSummaryResponse(**t) for t in trips], total=total,
+                                limit=limit, offset=offset, has_more=offset + len(trips) < total)
 
     def update_stop_order(self, trip_id: int, user_id: int, order: List[List[int]]) -> None:
         """

@@ -3,7 +3,7 @@ Mobile BFF — Trip route handler'ları.
 Transformer katmanı iOS'a özgü veri şekillendirmeyi üstlenir.
 Tüm Core API hataları mobile_error_wrapper ile iOS dostu mesajlara çevrilir.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 import os
 import uuid
@@ -43,6 +43,8 @@ async def create_trip(
 
 @router.get("")
 async def list_trips(
+    limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0),
     user_id: int = Depends(get_current_user_id),
 ):
     rid = str(uuid.uuid4())[:8]
@@ -50,6 +52,7 @@ async def list_trips(
         async with internal_client(15.0) as client:
             resp = await client.get(
                 f"{CORE_API_URL}/internal/trips",
+                params={"limit": limit, "offset": offset},
                 headers={"x-user-id": str(user_id)},
             )
         if resp.status_code >= 400:

@@ -3,7 +3,7 @@ Mobile BFF — Video route handler'ları.
 Transformer katmanı iOS'a özgü veri şekillendirmeyi üstlenir.
 Tüm Core API hataları mobile_error_wrapper ile iOS dostu mesajlara çevrilir.
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Depends, Query
 from pydantic import BaseModel
 import httpx
 from app.core.internal_client import internal_client
@@ -173,18 +173,22 @@ async def queue_url(
 
 
 @router.get("")
-async def get_user_videos(user_id: int = Depends(get_current_user_id)):
-    """Kullanıcının tüm videoları — iOS HomeView kart listesi."""
+async def get_user_videos(user_id: int = Depends(get_current_user_id),
+                          limit: int = Query(20, ge=1, le=50),
+                          offset: int = Query(0, ge=0)):
+    """Kullanıcının video sayfası — iOS HomeView kart listesi."""
     rid = str(uuid.uuid4())[:8]
     async with mobile_error_wrapper(request_id=rid):
         async with internal_client(15.0) as client:
-            resp = await client.get(f"{CORE_API_URL}/internal/videos/user/{user_id}")
+            resp = await client.get(f"{CORE_API_URL}/internal/videos/user/{user_id}",
+                                    params={"limit": limit, "offset": offset})
         if resp.status_code >= 400:
-            # Liste boşluğu kabul edilebilir — hata yerine boş döndür
-            return {"plans": [], "total": 0}
+            raise_from_response(resp, request_id=rid)
 
     data = resp.json()
     return {
         "plans": [to_mobile_summary(p) for p in data.get("plans", [])],
         "total": data.get("total", 0),
+        "limit": limit, "offset": offset,
+        "has_more": data.get("has_more", offset + len(data.get("plans", [])) < data.get("total", 0)),
     }

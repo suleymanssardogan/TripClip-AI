@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { getSession, getTrips, login } from "./api";
+import { getSession, getTrips, login, getPlans, getUserPlans } from "./api";
 
 afterEach(() => {
   localStorage.clear();
@@ -19,7 +19,7 @@ describe("cookie-backed web session", () => {
         refreshed = true;
         return new Response(JSON.stringify({ user_id: 1, email: "u@test.com" }), { status: 200 });
       }
-      if (url.endsWith("/trips")) {
+      if (new URL(url, "http://localhost").pathname.endsWith("/trips")) {
         return new Response(JSON.stringify(refreshed ? { trips: [] } : { detail: "expired" }), {
           status: refreshed ? 200 : 401,
         });
@@ -66,5 +66,33 @@ describe("cookie-backed web session", () => {
     expect(await login("u@test.com", "password")).toEqual({ user_id: 1, email: "u@test.com" });
     expect(localStorage.getItem("token")).toBeNull();
     expect(localStorage.getItem("refresh_token")).toBeNull();
+  });
+});
+
+
+describe("plan card response normalization", () => {
+  it("shows the BFF location count in both public and account lists", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      plans: [{ id: 48, filename: "antalya.mp4", status: "completed", locationsCount: 17,
+        topLocation: "Antalya", ocrPreview: ["Hidayet Koyu"], processingTime: 25.85 }],
+      total: 1, has_more: false,
+    }))));
+    for (const page of [await getPlans(), await getUserPlans(17)]) {
+      expect(page.plans[0].locations_count).toBe(17);
+      expect(page.plans[0].top_location).toBe("Antalya");
+      expect(page.plans[0].ocr_preview).toEqual(["Hidayet Koyu"]);
+      expect(page.plans[0].processing_time).toBe(25.85);
+      expect(page.total).toBe(1);
+    }
+  });
+
+  it("preserves summaries supplied in the original snake_case format", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ plans: [{
+      id: 1, locations_count: 4, top_location: "Kaş", processing_time: 0, ocr_preview: [],
+    }], total: 1, has_more: true }))));
+    const page = await getUserPlans(17);
+    expect(page.plans[0].locations_count).toBe(4);
+    expect(page.plans[0].processing_time).toBe(0);
+    expect(page.has_more).toBe(true);
   });
 });

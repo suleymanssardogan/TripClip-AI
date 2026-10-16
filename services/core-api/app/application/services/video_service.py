@@ -166,10 +166,12 @@ class VideoService:
             status="completed",
             **{k: v for k, v in p.items()}
         ) for p in data["plans"]]
-        return PlanListResponse(plans=plans, total=data["total"])
+        return PlanListResponse(plans=plans, total=data["total"], limit=limit, offset=offset,
+                                has_more=offset + len(plans) < data["total"])
 
-    def get_user_videos(self, user_id: int) -> PlanListResponse:
-        videos = self._repo.get_by_user(user_id)
+    def get_user_videos(self, user_id: int, limit: int = 20, offset: int = 0) -> PlanListResponse:
+        videos = self._repo.get_by_user(user_id, limit=limit, offset=offset)
+        total = self._repo.count_by_user(user_id)
 
         def _summary(v) -> PlanSummary:
             # Kullanıcının düzenlediği hâli — ham AI listesi değil. Aksi hâlde
@@ -188,7 +190,8 @@ class VideoService:
             )
 
         plans = [_summary(v) for v in videos]
-        return PlanListResponse(plans=plans, total=len(plans))
+        return PlanListResponse(plans=plans, total=total, limit=limit, offset=offset,
+                                has_more=offset + len(plans) < total)
 
     def get_video_detail(self, video_id: int, requesting_user_id: Optional[int] = None) -> VideoDetailResponse:
         video = self._repo.get_by_id(video_id)

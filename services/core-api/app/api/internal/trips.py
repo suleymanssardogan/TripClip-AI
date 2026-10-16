@@ -2,7 +2,7 @@
 Presentation katmanı — Trip route handler'ları.
 Sadece: input al → service çağır → response döndür.
 """
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -45,11 +45,13 @@ def create_trip(
 
 @router.get("", response_model=TripListResponse)
 def list_trips(
+    limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0),
     service: TripService = Depends(get_trip_service),
     x_user_id: Optional[int] = Header(default=None),
 ):
     user_id = _require_user(x_user_id)
-    return service.list_trips(user_id)
+    return service.list_trips(user_id, limit=limit, offset=offset)
 
 
 @router.get("/{trip_id}", response_model=TripDetailResponse)

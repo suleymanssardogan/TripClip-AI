@@ -135,29 +135,20 @@ class SqlTripRepository(AbstractTripRepository):
             "itinerary_applied_at": trip.itinerary_applied_at.isoformat() if trip.itinerary_applied_at else None,
         }
 
-    def list_trips(self, user_id: int) -> List[Dict[str, Any]]:
-        owned = self._db.query(Trip).filter(Trip.user_id == user_id).all()
+    def _list_query(self, user_id: int):
+        membership = self._db.query(TripCollaborator.trip_id).filter(
+            TripCollaborator.trip_id == Trip.id, TripCollaborator.user_id == user_id).exists()
+        return self._db.query(Trip).filter((Trip.user_id == user_id) | membership)
 
-        collab_rows = (
+    def count_trips(self, user_id: int) -> int:
+        return self._list_query(user_id).count()
+
+    def list_trips(self, user_id: int, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
+        trips = self._list_query(user_id).order_by(Trip.created_at.desc(), Trip.id.desc()).offset(offset).limit(max(1, min(limit, 50))).all()
+        role_by_collab_trip = {trip_id: role.value for trip_id, role in (
             self._db.query(TripCollaborator.trip_id, TripCollaborator.role)
-            .filter(TripCollaborator.user_id == user_id)
-            .all()
-        )
-        role_by_collab_trip = {trip_id: role.value for trip_id, role in collab_rows}
-        collab_trips = (
-            self._db.query(Trip).filter(Trip.id.in_(role_by_collab_trip.keys())).all()
-            if role_by_collab_trip else []
-        )
-
-        # Sahiplik ve collaborator kümeleri tasarım gereği ayrık olmalı (bir
-        # kullanıcı kendi trip'ine collaborator olarak eklenemez — bkz.
-        # SqlSharingRepository.accept_by_token), ama dict ile birleştirmek
-        # ucuz bir güvenlik ağı: ileride bir hata bu varsayımı bozarsa bile
-        # aynı trip iki kez listelenmez.
-        by_id: Dict[int, Any] = {t.id: t for t in owned}
-        for t in collab_trips:
-            by_id.setdefault(t.id, t)
-        trips = sorted(by_id.values(), key=lambda t: t.created_at or datetime.min, reverse=True)
+            .filter(TripCollaborator.user_id == user_id,
+                    TripCollaborator.trip_id.in_([t.id for t in trips])).all())}
 
         counts: Dict[int, int] = {}
         if trips:

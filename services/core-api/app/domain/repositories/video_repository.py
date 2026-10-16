@@ -18,9 +18,12 @@ class AbstractVideoRepository(ABC):
         ...
 
     @abstractmethod
-    def get_by_user(self, user_id: int) -> List:
-        """Kullanıcıya ait tüm videoları getir."""
+    def get_by_user(self, user_id: int, limit: int = 20, offset: int = 0) -> List:
+        """Kullanıcıya ait videoların istenen sayfasını getir."""
         ...
+
+    def count_by_user(self, user_id: int) -> int:
+        raise NotImplementedError
 
     @abstractmethod
     def get_completed(self, city: Optional[str] = None, limit: int = 20, offset: int = 0) -> Dict[str, Any]:

@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query, Depends
 from pydantic import BaseModel
 import httpx
 from app.core.internal_client import internal_client
-from app.core.auth import get_current_user_id
+from app.core.auth import get_current_user_id, get_optional_user_id
 import os
 import uuid
 
@@ -26,8 +26,8 @@ CORE_API_URL = os.getenv("CORE_API_URL", "http://core-api:8000")
 @router.get("")
 async def get_plans(
     city: str | None = Query(None),
-    limit: int = Query(20, le=50),
-    offset: int = Query(0),
+    limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0),
 ):
     """Public feed — web kart formatında."""
     rid = str(uuid.uuid4())[:8]
@@ -45,6 +45,8 @@ async def get_plans(
     return {
         "plans": [to_web_card(p) for p in data.get("plans", [])],
         "total": data.get("total", 0),
+        "limit": limit, "offset": offset,
+        "has_more": data.get("has_more", offset + len(data.get("plans", [])) < data.get("total", 0)),
     }
 
 
@@ -62,7 +64,9 @@ async def get_stats():
 
 
 @router.get("/user/{user_id}")
-async def get_user_plans(user_id: int, current_user_id: int = Depends(get_current_user_id)):
+async def get_user_plans(user_id: int, current_user_id: int = Depends(get_current_user_id),
+                         limit: int = Query(20, ge=1, le=50),
+                         offset: int = Query(0, ge=0)):
     """
     Kullanıcıya ait planlar — dashboard formatında.
 
@@ -80,7 +84,9 @@ async def get_user_plans(user_id: int, current_user_id: int = Depends(get_curren
     rid = str(uuid.uuid4())[:8]
     async with web_error_wrapper(request_id=rid):
         async with internal_client(15.0) as client:
-            resp = await client.get(f"{CORE_API_URL}/internal/videos/user/{user_id}")
+            resp = await client.get(f"{CORE_API_URL}/internal/videos/user/{user_id}",
+                                    params={"limit": limit, "offset": offset},
+                                    headers={"x-user-id": str(current_user_id)})
         if resp.status_code >= 400:
             raise_from_response(resp, request_id=rid)
 
@@ -88,34 +94,36 @@ async def get_user_plans(user_id: int, current_user_id: int = Depends(get_curren
     return {
         "plans": [to_web_card(p) for p in data.get("plans", [])],
         "total": data.get("total", 0),
+        "limit": limit, "offset": offset,
+        "has_more": data.get("has_more", offset + len(data.get("plans", [])) < data.get("total", 0)),
     }
 
 
 @router.get("/{video_id}/analyze")
-async def get_plan_analyze(video_id: int):
+async def get_plan_analyze(video_id: int, user_id: int | None = Depends(get_optional_user_id)):
     """Analyze sayfası — lokasyon + RAG ipuçları + rota."""
-    data = await _fetch_video(video_id)
+    data = await _fetch_video(video_id, user_id)
     return to_analyze_view(data)
 
 
 @router.get("/{video_id}/editor")
-async def get_plan_editor(video_id: int):
+async def get_plan_editor(video_id: int, user_id: int | None = Depends(get_optional_user_id)):
     """Editor sayfası — gün bazlı timeline."""
-    data = await _fetch_video(video_id)
+    data = await _fetch_video(video_id, user_id)
     return to_editor_view(data)
 
 
 @router.get("/{video_id}/share")
-async def get_plan_share(video_id: int):
+async def get_plan_share(video_id: int, user_id: int | None = Depends(get_optional_user_id)):
     """Share sayfası — hero istatistikleri + harita."""
-    data = await _fetch_video(video_id)
+    data = await _fetch_video(video_id, user_id)
     return to_share_view(data)
 
 
 @router.get("/{video_id}")
-async def get_plan(video_id: int):
+async def get_plan(video_id: int, user_id: int | None = Depends(get_optional_user_id)):
     """Ham video detayı (analyze/editor/share özel endpoint'leri yetersiz kalırsa)."""
-    return await _fetch_video(video_id)
+    return await _fetch_video(video_id, user_id)
 
 
 class StopOrderRequest(BaseModel):
@@ -144,11 +152,14 @@ async def update_plan_order(
 
 # ── Yardımcı ──────────────────────────────────────────────────────────────────
 
-async def _fetch_video(video_id: int) -> dict:
+async def _fetch_video(video_id: int, user_id: int | None = None) -> dict:
     rid = str(uuid.uuid4())[:8]
     async with web_error_wrapper(request_id=rid):
         async with internal_client(15.0) as client:
-            resp = await client.get(f"{CORE_API_URL}/internal/videos/{video_id}")
+            resp = await client.get(
+                f"{CORE_API_URL}/internal/videos/{video_id}",
+                headers={"x-user-id": str(user_id)} if user_id is not None else {},
+            )
         if resp.status_code >= 400:
             raise_from_response(resp, request_id=rid)
     return resp.json()

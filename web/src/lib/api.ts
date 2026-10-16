@@ -335,12 +335,30 @@ export async function getVideoProgress(id: number): Promise<ProgressResponse> {
 
 // ─── Plans ─────────────────────────────────────────────────────────────────
 
+type PlanCardResponse = Omit<Plan, "locations_count" | "top_location" | "ocr_preview" | "processing_time"> & {
+  locations_count?: number; locationsCount?: number;
+  top_location?: string | null; topLocation?: string | null;
+  ocr_preview?: string[]; ocrPreview?: string[];
+  processing_time?: number | null; processingTime?: number | null;
+};
+
+function normalizePlanCard(raw: PlanCardResponse): Plan {
+  return {
+    ...raw,
+    locations_count: raw.locationsCount ?? raw.locations_count ?? 0,
+    top_location: raw.topLocation ?? raw.top_location ?? null,
+    ocr_preview: raw.ocrPreview ?? raw.ocr_preview ?? [],
+    processing_time: raw.processingTime ?? raw.processing_time ?? null,
+  };
+}
+
 export async function getPlans(params?: { city?: string; limit?: number; offset?: number }) {
   const q = new URLSearchParams();
   if (params?.city)   q.set("city",   params.city);
   if (params?.limit)  q.set("limit",  String(params.limit));
   if (params?.offset !== undefined) q.set("offset", String(params.offset));
-  return request<{ plans: Plan[]; total: number }>(`/plans?${q}`);
+  const page = await request<{ plans: PlanCardResponse[]; total: number }>(`/plans?${q}`);
+  return { ...page, plans: page.plans.map(normalizePlanCard) };
 }
 
 export async function getPlan(id: number) {
@@ -355,8 +373,9 @@ export async function updatePlanOrder(id: number, order: number[][]) {
   });
 }
 
-export async function getUserPlans(userId: number) {
-  return request<{ plans: Plan[]; total: number }>(`/plans/user/${userId}`);
+export async function getUserPlans(userId: number, limit = 20, offset = 0) {
+  const page = await request<{ plans: PlanCardResponse[]; total: number; has_more?: boolean }>(`/plans/user/${userId}?limit=${limit}&offset=${offset}`);
+  return { ...page, plans: page.plans.map(normalizePlanCard) };
 }
 
 export async function getStats() {
@@ -440,8 +459,8 @@ export interface TripDetail {
   itinerary_applied_at: string | null;
 }
 
-export async function getTrips() {
-  return request<{ trips: TripSummary[] }>("/trips");
+export async function getTrips(limit = 20, offset = 0) {
+  return request<{ trips: TripSummary[]; total?: number; has_more?: boolean }>(`/trips?limit=${limit}&offset=${offset}`);
 }
 
 export async function getTrip(id: number) {

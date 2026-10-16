@@ -63,4 +63,20 @@ describe("TripsPage", () => {
     await waitFor(() => expect(screen.getByText("Geziler yüklenemedi")).toBeInTheDocument());
     expect(screen.getByText("Tekrar Dene")).toBeInTheDocument();
   });
+  it("keeps loaded trips after a failed page and retries the same offset", async () => {
+    vi.mocked(api.getTrips)
+      .mockResolvedValueOnce({ trips: [trip({ id: 1 })], total: 2, has_more: true })
+      .mockRejectedValueOnce(new Error("page unavailable"))
+      .mockResolvedValueOnce({ trips: [trip({ id: 2, title: "İkinci Gezi" })], total: 2, has_more: false });
+    render(<TripsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "Daha fazla yükle" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Yükleme başarısız");
+    expect(screen.getByText("İstanbul Gezisi")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Daha fazla yükle" }));
+    expect(await screen.findByText("İkinci Gezi")).toBeInTheDocument();
+    expect(api.getTrips).toHaveBeenNthCalledWith(2, 20, 1);
+    expect(api.getTrips).toHaveBeenNthCalledWith(3, 20, 1);
+    expect(screen.queryByRole("button", { name: "Daha fazla yükle" })).not.toBeInTheDocument();
+  });
+
 });

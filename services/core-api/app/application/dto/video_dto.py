@@ -1,6 +1,7 @@
 """
 Video DTO'ları — API request/response şemaları.
 """
+from app.application.dto.pagination import PageResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 
@@ -37,9 +38,8 @@ class PlanSummary(BaseModel):
     processing_time: Optional[float]
 
 
-class PlanListResponse(BaseModel):
+class PlanListResponse(PageResponse):
     plans: List[PlanSummary]
-    total: int
 
 
 class StatsResponse(BaseModel):
