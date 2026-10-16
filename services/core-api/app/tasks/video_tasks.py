@@ -206,7 +206,6 @@ def _process_uploaded_analysis(self, video_id: int, video_path: str) -> dict:
 
         # Sonucu kaydettikten SONRA kuyruğa al — bu task başarısız olsa bile
         # video COMPLETED kalır, sadece ipuçları eksik olur.
-        _enqueue_travel_tips(video_id)
 
         return {"status": "completed", "video_id": video_id}
 
@@ -237,15 +236,6 @@ def _process_uploaded_analysis(self, video_id: int, video_path: str) -> dict:
 
     finally:
         db.close()
-
-
-def _enqueue_travel_tips(video_id: int) -> None:
-    """Nudge the durable dispatcher; its periodic loop recovers broker outages."""
-    try:
-        from app.application.services.deferred_work import dispatch_pending_work
-        dispatch_pending_work()
-    except Exception:
-        logger.warning("İpucu kuyruğuna gönderilemedi | video_id=%s", video_id, exc_info=True)
 
 
 def _existing_analysis_result(repo, video_id: int):
@@ -446,7 +436,6 @@ def _process_url_analysis(self, video_id: int, source_url: str, source: str = "u
         _notify_push(db, video_id, completed=True)
         _track_trip_created(db, video_id)
 
-        _enqueue_travel_tips(video_id)
 
         return {"status": "completed", "video_id": video_id}
 

@@ -19,101 +19,21 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import signal
-import threading
 import time
 import json as _json
 import re as _re
-from concurrent.futures import ThreadPoolExecutor, Future
-from dataclasses import dataclass, field
-from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from app.core.redis import set_progress, get_redis
+from app.core.services.pipeline.runtime import ServiceResult, _safe_run
+from app.core.services.pipeline.media import MediaStages, _FFmpegTimeout, _FFmpegTimeoutGuard
+from app.core.services.pipeline.locations import LocationStages
+from app.core.services.pipeline.ocr import OCRStages
+from app.core.services.pipeline.parallel import StageSpec, run_parallel
+from app.core.services.pipeline.telemetry import timed_stage
 
 logger = logging.getLogger(__name__)
-
-# ffmpeg.probe()/ffmpeg-python'ın .run() metotları subprocess'e bir timeout
-# PARAMETRESİ geçirmiyor — `--pool=solo` (bkz. CLAUDE.md worker komutu)
-# Celery'nin kendi `task_soft_time_limit`/`task_time_limit`'ini de
-# UYGULAMIYOR (tek process, sinyalle durdurulacak ayrı bir alt process yok).
-# Sonuç: bozuk/kesik bir video dosyası ffmpeg'i sonsuza dek asabiliyor ve
-# `--pool=solo` tek seferde tek görev işlediği için bu, TEK bir kötü video
-# için TÜM kullanıcıların işlem kuyruğunu kalıcı olarak kilitliyordu (M39
-# audit bulgusu). `_FFmpegTimeoutGuard` bu iki çağrıyı `SIGALRM` ile sınırlar.
-_FFMPEG_PROBE_TIMEOUT_SECONDS = 30
-_FFMPEG_EXTRACT_TIMEOUT_SECONDS = 180
-
-
-class _FFmpegTimeout(Exception):
-    """`_get_metadata`/`_extract_frames`'in ffmpeg subprocess çağrıları
-    zaman aşımına uğradığında fırlatılır."""
-
-
-class _FFmpegTimeoutGuard:
-    """`SIGALRM` tabanlı zaman aşımı — yalnızca ANA thread'de devreye girer
-    (bu metotların GERÇEKTE çağrıldığı yer, paralel AI aşamaları
-    BAŞLAMADAN önce; sinyal işleyicileri yalnızca ana thread'de kurulabilir).
-    Ana thread değilse sessizce hiçbir şey yapmaz — bu durumda ESKİ
-    (korumasız) davranışa düşülür, hata FIRLATILMAZ; bu koruma yalnızca
-    ek bir güvenlik ağıdır, davranış değişikliği için gereken bir ön koşul
-    DEĞİLDİR."""
-
-    def __init__(self, seconds: int, label: str):
-        self._seconds = seconds
-        self._label = label
-        self._active = threading.current_thread() is threading.main_thread()
-        self._previous_handler = None
-
-    def __enter__(self):
-        if not self._active:
-            return self
-
-        def _on_alarm(signum, frame):
-            raise _FFmpegTimeout(f"{self._label} {self._seconds}s içinde tamamlanmadı")
-
-        self._previous_handler = signal.signal(signal.SIGALRM, _on_alarm)
-        signal.alarm(self._seconds)
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self._active:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, self._previous_handler)
-        return False
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ServiceResult — Her AI servisinin çıktısını taşır
-# ─────────────────────────────────────────────────────────────────────────────
-
-@dataclass
-class ServiceResult:
-    """Bir AI servisinin sonucunu ve durumunu tutar."""
-    name:          str
-    data:          Any
-    success:       bool
-    fallback_used: bool = False
-    error:         Optional[str] = None
-    duration_s:    float = 0.0
-
-    @property
-    def status_icon(self) -> str:
-        if self.success and not self.fallback_used:
-            return "✅"
-        if self.fallback_used:
-            return "⚠️ "
-        return "❌"
-
-    def __str__(self) -> str:
-        dur = f"{self.duration_s:.1f}s"
-        if self.fallback_used:
-            return f"{self.status_icon} {self.name:<12} — FALLBACK ({self.error}) [{dur}]"
-        if self.success:
-            return f"{self.status_icon} {self.name:<12} — OK [{dur}]"
-        return f"{self.status_icon} {self.name:<12} — HATA: {self.error} [{dur}]"
-
 
 # ── Gemini lokasyon çıktısı için içerik-adresli cache ─────────────────────────
 #
@@ -189,54 +109,6 @@ def _gemini_cache_set(content_hash: Optional[str], extraction: Dict) -> None:
         logger.debug("Gemini cache yazılamadı: %s", exc)
 
 
-def _safe_run(
-    name: str,
-    fn: Callable,
-    fallback: Any,
-    *,
-    timeout: Optional[float] = None,
-    future: Optional[Future] = None,
-) -> ServiceResult:
-    """
-    Bir fonksiyonu veya Future'ı güvenli şekilde çalıştırır.
-
-    Hata durumunda:
-      - Exception loglanır
-      - fallback değer döner
-      - Pipeline durmaz
-
-    Args:
-        name:    Servis adı (log ve rapor için)
-        fn:      Çağrılacak fonksiyon (future=None ise)
-        fallback: Hata durumunda kullanılacak değer
-        timeout: future.result() için timeout (saniye)
-        future:  Zaten submit edilmiş ThreadPoolExecutor future'ı
-    """
-    t0 = time.perf_counter()
-    try:
-        if future is not None:
-            data = future.result(timeout=timeout)
-        else:
-            data = fn()
-
-        dur = time.perf_counter() - t0
-        return ServiceResult(name=name, data=data, success=True, duration_s=dur)
-
-    except TimeoutError:
-        dur = time.perf_counter() - t0
-        error = f"timeout ({timeout}s)"
-        logger.warning("⏰ %s zaman aşımı — fallback kullanılıyor", name)
-        return ServiceResult(name=name, data=fallback, success=False,
-                             fallback_used=True, error=error, duration_s=dur)
-
-    except Exception as exc:
-        dur = time.perf_counter() - t0
-        error = type(exc).__name__ + ": " + str(exc)[:120]
-        logger.warning("⚠️  %s başarısız — fallback kullanılıyor | %s", name, error)
-        return ServiceResult(name=name, data=fallback, success=False,
-                             fallback_used=True, error=error, duration_s=dur)
-
-
 def _log_degradation_report(results: List[ServiceResult], video_id: int) -> None:
     """İşlem sonunda hangi servislerin çalıştığını/düştüğünü loglar."""
     lines = [f"\n{'─'*55}", f"  Degradasyon Raporu — video_id={video_id}", f"{'─'*55}"]
@@ -256,7 +128,7 @@ def _log_degradation_report(results: List[ServiceResult], video_id: int) -> None
 # VideoProcessingService
 # ─────────────────────────────────────────────────────────────────────────────
 
-class VideoProcessingService:
+class VideoProcessingService(MediaStages, OCRStages, LocationStages):
     """
     Video işleme pipeline'ı.
 
@@ -392,7 +264,7 @@ class VideoProcessingService:
 
         # ── 1. Metadata ───────────────────────────────────────────────────────
         set_progress(video_id, "metadata", 5)
-        metadata = self._get_metadata(video_path)     # kritik — hata fırlatır
+        metadata = timed_stage("media_metadata", lambda: self._get_metadata(video_path))     # kritik — hata fırlatır
         logger.info("Metadata: %s", metadata)
 
         # ── 2. Frame extraction ──────────────────────────────────────────────
@@ -405,8 +277,8 @@ class VideoProcessingService:
             0.25
         )
         set_progress(video_id, "frames", 10)
-        frames    = self._extract_frames(video_path, frame_dir, fps=adaptive_fps)
-        thumbnail = self._create_thumbnail(frames[0] if frames else None)
+        frames    = timed_stage("media_frames", lambda: self._extract_frames(video_path, frame_dir, fps=adaptive_fps))
+        thumbnail = timed_stage("media_thumbnail", lambda: self._create_thumbnail(frames[0] if frames else None))
         t_frames  = time.perf_counter()
         logger.info("🖼  %d frame @ %.2f fps | %.1fs",
                     len(frames), adaptive_fps, t_frames - start_time)
@@ -439,21 +311,16 @@ class VideoProcessingService:
         # dışında, yakalanmadan) değil; future çalışırken (future.result() →
         # _safe_run'ın except'i tarafından) fırlatılmasını sağlar — tek bir
         # servisin başlatma hatası tüm pipeline'ı çökertmez.
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            f_yolo    = pool.submit(lambda: self.detector.detect_objects_in_frames(frames))
-            f_vision  = pool.submit(lambda: self.vision_detector.detect_landmarks_in_frames(frames[:5]))
-            f_ocr     = pool.submit(lambda: self.ocr.extract_text_from_frames(frames))
-            if run_whisper:
-                f_whisper = pool.submit(lambda: self.audio_processor.process_video_audio(video_path, video_id))
-
-            # Her future bağımsız — biri exception fırlatsa diğerleri toplanır
-            r_yolo    = _safe_run("YOLO",    None, fallback=[],   future=f_yolo,    timeout=180)
-            r_vision  = _safe_run("Vision",  None, fallback=[],   future=f_vision,  timeout=120)
-            r_ocr     = _safe_run("OCR",     None, fallback=[],   future=f_ocr,     timeout=180)
-            if run_whisper:
-                r_whisper = _safe_run("Whisper", None, fallback=None, future=f_whisper, timeout=300)
-            else:
-                r_whisper = ServiceResult("Whisper(skipped/gemini)", None, True)
+        specs = [
+            StageSpec("YOLO", lambda: self.detector.detect_objects_in_frames(frames), [], 180),
+            StageSpec("Vision", lambda: self.vision_detector.detect_landmarks_in_frames(frames[:5]), [], 120),
+            StageSpec("OCR", lambda: self.ocr.extract_text_from_frames(frames), [], 180),
+        ]
+        if run_whisper:
+            specs.append(StageSpec("Whisper", lambda: self.audio_processor.process_video_audio(video_path, video_id), None, 300))
+        results = run_parallel(specs)
+        r_yolo, r_vision, r_ocr = results[:3]
+        r_whisper = results[3] if run_whisper else ServiceResult("Whisper(skipped/gemini)", None, True)
 
         degradation_log.extend([r_yolo, r_vision, r_ocr, r_whisper])
 
@@ -623,6 +490,8 @@ class VideoProcessingService:
         # Aramalar mekanın kendi şehrine göre gruplanır: tek bir videoda birden
         # fazla şehir gezilebiliyor ve hepsini tek bir city_hint'e zorlamak
         # (eski davranış) ikinci şehirdeki mekanları yanlış yere çekiyordu.
+        # Empty extraction has no resolved region; it must still complete.
+        regions: Dict = {}
         if self._use_gemini and gemini_raw:
             by_city: Dict[str, List[str]] = {}
             for item in gemini_raw:
@@ -914,6 +783,9 @@ class VideoProcessingService:
             "successful":     len(degradation_log) - fallback_count,
             "fallback_used":  fallback_count,
             "failed_services": [r.name for r in degradation_log if r.fallback_used],
+            "stages": [{"name": r.name, "duration_s": round(r.duration_s, 4),
+                        "status": "fallback" if r.fallback_used else "success"}
+                       for r in degradation_log if "skipped" not in r.name],
         }
 
         return {
@@ -947,526 +819,3 @@ class VideoProcessingService:
     # ─────────────────────────────────────────────────────────────────────────
     # Yardımcı metodlar
     # ─────────────────────────────────────────────────────────────────────────
-
-    def _filter_ocr_pois(self, extracted_texts: List[str], video_id: int) -> List[str]:
-        """OCR metinlerinden POI'ları filtrele. OCR başarısızsa boş liste döner."""
-        if not extracted_texts:
-            return []
-
-        try:
-            return self._run_ocr_filter_pipeline(extracted_texts, video_id)
-        except Exception as e:
-            logger.warning("OCR POI filtresi başarısız — boş liste fallback | %s", e)
-            return []
-
-    def _enrich_ocr_pois(
-        self,
-        ocr_pois: List[str],
-        city_bbox: Optional[tuple],
-        degradation_log: List[ServiceResult],
-        city_hint: Optional[str] = None,
-    ) -> List[Dict]:
-        """OCR POI'larını geocoding ile zenginleştir."""
-        if not ocr_pois:
-            return []
-
-        geo_signals = self._geo_signal_set()
-
-        def _has_geo_signal(text: str) -> bool:
-            t_l = self._tr_lower(text)
-            t_f = self._ascii_fold(t_l)
-            return any(s in t_l or self._ascii_fold(s) in t_f for s in geo_signals)
-
-        overpass_pois  = [p for p in ocr_pois if _has_geo_signal(p)]
-        nominatim_pois = [p for p in ocr_pois if not _has_geo_signal(p)]
-
-        enriched: List[Dict] = []
-
-        if overpass_pois:
-            r = _safe_run(
-                "Geocoding(Overpass)",
-                lambda: self.places.enrich_locations(
-                    overpass_pois, use_overpass=True, city_bbox=city_bbox,
-                    city_hint=city_hint,
-                ),
-                fallback=[],
-            )
-            # Overpass fail/boş döndüyse → aynı lokasyonları Nominatim'e yönlendir
-            if r.data:
-                enriched.extend(r.data)
-                degradation_log.append(r)
-            else:
-                logger.info("🔄 Overpass başarısız → %d POI Nominatim'e yönlendiriliyor",
-                            len(overpass_pois))
-                nominatim_pois = overpass_pois + nominatim_pois  # hepsini birleştir
-                degradation_log.append(r)
-
-        if nominatim_pois:
-            r = _safe_run(
-                "Geocoding(Nominatim)",
-                lambda: self.places.enrich_locations(
-                    nominatim_pois, use_overpass=False, city_bbox=city_bbox,
-                    city_hint=city_hint,
-                ),
-                fallback=[],
-            )
-            enriched.extend(r.data)
-            degradation_log.append(r)
-
-        return enriched
-
-    @staticmethod
-    def _convert_vision_landmarks(vision_landmarks: List[Dict]) -> List[Dict]:
-        """Google Vision landmark'larını enriched formatına çevir."""
-        result = []
-        for lm in vision_landmarks:
-            if lm.get("latitude") and lm.get("longitude") and lm.get("confidence", 0) > 0.5:
-                result.append({
-                    "original_name": lm["name"],
-                    "place_data": {
-                        "name":       lm["name"],
-                        "location":   {"lat": lm["latitude"], "lng": lm["longitude"]},
-                        "type":       "landmark",
-                        "importance": lm["confidence"],
-                    },
-                })
-        return result
-
-    def _fix_geographic_outliers(
-        self,
-        locations: List[Dict],
-        degradation_log: List,
-    ) -> List[Dict]:
-        """
-        Dominant ili bul, çok uzaktaki lokasyonları aynı il bbox'ıyla yeniden sorgula.
-
-        Algoritma:
-          1. Her lokasyonun il bilgisini çek (address_details.province)
-          2. En sık geçen il → dominant_province
-          3. Dominant ile ait lokasyonların merkez koordinatını hesapla (centroid)
-          4. Centroid'e MAX_OUTLIER_KM'den uzak olanları yeniden sorgula
-          5. Yeni sonuç bulunursa değiştir, bulunamazsa orijinali koru
-
-        Örnek:
-          7× Antalya + 1× Amasya (Kaleköy) + 1× İstanbul (Kaleiçi)
-          → dominant = Antalya, centroid ≈ (36.5, 30.5)
-          → Kaleköy Amasya 490km uzak → Antalya'da yeniden ara → Kaleköy/Kaş ✅
-          → Kaleiçi İstanbul 590km uzak → Antalya'da yeniden ara → Kaleiçi/Antalya ✅
-        """
-        from collections import Counter
-        from math import radians, sin, cos, sqrt, atan2
-
-        MAX_OUTLIER_KM = 180   # bu kadar uzaksa outlier say
-        DOMINANT_MIN   = 2     # dominant il için minimum lokasyon sayısı
-
-        if len(locations) < 3:
-            return locations   # çok az veri → filtre anlamsız
-
-        def _haversine(lat1, lon1, lat2, lon2):
-            R = 6371.0
-            dlat = radians(lat2 - lat1)
-            dlon = radians(lon2 - lon1)
-            a = sin(dlat/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(dlon/2)**2
-            return R * 2 * atan2(sqrt(a), sqrt(1-a))
-
-        def _get_coords(loc):
-            pd = loc.get("place_data") or {}
-            c  = pd.get("location") or {}
-            return c.get("lat"), c.get("lng")
-
-        def _get_province(loc):
-            pd   = loc.get("place_data") or {}
-            addr = pd.get("address_details") or {}
-            return addr.get("province") or addr.get("state")
-
-        # Adım 1: İl sayımı
-        province_counter: Counter = Counter()
-        for loc in locations:
-            p = _get_province(loc)
-            if p:
-                province_counter[p] += 1
-
-        if not province_counter:
-            return locations
-
-        dominant_province, dominant_count = province_counter.most_common(1)[0]
-        if dominant_count < DOMINANT_MIN:
-            return locations   # dominant yok → filtre gerekli değil
-
-        # Adım 2: Dominant ilin centroid'i
-        dominant_locs = [
-            loc for loc in locations
-            if _get_province(loc) == dominant_province
-        ]
-        valid_coords = [
-            _get_coords(loc) for loc in dominant_locs
-            if all(_get_coords(loc))
-        ]
-        if not valid_coords:
-            return locations
-
-        centroid_lat = sum(c[0] for c in valid_coords) / len(valid_coords)
-        centroid_lng = sum(c[1] for c in valid_coords) / len(valid_coords)
-
-        # Bbox: centroid ± 2°  (~220km)
-        dominant_bbox = (
-            centroid_lat - 2.0, centroid_lng - 2.0,
-            centroid_lat + 2.0, centroid_lng + 2.0,
-        )
-
-        logger.info(
-            "🌍 Coğrafi tutarlılık: dominant=%s (%d/%d lokasyon), centroid=(%.2f, %.2f)",
-            dominant_province, dominant_count, len(locations),
-            centroid_lat, centroid_lng,
-        )
-
-        # Adım 3: Outlier'ları tespit et ve yeniden sorgula
-        result = []
-        for loc in locations:
-            lat, lng = _get_coords(loc)
-            if lat is None or lng is None:
-                result.append(loc)
-                continue
-
-            km = _haversine(centroid_lat, centroid_lng, lat, lng)
-            if km <= MAX_OUTLIER_KM:
-                result.append(loc)
-                continue
-
-            # Outlier — yeniden sorgula
-            name = loc.get("original_name", "")
-            logger.info(
-                "🔄 Outlier yeniden sorgulanıyor: '%s' (%.0fkm uzak, il=%s)",
-                name, km, _get_province(loc),
-            )
-            new_place = self.places.search_place(
-                name, city_bbox=dominant_bbox, city_hint=dominant_province
-            )
-            if new_place:
-                new_lat = (new_place.get("location") or {}).get("lat")
-                new_lng = (new_place.get("location") or {}).get("lng")
-                if new_lat and new_lng:
-                    new_km = _haversine(centroid_lat, centroid_lng, new_lat, new_lng)
-                    if new_km <= MAX_OUTLIER_KM:
-                        logger.info(
-                            "  ✅ '%s' taşındı: %s → %s (%.0fkm)",
-                            name, _get_province(loc),
-                            (new_place.get("address_details") or {}).get("province", "?"),
-                            new_km,
-                        )
-                        loc = {**loc, "place_data": new_place}
-                    else:
-                        logger.info("  ⚠️ '%s' yeni sonuç da uzak (%.0fkm) — orijinal korundu", name, new_km)
-            else:
-                logger.info("  ⚠️ '%s' yeniden sorgu sonuç vermedi — orijinal korundu", name)
-
-            # Buraya düşen her kayıt şüpheli: ya bölge dışında bir eşleşmeydi ya
-            # da yeniden sorguyla başka bir ile taşındı. İkisi de "gazetteer'da
-            # DOĞRU kaydı bulduk" demek değil — Gaziantep videosunda "Efendioğlu"
-            # bu yolla Osmaniye'deki bir eczaneye bağlanmıştı ve `exact`
-            # görünüyordu. Etiket artık bunu saklamıyor.
-            pd = loc.get("place_data")
-            if pd is not None and not (pd.get("source") or "").startswith("gemini_"):
-                loc = {**loc, "place_data": {**pd, "precision": "uncertain"}}
-
-            result.append(loc)
-
-        return result
-
-    @staticmethod
-    def _extract_city_bbox(ner_enriched: List[Dict]) -> Optional[tuple]:
-        """İlk NER lokasyonundan şehir bounding box'ı çıkar (Overpass için)."""
-        if not ner_enriched:
-            return None
-        loc = ner_enriched[0].get("place_data", {}).get("location")
-        if not loc:
-            return None
-        lat, lng = loc["lat"], loc["lng"]
-        return (lat - 2.0, lng - 2.0, lat + 2.0, lng + 2.0)
-
-    @staticmethod
-    def _extract_city_hint(ner_enriched: List[Dict]) -> Optional[str]:
-        """
-        Dominant şehir adını çıkar — OCR geocoding için qualifier.
-        "Nohut Durumu" → "Nohut Durumu Gaziantep" şeklinde Nominatim'de aranır.
-
-        Çoğunluk oyu (mode) kullanılır — sadece listedeki İLK eşleşen giriş
-        kullanılırsa, tek bir yanlış/alakasız geocoding sonucu (örn. BERT-NER'in
-        transkriptte hayal ettiği bir yer adı) tüm videonun city_hint'ini
-        yanlış yöne çekebilir. Çoğunluk arasında birden fazla doğru lokasyon
-        aynı şehri işaret ediyorsa o kazanır.
-        """
-        if not ner_enriched:
-            return None
-
-        from collections import Counter
-        votes: Counter = Counter()
-        for loc in ner_enriched:
-            addr = (loc.get("place_data") or {}).get("address_details") or {}
-            # Nominatim address hierarchy: city > town > province > state
-            for key in ("city", "town", "province", "state"):
-                if name := addr.get(key):
-                    votes[name] += 1
-                    break
-            else:
-                # Fallback: original_name eğer şehir seviyesindeyse
-                place = loc.get("place_data") or {}
-                if place.get("type") in ("city", "town"):
-                    votes[loc.get("original_name")] += 1
-
-        if not votes:
-            return None
-        return votes.most_common(1)[0][0]
-
-    # `_detect_city_from_list` KALDIRILDI.
-    #
-    # Geocoding öncesi şehir ipucunu 37 Türkiye şehrinden oluşan hardcode bir
-    # kümeyle tahmin ediyordu. Dünyanın herhangi bir yerinden gelen bir Reels'te
-    # (Barselona, Kyoto, Tiflis) hiçbir zaman eşleşmiyor ve arama bölgesiz
-    # kalıyordu. Yerine Gemini'nin döndürdüğü `region` kullanılıyor —
-    # bkz. gemini_service._LOCATIONS_SCHEMA.
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # OCR filtre pipeline (ayrı metod — test edilebilir)
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _run_ocr_filter_pipeline(self, extracted_texts: List[str], video_id: int) -> List[str]:
-        """OCR POI filtresi — gürültü eleme + NER batch + heuristic fallback."""
-
-        tr_lower    = self._tr_lower
-        ascii_fold  = self._ascii_fold
-        geo_signals = self._geo_signal_set()
-        noise_set   = self._noise_pattern_set()
-        stopwords   = self._tr_stopword_set()
-        generic_set = self._generic_type_set()
-
-        desc_regexes = [
-            _re.compile(p, _re.IGNORECASE) for p in [
-                r"\d+\s*(yer|tane|adet|durak|mekan|kafe|sahil|plaj)",
-                r"\w+['\u2018\u2019]?\s*(?:da|de|ta|te)\s+gezilecek",
-                r"(?:da|de|ta|te)\s+gezilecek",
-                r"(en iyi|mutlaka|kesinlikle|illa)",
-                r"(gidilecek|gorilecek|gorulebilecek)",
-                r"(yenilecek|icilecek|icekilecek)",
-                r"(nasil|nerede|nereden|hangi)",
-                r"(bolum|part|episode|vlog|video)",
-                r"\d+\.\s*(bolum|part|video)",
-                r"gezilecek",
-                r"(listesi|rehberi|onerileri|tavsiyeleri)",
-                r"(top\s*\d+|en\s+iyi\s+\d+)",
-            ]
-        ]
-
-        def _has_geo_signal(text: str) -> bool:
-            t_l = tr_lower(text)
-            t_f = ascii_fold(t_l)
-            return any(s in t_l or ascii_fold(s) in t_f for s in geo_signals)
-
-        def _split_camelcase(t: str) -> str:
-            t = _re.sub(r'([a-zğüşıöç])([A-ZĞÜŞİÖÇ])', r'\1 \2', t)
-            t = _re.sub(r'([A-ZĞÜŞİÖÇ]{2,})([A-ZĞÜŞİÖÇ][a-zğüşıöç])', r'\1 \2', t)
-            return t.strip()
-
-        def _norm(t: str) -> str:
-            return _re.sub(r'[^a-z0-9ğüşıöç]', '', tr_lower(t))
-
-        def _is_fuzzy_dup(t: str, seen: list) -> bool:
-            norm = _norm(t)
-            if len(norm) < 4:
-                return False
-            return any(
-                SequenceMatcher(None, norm, s).ratio() >= 0.82
-                for s in seen
-            )
-
-        def is_noise(t: str) -> bool:
-            t_l  = tr_lower(t).strip()
-            t_orig = t.strip()
-            if len(t_l) < 4: return True
-            if t_l.replace(" ", "").isnumeric(): return True
-            if t_l.endswith(("?", "-", ":", ".", ",")): return True
-            if t_l.startswith(("-", ".", ":")): return True
-            if any(p in t_l for p in noise_set): return True
-            if t_l in stopwords: return True
-            if "_" in t_orig: return True
-            tokens = t_l.split()
-            if tokens and tokens[0].isnumeric(): return True
-            if any(r.search(t_l) for r in desc_regexes): return True
-            short_tokens = [tok for tok in tokens if len(tok) <= 2]
-            if tokens and len(short_tokens) / len(tokens) > 0.5: return True
-            if t_orig.isupper() and len(t_l) < 6 and len(tokens) == 1: return True
-            return False
-
-        # ── Aşama 1: Noise filtresi + fuzzy dedup ────────────────────────────
-        candidates, seen_display, seen_norms = [], set(), []
-        for t in extracted_texts:
-            t_clean = _split_camelcase(t.strip())
-            t_lower = tr_lower(t_clean)
-            if is_noise(t_clean): continue
-            if t_lower in seen_display: continue
-            if _is_fuzzy_dup(t_clean, seen_norms): continue
-            words = t_clean.split()
-            if len(words) == 1 and t_lower in generic_set: continue
-            seen_display.add(t_lower)
-            seen_norms.append(_norm(t_clean))
-            candidates.append(t_clean)
-
-        if not candidates:
-            return []
-
-        # ── Aşama 2: Batch NER filtresi ──────────────────────────────────────
-        MAX_POIS = 18
-        try:
-            ner_filtered = self.ner.filter_locations_from_ocr(candidates)
-            if ner_filtered:
-                logger.info("NER batch: %d → %d POI", len(candidates), len(ner_filtered))
-                return ner_filtered[:MAX_POIS]
-            # NER 0 sonuç → heuristic fallback
-            fallback_pois = [
-                t for t in candidates
-                if _has_geo_signal(t) or len(t.split()) >= 2
-            ][:MAX_POIS]
-            logger.info("NER batch 0 sonuç → heuristic fallback: %d POI", len(fallback_pois))
-            return fallback_pois
-        except Exception as e:
-            logger.warning("NER batch OCR filtresi başarısız — heuristic fallback | %s", e)
-            return [
-                t for t in candidates
-                if _has_geo_signal(t) or len(t.split()) >= 2
-            ][:MAX_POIS]
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Statik yardımcılar
-    # ─────────────────────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _tr_lower(s: str) -> str:
-        return s.replace("İ", "i").replace("I", "ı").lower()
-
-    @staticmethod
-    def _ascii_fold(s: str) -> str:
-        return (s.replace("ğ", "g").replace("ü", "u").replace("ş", "s")
-                 .replace("ı", "i").replace("ö", "o").replace("ç", "c")
-                 .replace("â", "a").replace("î", "i").replace("û", "u"))
-
-    @staticmethod
-    def _geo_signal_set() -> set:
-        return {
-            "han", "kafe", "cafe", "restoran", "müze", "cami", "kilise",
-            "köprü", "kale", "kalesi", "kaleici", "sarayı", "parkı", "gölü",
-            "plajı", "plaji", "şelalesi", "selalesi",
-            "mağarası", "magarasi", "tepesi", "dağı", "dagi", "vadisi",
-            "konak", "çarşı", "carsi", "pazar", "hamam", "türbe", "turbe",
-            "anıt", "anit", "kervansaray", "ören",
-            "sokağı", "sokagi", "mahallesi", "kapısı", "kapisi",
-            "kulesi", "camii", "hamamı", "hamami",
-            "bahçesi", "bahcesi", "ormanı", "ormani", "göleti", "barajı",
-            "köprüsü", "koprüsü",
-            "koyu", "körfez", "korfez", "limanı", "limani",
-            "kayalığı", "kayaligi", "adası", "adasi", "yarımadası",
-            "kanyonu", "platosu", "çayı", "cayi", "irmağı",
-            "yaylası", "yaylasi", "milliparkı",
-            "harabeleri", "höyüğü", "hoyugu", "mezarlığı", "mezarligi",
-            "kilisesi", "manastırı", "manastiri", "kalıntıları",
-            # Yemek & işletme sinyalleri — Gaziantep/şehir lokali içerik
-            "yeri", "durumu", "evi", "ocağı", "ocagi", "fırını", "firini",
-            "pastanesi", "lokantası", "lokantasi", "kebabçısı", "kebabcisi",
-            "büfesi", "bufesi", "dönercisi", "donercisi", "tatlıcısı",
-            "çiğköftecisi", "cigkoftecisi", "pidecisi", "lahmacuncusu",
-            "muhallebicisi", "baklavacısı", "baklavacisi",
-        }
-
-    @staticmethod
-    def _noise_pattern_set() -> set:
-        return {
-            "www.", "http", "@", "#", ".com", ".tr", "₺", "$", "€",
-            "follow", "like", "share", "subscribe", "abone", "takip",
-        }
-
-    @staticmethod
-    def _tr_stopword_set() -> set:
-        return {
-            "içecek", "yiyecek", "giriş", "çıkış", "bilgi", "lütfen", "teşekkür",
-            "devam", "dikkat", "uyarı", "yasak", "serbest", "açık", "kapalı",
-            "indirim", "fiyat", "menü", "sipariş", "ödeme", "nakit", "kart",
-            "telefon", "adres", "saat", "tarih", "numara", "adet", "toplam",
-            "olan", "olur", "oldu", "için", "ile", "veya", "hem", "ama",
-            "büyük", "küçük", "yeni", "eski", "güzel", "iyi", "kötü",
-            "başka", "diğer", "tüm", "her", "bazı", "çok", "az", "daha",
-            "dis", "bis", "ecs", "aci", "bey", "ecek", "acak", "mis",
-            "yo", "ve", "da", "de", "ki", "mi", "mu", "mü",
-            "kahvesi", "çayı", "kebabı", "mantısı", "baklavası", "köftesi",
-            "pidesi", "böreği", "tatlısı", "döneri", "lahmacunu", "çorbası",
-            "büfesi", "fırını", "pastanesi", "lokantası", "restoranı",
-            "istanbul", "ankara", "izmir",
-            "market", "deneme", "gerekenler", "durumu", "masaya", "masasi",
-            "lutfen", "yiyecek", "icecek", "siparis", "ucretsiz", "ucret",
-            "ntep", "disin", "disi", "bufe", "bufesi",
-        }
-
-    @staticmethod
-    def _generic_type_set() -> set:
-        return {
-            "koyu", "koy", "plaj", "plaji", "sahil", "dağ", "dag", "gol", "göl",
-            "şelale", "selale", "orman", "vadi", "kanyon", "tepe", "kale",
-            "cami", "camii", "köy", "koy", "mahalle", "sokak", "cadde",
-            "park", "bahçe", "bahce", "ada", "kıyı", "kiyi", "liman",
-        }
-
-    # ─────────────────────────────────────────────────────────────────────────
-    # Video işleme (metadata, frame, thumbnail)
-    # ─────────────────────────────────────────────────────────────────────────
-
-    def _get_metadata(self, video_path: str) -> Dict:
-        import ffmpeg
-        try:
-            with _FFmpegTimeoutGuard(_FFMPEG_PROBE_TIMEOUT_SECONDS, "ffmpeg.probe"):
-                probe = ffmpeg.probe(video_path)
-            video_stream = next(s for s in probe["streams"] if s["codec_type"] == "video")
-            fps_str      = video_stream.get("r_frame_rate", "30/1")
-            num, den     = fps_str.split("/")
-            return {
-                "duration": float(probe["format"]["duration"]),
-                "width":    int(video_stream["width"]),
-                "height":   int(video_stream["height"]),
-                "fps":      round(float(num) / float(den), 2),
-            }
-        except Exception as e:
-            logger.error("Metadata çıkarma başarısız: %s", e)
-            raise
-
-    def _extract_frames(self, video_path: str, output_dir: Path, fps: float = 0.5) -> List[str]:
-        import ffmpeg
-        try:
-            output_dir.mkdir(parents=True, exist_ok=True)
-            with _FFmpegTimeoutGuard(_FFMPEG_EXTRACT_TIMEOUT_SECONDS, "ffmpeg frame extraction"):
-                (
-                    ffmpeg.input(video_path)
-                    .filter("fps", fps=fps)
-                    .output(str(output_dir / "frame_%04d.jpg"), quality=2)
-                    .overwrite_output()
-                    .run(capture_stdout=True, capture_stderr=True)
-                )
-            frames = sorted(output_dir.glob("*.jpg"))
-            return [str(f) for f in frames if f.name.startswith("frame_")]
-        except ffmpeg.Error as e:
-            logger.error("FFmpeg hatası: %s", e.stderr.decode())
-            raise
-
-    def _create_thumbnail(self, first_frame: Optional[str]) -> Optional[str]:
-        if not first_frame:
-            return None
-        import ffmpeg
-        try:
-            thumb_path = Path(first_frame).parent / "thumbnail.jpg"
-            (
-                ffmpeg.input(first_frame)
-                .filter("scale", 320, -1)
-                .output(str(thumb_path))
-                .overwrite_output()
-                .run(quiet=True)
-            )
-            return str(thumb_path)
-        except Exception as e:
-            logger.error("Thumbnail oluşturulamadı: %s", e)
-            return None

@@ -164,3 +164,34 @@ def test_ffmpeg_timeout_guard_is_a_noop_off_the_main_thread():
 
     assert result.get("ok") is True
     assert "error" not in result
+
+
+@pytest.mark.parametrize('provider_failure', [False, True])
+def test_empty_gemini_extraction_completes_without_region(provider_failure, tmp_path):
+    """No locations and provider fallback both skip region resolution safely."""
+    service = VideoProcessingService.__new__(VideoProcessingService)
+    service._ml_available = True
+    service._use_gemini = True
+    service._use_hybrid = False
+    service.frames_dir = tmp_path
+    service.detector = mock.Mock()
+    service.vision_detector = mock.Mock()
+    service.ocr = mock.Mock()
+    service.places = mock.Mock()
+    service.route_optimizer = mock.Mock()
+    service.gemini = mock.Mock()
+    service.gemini.normalize_extraction.return_value = {'region': {}, 'locations': []}
+    service.gemini.extract_locations.return_value = []
+    if provider_failure:
+        service.gemini.extract_locations.side_effect = RuntimeError('provider unavailable')
+    service._get_metadata = mock.Mock(return_value={'duration': 5, 'width': 640, 'height': 360, 'fps': 30})
+    service._extract_frames = mock.Mock(return_value=[])
+    service._create_thumbnail = mock.Mock(return_value=None)
+    service._filter_ocr_pois = mock.Mock(return_value=[])
+    service._enrich_ocr_pois = mock.Mock(return_value=[])
+    from app.core.services.video_processor import ServiceResult
+    results = [ServiceResult(name, [], True) for name in ['YOLO', 'Vision', 'OCR']]
+    with mock.patch('app.core.services.video_processor.run_parallel', return_value=results), mock.patch('app.core.services.video_processor.set_progress'), mock.patch('app.core.services.video_processor._gemini_cache_get', return_value=None), mock.patch('app.core.services.video_processor._gemini_cache_set'):
+        result = service.process_video('synthetic.mp4', 9999, defer_tips=True)
+    assert result['deduplicated_locations'] == []
+    service.places.resolve_region.assert_not_called()

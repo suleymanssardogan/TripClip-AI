@@ -354,7 +354,7 @@ def test_update_stop_order_rejects_other_users_video(client, registered_user):
     resp = client.patch(
         f"/internal/videos/{vid}/order",
         json={"order": [[2, 1]]},
-        headers={"x-user-id": str(registered_user["user_id"] + 12345)},
+        headers={"x-user-id": str(_other_active_user_id())},
     )
     assert resp.status_code == 403
 
@@ -412,7 +412,7 @@ def test_delete_video_rejects_other_user(client, registered_user):
     vid = _make_video_with_locations(registered_user["user_id"], 1)
     resp = client.delete(
         f"/internal/videos/{vid}",
-        headers={"x-user-id": str(registered_user["user_id"] + 12345)},
+        headers={"x-user-id": str(_other_active_user_id())},
     )
     assert resp.status_code == 403
 
@@ -476,3 +476,14 @@ def test_visible_locations_without_order_is_raw_list():
     v.deduplicated_locations = [{"original_name": "A"}, {"original_name": "B"}]
     v.stop_order = None
     assert [loc["original_name"] for loc in visible_locations(v)] == ["A", "B"]
+
+
+def _other_active_user_id():
+    """Ownership tests need a real active account, not a nonexistent subject."""
+    import uuid
+    from conftest import TestingSessionLocal
+    from app.models.user import User
+    with TestingSessionLocal() as db:
+        user = User(email=f"other_{uuid.uuid4().hex}@example.test")
+        db.add(user); db.commit()
+        return user.id
