@@ -16,7 +16,8 @@ import secrets
 import logging
 import os
 
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Depends
+from app.core.database import get_db
 
 INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET", "")
 
@@ -40,3 +41,16 @@ async def verify_internal_secret(
             status_code=401,
             detail={"code": "UNAUTHORIZED", "message": "Geçersiz internal secret."},
         )
+
+
+def verify_active_internal_user(
+    x_user_id: int | None = Header(default=None),
+    db=Depends(get_db),
+) -> None:
+    """Reject still-valid JWT subjects whose account was deleted or disabled."""
+    if x_user_id is None:
+        return
+    from app.models.user import User
+    user = db.get(User, x_user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(401, detail={"code": "AUTH_ERROR", "message": "Oturum geçersiz. Tekrar giriş yapın."})

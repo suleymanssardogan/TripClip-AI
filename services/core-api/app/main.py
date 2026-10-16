@@ -73,34 +73,10 @@ async def lifespan(app: FastAPI):
 
     metrics_task = asyncio.create_task(_queue_depth_loop())
 
-    async def _deferred_work_loop():
-        from app.application.services.deferred_work import dispatch_pending_work
-        while True:
-            try:
-                await asyncio.to_thread(dispatch_pending_work)
-            except Exception as exc:
-                logger.warning("Deferred work dispatcher: %s", type(exc).__name__)
-            await asyncio.sleep(15)
-
-    deferred_task = asyncio.create_task(_deferred_work_loop())
-
-    async def _retention_loop():
-        from app.application.services.privacy_retention import sweep_upload_retention
-        while True:
-            try:
-                await asyncio.to_thread(sweep_upload_retention)
-            except Exception as exc:
-                logger.warning("Upload retention: %s", type(exc).__name__)
-            await asyncio.sleep(900)
-
-    retention_task = asyncio.create_task(_retention_loop())
-
-    yield  # ← uygulama burada çalışır
+    yield
 
     metrics_task.cancel()
-    deferred_task.cancel()
-    retention_task.cancel()
-    await asyncio.gather(metrics_task, deferred_task, retention_task, return_exceptions=True)
+    await asyncio.gather(metrics_task, return_exceptions=True)
 
 
 # Rate limiter — IP başına istek limiti
@@ -238,13 +214,13 @@ def health_ready():
 
 
 # Import routers AFTER app creation
-from app.core.internal_auth import verify_internal_secret
+from app.core.internal_auth import verify_internal_secret, verify_active_internal_user
 from app.api.internal import videos, auth, places, trips, analytics, trip_sharing, trip_optimization, trip_assistant
-app.include_router(videos.router, dependencies=[Depends(verify_internal_secret)])
-app.include_router(auth.router, dependencies=[Depends(verify_internal_secret)])
-app.include_router(places.router, dependencies=[Depends(verify_internal_secret)])
-app.include_router(trips.router, dependencies=[Depends(verify_internal_secret)])
-app.include_router(analytics.router, dependencies=[Depends(verify_internal_secret)])
-app.include_router(trip_sharing.router, dependencies=[Depends(verify_internal_secret)])
-app.include_router(trip_optimization.router, dependencies=[Depends(verify_internal_secret)])
-app.include_router(trip_assistant.router, dependencies=[Depends(verify_internal_secret)])
+app.include_router(videos.router, dependencies=[Depends(verify_internal_secret), Depends(verify_active_internal_user)])
+app.include_router(auth.router, dependencies=[Depends(verify_internal_secret), Depends(verify_active_internal_user)])
+app.include_router(places.router, dependencies=[Depends(verify_internal_secret), Depends(verify_active_internal_user)])
+app.include_router(trips.router, dependencies=[Depends(verify_internal_secret), Depends(verify_active_internal_user)])
+app.include_router(analytics.router, dependencies=[Depends(verify_internal_secret), Depends(verify_active_internal_user)])
+app.include_router(trip_sharing.router, dependencies=[Depends(verify_internal_secret), Depends(verify_active_internal_user)])
+app.include_router(trip_optimization.router, dependencies=[Depends(verify_internal_secret), Depends(verify_active_internal_user)])
+app.include_router(trip_assistant.router, dependencies=[Depends(verify_internal_secret), Depends(verify_active_internal_user)])

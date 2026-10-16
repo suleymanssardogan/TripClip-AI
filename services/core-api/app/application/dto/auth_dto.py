@@ -2,7 +2,7 @@
 Auth DTO'ları — API request/response şemaları.
 Route handler'lar sadece bu modelleri görür; DB modelleri görünmez.
 """
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional
 
 
@@ -36,7 +36,8 @@ class LoginRequest(BaseModel):
 
 
 class AppleSignInRequest(BaseModel):
-    identity_token: str
+    authorization_code: str = Field(min_length=1, max_length=4096)
+    identity_token: str = Field(min_length=1, max_length=16384)
     full_name: Optional[str] = None
 
 

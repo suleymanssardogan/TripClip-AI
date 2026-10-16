@@ -177,7 +177,7 @@ def test_apple_sign_in_invalid_payload(client, mock_core_api):
 def test_apple_sign_in_happy_path(client, mock_core_api, make_response):
     mock_core_api.post.return_value = make_response(200, _auth_response(3, "apple@test.com"))
 
-    resp = client.post("/api/web/auth/apple", json={"identity_token": "fake-jwt"})
+    resp = client.post("/api/web/auth/apple", json={"identity_token": "fake-jwt", "authorization_code": "one-use-code"})
 
     assert resp.status_code == 200
     assert resp.json()["user_id"] == 3

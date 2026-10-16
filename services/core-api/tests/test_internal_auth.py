@@ -42,3 +42,21 @@ def test_production_rejects_weak_internal_secret(secret):
     )
     assert result.returncode != 0
     assert "INTERNAL_API_SECRET must contain at least 32 characters" in result.stderr
+
+
+def test_deleted_account_subject_cannot_list_or_create_trips(client, registered_user):
+    user_id = registered_user['user_id']
+    headers = {'x-user-id': str(user_id)}
+    assert client.get('/internal/trips', headers=headers).status_code == 200
+    assert client.delete('/internal/auth/account', headers=headers).status_code == 200
+    assert client.get('/internal/trips', headers=headers).status_code == 401
+    assert client.post('/internal/trips', headers=headers, json={'title': 'Deleted user', 'place_ids': []}).status_code == 401
+
+
+def test_disabled_account_subject_is_rejected(client, registered_user):
+    from conftest import TestingSessionLocal
+    from app.models.user import User
+    with TestingSessionLocal() as db:
+        db.get(User, registered_user['user_id']).is_active = False
+        db.commit()
+    assert client.get('/internal/trips', headers={'x-user-id': str(registered_user['user_id'])}).status_code == 401

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text
 from app.core.database import Base
 from datetime import datetime
 
@@ -10,6 +10,7 @@ class User(Base):
     username = Column(String, unique=True, index=True)
     hashed_password = Column(String, nullable=True)  # Apple/Google Sign In kullanıcıları şifresiz
     apple_id = Column(String, unique=True, index=True, nullable=True)
+    apple_refresh_token_encrypted = Column(Text, nullable=True)
     google_id = Column(String, unique=True, index=True, nullable=True)  # M34 — apple_id ile AYNI desen
     apns_token = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)

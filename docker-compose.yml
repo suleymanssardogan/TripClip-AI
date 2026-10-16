@@ -83,6 +83,13 @@ services:
       mongodb:
         condition: service_started
     environment:
+      - APPLE_CLIENT_ID=${APPLE_CLIENT_ID:-}
+      - APPLE_TEAM_ID=${APPLE_TEAM_ID:-}
+      - APPLE_KEY_ID=${APPLE_KEY_ID:-}
+      - APPLE_PRIVATE_KEY=${APPLE_PRIVATE_KEY:-}
+      - APPLE_TOKEN_ENCRYPTION_KEY=${APPLE_TOKEN_ENCRYPTION_KEY:-}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-tripclip-secret-change-in-production}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - DATABASE_URL=postgresql://tripclip:tripclip123@postgres:5432/tripclip
       - REDIS_URL=redis://redis:6379/0
       - MONGODB_URL=mongodb://mongodb:27017/tripclip
@@ -91,6 +98,7 @@ services:
       - ALLOWED_HOSTS=
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - AI_PRICING_JSON=${AI_PRICING_JSON:-}
       - GEMINI_SEND_FRAMES=${GEMINI_SEND_FRAMES:-true}
       - ANALYTICS_ENABLED=${ANALYTICS_ENABLED:-true}
       - AI_ASSISTANT_PROVIDER=${AI_ASSISTANT_PROVIDER:-gemini}
@@ -118,6 +126,42 @@ services:
       retries: 10
       start_period: 30s
 
+  maintenance:
+    build: ./services/core-api
+    restart: unless-stopped
+    init: true
+    command: ["python", "-m", "app.tasks.maintenance"]
+    stop_grace_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - APPLE_CLIENT_ID=${APPLE_CLIENT_ID:-}
+      - APPLE_TEAM_ID=${APPLE_TEAM_ID:-}
+      - APPLE_KEY_ID=${APPLE_KEY_ID:-}
+      - APPLE_PRIVATE_KEY=${APPLE_PRIVATE_KEY:-}
+      - APPLE_TOKEN_ENCRYPTION_KEY=${APPLE_TOKEN_ENCRYPTION_KEY:-}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-tripclip-secret-change-in-production}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
+      - DATABASE_URL=postgresql://tripclip:tripclip123@postgres:5432/tripclip
+      - REDIS_URL=redis://redis:6379/0
+      - UPLOAD_DIR=/app/uploads/videos
+      - RAW_UPLOAD_RETENTION_HOURS=${RAW_UPLOAD_RETENTION_HOURS:-24}
+      - FAILED_UPLOAD_RETENTION_HOURS=${FAILED_UPLOAD_RETENTION_HOURS:-168}
+      - MAINTENANCE_DISPATCH_INTERVAL=${MAINTENANCE_DISPATCH_INTERVAL:-5}
+      - MAINTENANCE_RETENTION_INTERVAL=${MAINTENANCE_RETENTION_INTERVAL:-900}
+    volumes:
+      - uploads_data:/app/uploads
+      - ./services/core-api/app:/app/app
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.tasks.maintenance", "--healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
   # ── Celery Worker ─────────────────────────────────────────────────────────
   celery-worker:
     build: ./services/core-api
@@ -134,6 +178,8 @@ services:
       redis:
         condition: service_healthy
     environment:
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-tripclip-secret-change-in-production}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - DATABASE_URL=postgresql://tripclip:tripclip123@postgres:5432/tripclip
       - REDIS_URL=redis://redis:6379/0
       - MONGODB_URL=mongodb://mongodb:27017/tripclip
@@ -142,6 +188,7 @@ services:
       - USE_HYBRID=true
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - AI_PRICING_JSON=${AI_PRICING_JSON:-}
       - GEMINI_SEND_FRAMES=${GEMINI_SEND_FRAMES:-true}
       - WHISPER_MODEL=base
       - USE_GOOGLE_VISION=false
@@ -174,6 +221,8 @@ services:
       core-api:
         condition: service_healthy
     environment:
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-tripclip-secret-change-in-production}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - CORE_API_URL=http://core-api:8000
       - ALLOWED_ORIGINS=
       - ALLOWED_HOSTS=
@@ -191,6 +240,8 @@ services:
       core-api:
         condition: service_healthy
     environment:
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-tripclip-secret-change-in-production}
+      - INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
       - CORE_API_URL=http://core-api:8000
       - ALLOWED_ORIGINS=
       - ALLOWED_HOSTS=

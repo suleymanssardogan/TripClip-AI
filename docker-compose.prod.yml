@@ -191,6 +191,11 @@ services:
       qdrant:
         condition: service_healthy
     environment:
+      APPLE_CLIENT_ID: ${APPLE_CLIENT_ID:-}
+      APPLE_TEAM_ID: ${APPLE_TEAM_ID:-}
+      APPLE_KEY_ID: ${APPLE_KEY_ID:-}
+      APPLE_PRIVATE_KEY: ${APPLE_PRIVATE_KEY:-}
+      APPLE_TOKEN_ENCRYPTION_KEY: ${APPLE_TOKEN_ENCRYPTION_KEY:-}
       DATABASE_URL: postgresql://${POSTGRES_USER:-tripclip}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-tripclip}
       REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
       MONGODB_URL: mongodb://${MONGODB_ROOT_USERNAME:?MONGODB_ROOT_USERNAME must be set}:${MONGODB_ROOT_PASSWORD:?MONGODB_ROOT_PASSWORD must be set}@mongodb:27017/tripclip?authSource=admin
@@ -201,6 +206,7 @@ services:
       FAILED_UPLOAD_RETENTION_HOURS: ${FAILED_UPLOAD_RETENTION_HOURS:-168}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      AI_PRICING_JSON: ${AI_PRICING_JSON:-}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?INTERNAL_API_SECRET must be set}
       APP_ENV: production
@@ -239,6 +245,53 @@ services:
       retries: 10
       start_period: 30s
 
+  # Independent of API availability; shares only SQL, broker and upload storage.
+  maintenance:
+    build:
+      context: ./services/core-api
+      args:
+        WHISPER_MODEL: ${WHISPER_MODEL:-small}
+    restart: always
+    init: true
+    mem_limit: 512m
+    cpus: 0.5
+    command: ["python", "-m", "app.tasks.maintenance"]
+    stop_grace_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APPLE_CLIENT_ID: ${APPLE_CLIENT_ID:-}
+      APPLE_TEAM_ID: ${APPLE_TEAM_ID:-}
+      APPLE_KEY_ID: ${APPLE_KEY_ID:-}
+      APPLE_PRIVATE_KEY: ${APPLE_PRIVATE_KEY:-}
+      APPLE_TOKEN_ENCRYPTION_KEY: ${APPLE_TOKEN_ENCRYPTION_KEY:-}
+      APP_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tripclip}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-tripclip}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
+      UPLOAD_DIR: /app/uploads/videos
+      RAW_UPLOAD_RETENTION_HOURS: ${RAW_UPLOAD_RETENTION_HOURS:-24}
+      FAILED_UPLOAD_RETENTION_HOURS: ${FAILED_UPLOAD_RETENTION_HOURS:-168}
+      MAINTENANCE_DISPATCH_INTERVAL: ${MAINTENANCE_DISPATCH_INTERVAL:-5}
+      MAINTENANCE_RETENTION_INTERVAL: ${MAINTENANCE_RETENTION_INTERVAL:-900}
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - app-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.tasks.maintenance", "--healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
   # ── Celery Worker ─────────────────────────────────────────────────────────────
   celery-worker:
     build:
@@ -274,6 +327,7 @@ services:
       USE_HYBRID: ${USE_HYBRID:-true}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      AI_PRICING_JSON: ${AI_PRICING_JSON:-}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY must be set}
       WHISPER_MODEL: ${WHISPER_MODEL:-small}
       USE_GOOGLE_VISION: ${USE_GOOGLE_VISION:-false}

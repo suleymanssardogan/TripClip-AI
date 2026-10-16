@@ -4,7 +4,7 @@ Tüm Core API hataları web_error_wrapper aracılığıyla web dostu mesajlara �
 """
 from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from app.core.internal_client import internal_client
@@ -54,7 +54,8 @@ class RegisterRequest(BaseModel):
 
 
 class AppleSignInRequest(BaseModel):
-    identity_token: str
+    authorization_code: str = Field(min_length=1, max_length=4096)
+    identity_token: str = Field(min_length=1, max_length=16384)
     full_name: str | None = None
 
 

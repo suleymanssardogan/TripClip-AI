@@ -95,6 +95,7 @@ def apple_sign_in(
 ):
     return service.apple_sign_in(
         identity_token=body.identity_token,
+        authorization_code=body.authorization_code,
         full_name=body.full_name,
     )
 

@@ -71,6 +71,12 @@ class SqlUserRepository(AbstractUserRepository):
             user.apple_id = apple_id
             self._db.commit()
 
+    def update_apple_refresh_token(self, user_id: int, encrypted_token: str) -> None:
+        user = self.get_by_id(user_id)
+        if user:
+            user.apple_refresh_token_encrypted = encrypted_token
+            self._db.commit()
+
     def update_google_id(self, user_id: int, google_id: str) -> None:
         user = self.get_by_id(user_id)
         if user:
@@ -136,6 +142,9 @@ class SqlUserRepository(AbstractUserRepository):
                 if row.file_path:
                     self._db.add(PendingFileErasure(file_path=row.file_path))
             self._db.add(PrivacyErasureRecord(action="delete", category="account_sql_records", count=1))
+            if user.apple_refresh_token_encrypted:
+                from app.models.apple_revocation import AppleRevocation
+                self._db.add(AppleRevocation(encrypted_token=user.apple_refresh_token_encrypted))
             self._db.delete(user)
             self._db.commit()
         except Exception:

@@ -90,3 +90,28 @@ def workers(database):
     yield start, kill
     for process, log in children:
         kill(process); log.close()
+
+
+@pytest.fixture
+def maintenance(database):
+    children = []
+    def start():
+        import tempfile
+        health_dir = tempfile.mkdtemp(prefix="maintenance-health-")
+        env = dict(os.environ, MAINTENANCE_HEALTH_DIR=health_dir,
+                   MAINTENANCE_DISPATCH_INTERVAL="1", MAINTENANCE_RETENTION_INTERVAL="30")
+        log = (Path("/reports") / f"maintenance-{time.time_ns()}.log").open("w")
+        process = subprocess.Popen([sys.executable, "-m", "app.tasks.maintenance"], env=env,
+                                   stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        children.append((process, log, health_dir))
+        eventually(lambda: process.poll() is None and (Path(health_dir) / "dispatch").exists())
+        return process, health_dir
+    yield start
+    for process, log, health_dir in children:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL); process.wait(timeout=5)
+        log.close()

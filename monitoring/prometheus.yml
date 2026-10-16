@@ -22,6 +22,10 @@ scrape_configs:
     static_configs:
       - targets: ["celery-worker:9808"]
 
+  - job_name: "maintenance"
+    static_configs:
+      - targets: ["maintenance:9810"]
+
   - job_name: "prometheus"
     static_configs:
       - targets: ["localhost:9090"]

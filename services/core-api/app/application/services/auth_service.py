@@ -296,8 +296,10 @@ class AuthService:
     # bırakıyoruz (register/login/refresh/logout ile aynı, kanıtlanmış desen).
     # Apple Sign-In sık çağrılan bir yol değil, ekstra async karmaşıklığına değmez.
 
-    def apple_sign_in(self, identity_token: str, full_name: str | None = None) -> AuthResponse:
+    def apple_sign_in(self, identity_token: str, authorization_code: str, full_name: str | None = None) -> AuthResponse:
         apple_user_id, email = self._verify_apple_token(identity_token)
+        from app.application.services.apple_credentials import exchange
+        encrypted_token = exchange(authorization_code, apple_user_id, self._verify_apple_token)
 
         user = self._repo.get_by_apple_id(apple_user_id)
         if not user and email:
@@ -311,9 +313,12 @@ class AuthService:
                 username=full_name or email.split("@")[0],
                 apple_id=apple_user_id,
             )
+        elif user.apple_id and user.apple_id != apple_user_id:
+            raise HTTPException(401, "Apple credential mismatch")
         elif not user.apple_id:
             self._repo.update_apple_id(user.id, apple_user_id)
 
+        self._repo.update_apple_refresh_token(user.id, encrypted_token)
         return self._issue_tokens(user)
 
     # ── Google Sign In (M34) ─────────────────────────────────────────────────
@@ -450,8 +455,9 @@ class AuthService:
     @staticmethod
     def _verify_apple_token(identity_token: str) -> tuple[str, str | None]:
         try:
-            with httpx.Client() as client:
+            with httpx.Client(timeout=10) as client:
                 resp = client.get(APPLE_KEYS_URL)
+                resp.raise_for_status()
                 jwks = resp.json()
 
             header = pyjwt.get_unverified_header(identity_token)
@@ -464,12 +470,14 @@ class AuthService:
                 identity_token,
                 public_key,
                 algorithms=["RS256"],
-                audience="com.sardogan.TripClipAI",
+                audience=os.getenv("APPLE_CLIENT_ID", "com.sardogan.TripClipAI"),
+                issuer="https://appleid.apple.com",
+                options={"require": ["exp", "iat", "sub", "iss", "aud"]},
             )
             return payload["sub"], payload.get("email")
 
         except pyjwt.ExpiredSignatureError:
             raise HTTPException(status_code=401, detail="Apple token expired")
         except Exception as e:
-            logger.error(f"Apple token verification failed: {e}")
+            logger.warning("Apple token verification failed")
             raise HTTPException(status_code=401, detail="Invalid Apple token")

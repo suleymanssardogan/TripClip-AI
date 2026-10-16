@@ -12,6 +12,8 @@
 
 AI/video işlemcisi ve embedding testte deterministik sentetik karşılıklar kullanır. Ücretli AI çağrısı, video indirme veya model ağırlığı indirme yapılmaz. Bu testler model doğruluğu, video kalitesi, ses/OCR başarısı, gerçek maliyet veya üretim yükünü ölçmez. Görev kodu, SQL transaction/lease/claim, Celery, Redis, Qdrant yazımı ve migration'lar gerçektir.
 
+6. API süreci olmadan gerçek bakım servisi SQL işini gönderir, worker analizi tamamlar ve süresi dolmuş ham dosya temizlenir. SIGTERM ile bakım servisi kontrollü kapanır.
+
 ## CI ve çıktılar
 
 GitHub Actions `test-integration` işi her main push/PR'da çalışır. Başarısız olursa Docker Build aşaması ilerlemez. JUnit raporu, worker ve servis günlükleri `integration-resilience` artifact'inde saklanır. Yerelde aynı dosyalar `integration-reports/` dizinine yazılır ve Git'e eklenmez.

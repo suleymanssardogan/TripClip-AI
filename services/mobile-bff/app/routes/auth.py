@@ -3,7 +3,7 @@ Mobile BFF — Auth route handler'ları.
 Tüm Core API hataları mobile_error_wrapper aracılığıyla iOS dostu mesajlara çevrilir.
 """
 from fastapi import APIRouter, Request, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 import httpx
@@ -32,7 +32,8 @@ class LoginRequest(BaseModel):
 
 
 class AppleSignInRequest(BaseModel):
-    identity_token: str
+    authorization_code: str = Field(min_length=1, max_length=4096)
+    identity_token: str = Field(min_length=1, max_length=16384)
     full_name: str | None = None
 
 

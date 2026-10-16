@@ -157,3 +157,22 @@ def test_postgres_video_and_outbox_rollback_together(database, monkeypatch):
             SqlVideoRepository(db).create("rollback.mp4", "/tmp/nonexistent", 1)
         assert db.query(Video).count() == 0
         assert db.query(DeferredJob).count() == 0
+
+
+def test_maintenance_dispatch_and_retention_without_api(database, workers, maintenance):
+    workers[0]()
+    vid, job, _ = create_video(database)
+    root = Path(os.environ["UPLOAD_DIR"])
+    old_path = root / "expired.mp4"; old_path.write_bytes(b"old-private-video")
+    with database() as db:
+        db.add(Video(filename="expired.mp4", file_path=str(old_path), user_id=1,
+                     status=VideoStatus.COMPLETED, created_at=datetime.utcnow() - timedelta(days=2)))
+        db.commit()
+    process, health_dir = maintenance()
+    # No API process and no explicit dispatch/retention call in this test.
+    eventually(lambda: status(database, job) == "completed")
+    eventually(lambda: not old_path.exists())
+    assert runs(vid) == 1
+    process.terminate(); assert process.wait(timeout=15) == 0
+    assert not (Path(health_dir) / "dispatch").exists()
+    assert not (Path(health_dir) / "retention").exists()

@@ -46,6 +46,9 @@ class AbstractUserRepository(ABC):
         """Kullanıcının Apple ID'sini güncelle."""
         ...
 
+    def update_apple_refresh_token(self, user_id: int, encrypted_token: str) -> None:
+        raise NotImplementedError
+
     @abstractmethod
     def update_google_id(self, user_id: int, google_id: str) -> None:
         """Kullanıcının Google ID'sini günceller — mevcut e-posta/şifre
