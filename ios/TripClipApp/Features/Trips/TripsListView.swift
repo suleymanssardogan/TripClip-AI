@@ -55,6 +55,17 @@ struct TripsListView: View {
                     }
                     .buttonStyle(PressableButtonStyle())
                 }
+                if let error = vm.error {
+                    Text(error.localizedDescription ?? "Yükleme başarısız.")
+                        .font(.footnote).foregroundStyle(AppColors.destructive)
+                }
+                if vm.hasMore {
+                    Button(vm.isLoading ? "Yükleniyor…" : "Daha fazla yükle") {
+                        Task { await vm.loadMore(auth: auth) }
+                    }
+                    .disabled(vm.isLoading)
+                    .padding(.vertical, 12)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)

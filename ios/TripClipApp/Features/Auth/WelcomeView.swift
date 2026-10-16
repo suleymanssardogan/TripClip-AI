@@ -26,11 +26,14 @@ struct WelcomeView: View {
                         .tracking(-1.2)
                         .padding(.top, 14)
 
-                        Image("WelcomePhoto")
-                            .resizable()
-                            .scaledToFill()
+                        Rectangle()
+                            .fill(Color.clear)
                             .frame(height: 238)
-                            .frame(maxWidth: .infinity)
+                            .overlay {
+                                Image("WelcomePhoto")
+                                    .resizable()
+                                    .scaledToFill()
+                            }
                             .clipped()
                             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
                             .accessibilityLabel("İstanbul Boğazı'nı gösteren temsili seyahat görseli")

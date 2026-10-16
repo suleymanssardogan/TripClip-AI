@@ -13,7 +13,7 @@ enum Endpoint {
     // Auth
     case login(email: String, password: String)
     case register(email: String, password: String, username: String?)
-    case appleSignIn(identityToken: String, fullName: String?)
+    case appleSignIn(identityToken: String, authorizationCode: String, fullName: String?)
     case googleSignIn(code: String, redirectUri: String)
     case forgotPassword(email: String)
     case resetPassword(token: String, newPassword: String)
@@ -23,7 +23,7 @@ enum Endpoint {
     case registerDeviceToken(token: String)
 
     // Videos
-    case userVideos(userID: Int)
+    case userVideos(userID: Int, limit: Int = 20, offset: Int = 0)
     case videoDetail(videoID: Int)
     case videoProgress(videoID: Int)
     case queueUrl(url: String)
@@ -47,6 +47,7 @@ enum Endpoint {
     // Trip Builder — Library'den seçilen mekanlardan TSP ile rotalanmış gezi
     case createTrip(title: String, placeIDs: [Int])
     case tripList
+    case tripPage(limit: Int, offset: Int)
     case tripDetail(tripID: Int)
     case updateTripStopOrder(tripID: Int, order: [[Int]])
     case deleteTrip(tripID: Int)
@@ -113,7 +114,7 @@ extension Endpoint {
         case .library:                      return "/api/mobile/places"
         case .librarySemanticSearch:         return "/api/mobile/places"
         case .createTrip:                   return "/api/mobile/trips"
-        case .tripList:                     return "/api/mobile/trips"
+        case .tripList, .tripPage:          return "/api/mobile/trips"
         case .tripDetail(let id):           return "/api/mobile/trips/\(id)"
         case .updateTripStopOrder(let id, _): return "/api/mobile/trips/\(id)/order"
         case .deleteTrip(let id):           return "/api/mobile/trips/\(id)"
@@ -151,8 +152,8 @@ extension Endpoint {
             if let username { b["username"] = username }
             return b
 
-        case .appleSignIn(let token, let name):
-            var b: [String: Any] = ["identity_token": token]
+        case .appleSignIn(let token, let code, let name):
+            var b: [String: Any] = ["identity_token": token, "authorization_code": code]
             if let name { b["full_name"] = name }
             return b
 
@@ -222,6 +223,9 @@ extension Endpoint {
 
     var queryItems: [URLQueryItem]? {
         switch self {
+        case .userVideos(_, let limit, let offset), .tripPage(let limit, let offset):
+            return [URLQueryItem(name: "limit", value: String(limit)),
+                    URLQueryItem(name: "offset", value: String(offset))]
         case .publicPlans(let city, let limit, let offset):
             var items = [
                 URLQueryItem(name: "limit",  value: String(limit)),

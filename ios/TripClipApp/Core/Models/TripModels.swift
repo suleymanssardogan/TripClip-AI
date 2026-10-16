@@ -70,4 +70,12 @@ struct TripSummary: Decodable, Identifiable, Hashable {
 
 struct TripListResponse: Decodable {
     let trips: [TripSummary]
+    let total: Int?
+    let hasMore: Bool?
+
+    init(trips: [TripSummary], total: Int? = nil, hasMore: Bool? = nil) {
+        self.trips = trips
+        self.total = total
+        self.hasMore = hasMore
+    }
 }

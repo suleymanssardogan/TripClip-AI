@@ -75,4 +75,25 @@ final class HomeViewModelTests: XCTestCase {
         XCTAssertFalse(auth.isAuthenticated)
         XCTAssertNil(vm.deleteError)
     }
+    func test_loadMore_keepsExistingPlansAndRetriesFailedPage() async {
+        let fake = FakeAPIClient()
+        let auth = makeAuth(fake: fake)
+        let vm = HomeViewModel()
+        fake.result = .success(PlanListResponse(plans: [plan(id: 1)], total: 3, hasMore: true))
+        await vm.load(auth: auth)
+        fake.result = .failure(APIError.server(code: "UNAVAILABLE", message: "Try again"))
+        await vm.loadMore(auth: auth)
+        XCTAssertEqual(vm.plans.map(\.id), [1])
+        XCTAssertTrue(vm.hasMore)
+        fake.result = .success(PlanListResponse(plans: [plan(id: 1), plan(id: 2)], total: 3, hasMore: false))
+        await vm.loadMore(auth: auth)
+        XCTAssertEqual(vm.plans.map(\.id), [1, 2])
+        XCTAssertFalse(vm.hasMore)
+        guard case .userVideos(_, let limit, let offset) = fake.lastEndpoint else {
+            XCTFail("Expected paged videos"); return
+        }
+        XCTAssertEqual(limit, 20)
+        XCTAssertEqual(offset, 1)
+    }
+
 }

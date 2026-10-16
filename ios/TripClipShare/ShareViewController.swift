@@ -262,6 +262,19 @@ final class ShareViewController: UIViewController {
             return
         }
 
+        guard AIConsentStore.hasConsent(userID: userID) else {
+            let alert = UIAlertController(title: "AI ile veri paylaşımı", message: AIConsentStore.disclosure, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Şimdi değil", style: .cancel))
+            alert.addAction(UIAlertAction(title: "Gizlilik politikasını aç", style: .default) { [weak self] _ in
+                self?.extensionContext?.open(TripClipConfig.privacyURL, completionHandler: nil)
+            })
+            alert.addAction(UIAlertAction(title: "İzin ver ve devam et", style: .default) { [weak self] _ in
+                if AIConsentStore.grant(userID: userID) { self?.postTapped() }
+            })
+            present(alert, animated: true)
+            return
+        }
+
         // Butonu devre dışı bırak — double-tap önlemi
         postButton.isEnabled = false
 

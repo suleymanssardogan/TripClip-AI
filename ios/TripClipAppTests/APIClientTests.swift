@@ -18,6 +18,13 @@ final class APIClientTests: XCTestCase {
         APIClient(baseURL: URL(string: "https://test.invalid")!, session: MockURLProtocol.makeSession())
     }
 
+    func test_appleSignIn_forwardsAuthorizationCode() throws {
+        let endpoint = Endpoint.appleSignIn(identityToken: "identity", authorizationCode: "one-use", fullName: nil)
+        XCTAssertEqual(endpoint.body?["authorization_code"] as? String, "one-use")
+        XCTAssertEqual(endpoint.body?["identity_token"] as? String, "identity")
+        XCTAssertNil(endpoint.body?["full_name"])
+    }
+
     // MARK: - 401 → refresh → retry
 
     func test_send_401_retriesWithRefreshedToken_succeeds() async throws {

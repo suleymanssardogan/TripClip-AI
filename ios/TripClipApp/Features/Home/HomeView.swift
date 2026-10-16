@@ -26,6 +26,7 @@ struct HomeView: View {
     @State private var showLogoutConfirmation = false
     @State private var showDeleteAccountConfirmation = false
     @State private var accountDeleteError: String?
+    @State private var showAIConsent = false
 
     private enum UploadState {
         case idle
@@ -65,7 +66,7 @@ struct HomeView: View {
                         ProgressView().tint(AppColors.accentText)
                             .accessibilityLabel("Yükleniyor")
                         Spacer()
-                    } else if let error = vm.error {
+                    } else if let error = vm.error, vm.plans.isEmpty {
                         errorState(error)
                     } else if vm.plans.isEmpty {
                         emptyState
@@ -84,6 +85,9 @@ struct HomeView: View {
                     .accessibilityLabel("Geçmiş")
 
                     Menu {
+                        NavigationLink(destination: PrivacySettingsView()) {
+                            Label("Gizlilik ve veri paylaşımı", systemImage: "hand.raised")
+                        }
                         Button {
                             (UIApplication.shared.delegate as? AppDelegate)?.requestNotificationPermission()
                         } label: {
@@ -153,7 +157,7 @@ struct HomeView: View {
             }
             Button("Vazgeç", role: .cancel) {}
         } message: {
-            Text("Tüm videoların, planların ve gezilerin kalıcı olarak silinir. Bu işlem geri alınamaz.")
+            Text("Tüm videoların, planların ve gezilerin kalıcı olarak silinir. Bu işlem geri alınamaz. Apple ile giriş yaptıysan bağlantını ayrıca iPhone Ayarlar > adın > Apple ile Giriş bölümünden kaldırabilirsin.")
         }
         .alert("Hesap silinemedi", isPresented: Binding(
             get: { accountDeleteError != nil },
@@ -185,6 +189,14 @@ struct HomeView: View {
             Button("Tamam", role: .cancel) { vm.deleteError = nil }
         } message: {
             Text(vm.deleteError ?? "")
+        }
+        .sheet(isPresented: $showAIConsent, onDismiss: {
+            if !AIConsentStore.hasConsent(userID: auth.user?.id ?? 0) { pickerItem = nil }
+        }) {
+            AIConsentView(userID: auth.user?.id ?? 0, onGranted: {
+                showAIConsent = false
+                if let item = pickerItem { Task { await handlePickedItem(item) } }
+            }, onDeclined: { showAIConsent = false; pickerItem = nil })
         }
         .onChange(of: pickerItem) { _, item in
             guard let item else { return }
@@ -231,6 +243,10 @@ struct HomeView: View {
     // MARK: - Upload Flow
 
     private func handlePickedItem(_ item: PhotosPickerItem) async {
+        guard AIConsentStore.hasConsent(userID: auth.user?.id ?? 0) else {
+            showAIConsent = true
+            return
+        }
         uploadState = .loading
         uploadPct   = 0
 
@@ -240,6 +256,11 @@ struct HomeView: View {
                 return
             }
 
+            guard data.count <= 100 * 1024 * 1024 else {
+                uploadState = .failed("Video 100 MB sınırını aşıyor. Daha kısa bir video seç.")
+                pickerItem = nil
+                return
+            }
             uploadState = .uploading
             let filename = "\(UUID().uuidString).mp4"
 
@@ -415,6 +436,17 @@ struct HomeView: View {
                             Label("Planı Sil", systemImage: "trash")
                         }
                     }
+                }
+                if let error = vm.error {
+                    Text(error.localizedDescription ?? "Yükleme başarısız.")
+                        .font(.footnote).foregroundStyle(AppColors.destructive)
+                }
+                if vm.hasMore {
+                    Button(vm.isLoading ? "Yükleniyor…" : "Daha fazla yükle") {
+                        Task { await vm.loadMore(auth: auth) }
+                    }
+                    .disabled(vm.isLoading)
+                    .padding(.vertical, 12)
                 }
             }
             .padding(.horizontal, 20)

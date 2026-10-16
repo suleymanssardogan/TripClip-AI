@@ -11,6 +11,8 @@ import MapKit
 /// `MKRoute` DEĞİL, bu protokolün kendisini taklit ediyor (bkz.
 /// `TripClipAppTests/Support/FakeOptimizerRoutingProvider.swift`,
 /// docs/ios-trip-optimizer.md "MapKit Directions mimarisi").
+// Route state and MapKit requests are owned by the main actor.
+@MainActor
 protocol OptimizerRoutingProviding {
     func route(
         from: CLLocationCoordinate2D, to: CLLocationCoordinate2D, mode: OptimizerTransportMode

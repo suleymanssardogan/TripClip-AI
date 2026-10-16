@@ -131,6 +131,9 @@ final class APIClient: APIClientProtocol, @unchecked Sendable {
         token: String,
         onProgress: @Sendable @escaping (Double) -> Void
     ) async throws -> UploadResponse {
+        guard data.count <= 100 * 1024 * 1024 else {
+            throw APIError.server(code: "FILE_TOO_LARGE", message: "Video 100 MB sınırını aşıyor.")
+        }
         let boundary = "TripClip-\(UUID().uuidString)"
         var body = Data()
 
@@ -152,6 +155,7 @@ final class APIClient: APIClientProtocol, @unchecked Sendable {
         let delegate = UploadProgressDelegate(onProgress: onProgress)
         let progressSession = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
 
+        defer { progressSession.invalidateAndCancel() }
         let (responseData, response) = try await progressSession.upload(for: request, from: body)
 
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0

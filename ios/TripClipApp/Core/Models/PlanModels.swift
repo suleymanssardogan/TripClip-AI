@@ -131,6 +131,13 @@ struct PlanSummary: Decodable, Identifiable, Hashable {
 struct PlanListResponse: Decodable {
     let plans: [PlanSummary]
     let total: Int
+    let hasMore: Bool?
+
+    init(plans: [PlanSummary], total: Int, hasMore: Bool? = nil) {
+        self.plans = plans
+        self.total = total
+        self.hasMore = hasMore
+    }
 }
 
 /// Gövdesi anlamlı veri taşımayan yazma uçları (`{"success": true}`).

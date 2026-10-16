@@ -203,6 +203,10 @@ final class BackgroundUploader: NSObject, @unchecked Sendable {
                  userID: Int,
                  completion: @escaping EnqueueCompletion) {
 
+        guard AIConsentStore.hasConsent(userID: userID) else {
+            completion(.failure(.consentRequired))
+            return
+        }
         guard let token = authToken else {
             completion(.failure(.notAuthenticated))
             return
@@ -266,11 +270,13 @@ final class BackgroundUploader: NSObject, @unchecked Sendable {
 
     enum UploaderError: LocalizedError {
         case notAuthenticated
+        case consentRequired
         case invalidConfiguration
         case encodingFailed
 
         var errorDescription: String? {
             switch self {
+            case .consentRequired: return "AI veri paylaşımı için önce izin verin."
             case .notAuthenticated:    return "Önce TripClip'e giriş yapın."
             case .invalidConfiguration: return "API adresi geçersiz."
             case .encodingFailed:      return "İstek hazırlanamadı."

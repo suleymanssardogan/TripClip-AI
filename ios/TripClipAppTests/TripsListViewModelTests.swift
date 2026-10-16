@@ -103,4 +103,23 @@ final class TripsListViewModelTests: XCTestCase {
         XCTAssertNotNil(vm.error)
         XCTAssertTrue(vm.trips.isEmpty)
     }
+    func test_loadMore_appendsTripsAndForwardsOffset() async {
+        let fake = FakeAPIClient()
+        let auth = makeAuth(fake: fake)
+        let vm = TripsListViewModel()
+        let first = TripSummary(id: 1, title: "First", totalDistanceKm: nil, createdAt: nil, stopsCount: 1)
+        let second = TripSummary(id: 2, title: "Second", totalDistanceKm: nil, createdAt: nil, stopsCount: 1)
+        fake.result = .success(TripListResponse(trips: [first], total: 2, hasMore: true))
+        await vm.load(auth: auth)
+        fake.result = .success(TripListResponse(trips: [second], total: 2, hasMore: false))
+        await vm.loadMore(auth: auth)
+        XCTAssertEqual(vm.trips.map(\.id), [1, 2])
+        XCTAssertFalse(vm.hasMore)
+        guard case .tripPage(let limit, let offset) = fake.lastEndpoint else {
+            XCTFail("Expected paged trips"); return
+        }
+        XCTAssertEqual(limit, 20)
+        XCTAssertEqual(offset, 1)
+    }
+
 }

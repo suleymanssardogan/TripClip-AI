@@ -22,6 +22,14 @@ enum TripClipConfig {
     static let apiBaseURL: String = "https://api.tripclip.app"
     #endif
 
+    static var aiProviderName: String {
+        guard let value = Bundle.main.infoDictionary?["AI_PROVIDER_NAME"] as? String,
+              !value.isEmpty, value != "$(AI_PROVIDER_NAME)" else { return "Google Gemini" }
+        return value
+    }
+    static let privacyURL = URL(string: "https://tripclip.app/privacy")!
+    static let termsURL = URL(string: "https://tripclip.app/terms")!
+
     static var apiBaseAsURL: URL {
         URL(string: apiBaseURL)!
     }

@@ -24,6 +24,7 @@ settings:
     # googleClientID'si, web'in NEXT_PUBLIC_GOOGLE_CLIENT_ID'iyle AYNI
     # "optional infra degrades gracefully" deseni).
     GOOGLE_CLIENT_ID: ""
+    AI_PROVIDER_NAME: "Google Gemini"
     APS_ENVIRONMENT: development
   configs:
     Debug:
@@ -74,11 +75,16 @@ targets:
         NSPhotoLibraryUsageDescription: "TripClip, gezi videolarını yüklemek için fotoğraf kitaplığınıza erişir."
         ITSAppUsesNonExemptEncryption: false
         DEV_API_HOST: "$(DEV_API_HOST)"
+        AI_PROVIDER_NAME: "$(AI_PROVIDER_NAME)"
+        NSLocalNetworkUsageDescription: "Geliştirme sırasında Mac üzerinde çalışan TripClip sunucusuna bağlanmak için yerel ağ erişimi gerekir."
         GOOGLE_CLIENT_ID: "$(GOOGLE_CLIENT_ID)"
 
     entitlements:
       path: TripClipApp/Resources/TripClipApp.entitlements
       properties:
+        com.apple.developer.applesignin:
+          - Default
+        aps-environment: "$(APS_ENVIRONMENT)"
         com.apple.security.application-groups:
           - group.com.sardogan.TripClipAI
 
@@ -135,6 +141,8 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         DEV_API_HOST: "$(DEV_API_HOST)"
+        AI_PROVIDER_NAME: "$(AI_PROVIDER_NAME)"
+        NSLocalNetworkUsageDescription: "Geliştirme sırasında Mac üzerinde çalışan TripClip sunucusuna bağlanmak için yerel ağ erişimi gerekir."
 
     entitlements:
       path: TripClipShare/TripClipShare.entitlements

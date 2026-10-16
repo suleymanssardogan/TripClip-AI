@@ -17,7 +17,15 @@ final class HomeViewModel {
     /// AYNI desen: ayrı bir alan, `.alert` ile gösterilir, liste YERİNDE kalır.
     var deleteError: String?
 
-    func load(auth: AuthEnvironment) async {
+    private(set) var hasMore = false
+    private var nextOffset = 0
+
+    func loadMore(auth: AuthEnvironment) async {
+        guard hasMore else { return }
+        await load(auth: auth, append: true)
+    }
+
+    func load(auth: AuthEnvironment, append: Bool = false) async {
         guard !isLoading else { return }
         isLoading = true
         error = nil
@@ -27,10 +35,18 @@ final class HomeViewModel {
 
         do {
             let response: PlanListResponse = try await auth.apiClient.send(
-                .userVideos(userID: userID),
+                .userVideos(userID: userID, limit: 20, offset: append ? nextOffset : 0),
                 token: token
             )
-            plans = response.plans
+            let start = append ? nextOffset : 0
+            if append {
+                let existing = Set(plans.map(\.id))
+                plans.append(contentsOf: response.plans.filter { !existing.contains($0.id) })
+            } else {
+                plans = response.plans
+            }
+            nextOffset = start + response.plans.count
+            hasMore = !response.plans.isEmpty && (response.hasMore ?? (nextOffset < response.total))
         } catch let apiError as APIError {
             if apiError.isUnauthorized { auth.handleUnauthorized(); return }
             error = apiError
@@ -55,6 +71,7 @@ final class HomeViewModel {
             let _: SuccessResponse = try await auth.apiClient.send(
                 .deletePlan(videoID: plan.id), token: token
             )
+            nextOffset = max(0, nextOffset - 1)
             if let cached = PersistenceController.shared.fetch(id: plan.id) {
                 PersistenceController.shared.delete(cached)
             }

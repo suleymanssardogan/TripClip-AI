@@ -66,5 +66,9 @@ enum AppGroupStore {
         deleteToken()
         deleteRefreshToken()
         deleteUserID()
+        AIConsentStore.revoke()
+        for key in ["pendingURL", "pendingVideoID", "pendingUploadError", "lastUploadDate"] {
+            defaults?.removeObject(forKey: key)
+        }
     }
 }

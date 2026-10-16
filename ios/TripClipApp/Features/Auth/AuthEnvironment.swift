@@ -119,6 +119,8 @@ final class AuthEnvironment {
             throw APIError.server(code: "AUTH_REQUIRED", message: "Oturum süresi doldu.")
         }
         let _: StatusResponse = try await apiClient.send(.deleteAccount, token: token)
+        // An in-flight token refresh must not restore a deleted account.
+        sessionEpoch += 1
         user = nil
         KeychainStore.delete()
         KeychainStore.deleteRefresh()
@@ -235,7 +237,9 @@ final class AuthEnvironment {
             case .success(let auth) = result,
             let credential = auth.credential as? ASAuthorizationAppleIDCredential,
             let tokenData  = credential.identityToken,
-            let tokenStr   = String(data: tokenData, encoding: .utf8)
+            let tokenStr   = String(data: tokenData, encoding: .utf8),
+            let codeData = credential.authorizationCode,
+            let codeStr = String(data: codeData, encoding: .utf8)
         else {
             throw APIError.server(code: "APPLE_AUTH_FAILED", message: "Apple ile giriş başarısız.")
         }
@@ -252,7 +256,7 @@ final class AuthEnvironment {
         defer { isLoading = false }
 
         let response: AuthResponse = try await apiClient.send(
-            .appleSignIn(identityToken: tokenStr, fullName: fullName),
+            .appleSignIn(identityToken: tokenStr, authorizationCode: codeStr, fullName: fullName),
             token: nil
         )
         persist(response: response)

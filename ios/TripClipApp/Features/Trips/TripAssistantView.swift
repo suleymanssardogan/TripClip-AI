@@ -36,6 +36,7 @@ struct TripAssistantView: View {
     @Environment(AuthEnvironment.self) private var auth
     @Environment(\.dismiss) private var dismiss
     @State private var inputText = ""
+    @State private var showAIConsent = false
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -81,6 +82,10 @@ struct TripAssistantView: View {
                             .foregroundStyle(AppColors.destructive)
                         Spacer()
                         Button("Tekrar Dene") {
+                            guard AIConsentStore.hasConsent(userID: auth.user?.id ?? 0) else {
+                                showAIConsent = true
+                                return
+                            }
                             Task { await vm.retryLastFailedMessage(tripID: tripID, auth: auth) }
                         }
                         .font(.system(size: 13, weight: .semibold))
@@ -96,6 +101,20 @@ struct TripAssistantView: View {
         }
         .navigationTitle("AI Asistan")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showAIConsent) {
+            AIConsentView(userID: auth.user?.id ?? 0, onGranted: { showAIConsent = false },
+                          onDeclined: { showAIConsent = false })
+        }
+    }
+
+    private func sendIfAllowed(_ text: String) {
+        guard AIConsentStore.hasConsent(userID: auth.user?.id ?? 0) else {
+            inputText = text
+            showAIConsent = true
+            return
+        }
+        inputText = ""
+        Task { await vm.send(text, tripID: tripID, auth: auth) }
     }
 
     // MARK: - Sohbet baloncukları
@@ -171,7 +190,7 @@ struct TripAssistantView: View {
 
             ForEach(suggestedPrompts, id: \.self) { prompt in
                 Button {
-                    Task { await vm.send(prompt, tripID: tripID, auth: auth) }
+                    sendIfAllowed(prompt)
                 } label: {
                     Text(prompt)
                         .font(.system(size: 13, weight: .semibold))
@@ -205,8 +224,7 @@ struct TripAssistantView: View {
 
             Button {
                 let text = inputText
-                inputText = ""
-                Task { await vm.send(text, tripID: tripID, auth: auth) }
+                sendIfAllowed(text)
             } label: {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 30))

@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>AI_PROVIDER_NAME</key>
+	<string>$(AI_PROVIDER_NAME)</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
@@ -33,6 +35,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Geliştirme sırasında Mac üzerinde çalışan TripClip sunucusuna bağlanmak için yerel ağ erişimi gerekir.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>TripClip, harita üzerinde gezi güzergahlarını göstermek için konumunuzu kullanır.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
