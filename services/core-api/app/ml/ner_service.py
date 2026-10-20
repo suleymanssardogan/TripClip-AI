@@ -8,7 +8,6 @@ Performans notları:
   - max_text_chars: BERT max 512 token → çok uzun metin parçalanır
 """
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-from transformers import pipeline
 from typing import List, Dict
 import logging
 
@@ -18,6 +17,12 @@ logger = logging.getLogger(__name__)
 NER_TIMEOUT_SECONDS = 45
 # BERT max token ≈ 512 — güvenli karakter limiti
 MAX_TEXT_CHARS = 1800
+
+
+def pipeline(*args, **kwargs):
+    """Load the optional ML dependency only when constructing the model."""
+    from transformers import pipeline as transformers_pipeline
+    return transformers_pipeline(*args, **kwargs)
 
 # Yer ismi değil ünlem/dolgu kelimeler — tek kelime YA DA bunların ardışık
 # birleşimi olarak etiketlenebilir (aggregation_strategy="simple" "Ya" + "Allah"

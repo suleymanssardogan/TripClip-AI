@@ -677,6 +677,9 @@ export interface VideoDetail {
     audio: { transcription: { transcript: string; language: string } };
     ner: { extracted_locations: string[] };
     nominatim: {
+      location_summary?: {
+        unresolved_locations?: Array<{ name: string; city?: string | null; status: string }>;
+      };
       deduplicated_locations: Array<{
         original_name: string;
         place_data: {
@@ -689,7 +692,7 @@ export interface VideoDetail {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     route: { optimized_route: { route: any[]; total_distance_km: number } };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    rag: { travel_tips: { tips: any[]; summary: string } };
+    rag: { status?: "pending" | "completed" | "failed" | "unavailable"; travel_tips: { tips: any[]; summary: string } };
     ocr_pois: string[] | null;
   } | null;
   degradation: {

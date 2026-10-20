@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from unittest import mock
 import pytest
 from pydantic import ValidationError
-from tests.conftest import TestingSessionLocal
+from conftest import TestingSessionLocal
 from tests.test_place_knowledge_retriever import _make_place, _trip_context, ContextStop
 from app.application.services.knowledge_ingestion import ingest_documents, KnowledgeInput
 from app.infrastructure.repositories.sql_place_knowledge_retriever import SqlPlaceKnowledgeRetriever

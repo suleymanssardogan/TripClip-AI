@@ -58,14 +58,33 @@ def test_upload_invalid_file_type(client, auth_headers, mock_core_api):
     mock_core_api.post.assert_not_awaited()
 
 
-def test_upload_file_too_large(client, auth_headers, mock_core_api):
-    """100MB üstü dosya → 400 FILE_TOO_LARGE, Core API'ye hiç gidilmez."""
-    big_content = b"0" * (100 * 1024 * 1024 + 1)
+def test_upload_file_too_large(client, auth_headers, mock_core_api, monkeypatch):
+    """Limit + 1 is rejected before forwarding to Core."""
+    monkeypatch.setattr("app.routes.videos.MAX_UPLOAD_BYTES", 16)
+    big_content = b"0" * 17
     files = {"file": ("trip.mp4", io.BytesIO(big_content), "video/mp4")}
     resp = client.post("/api/mobile/videos/upload", files=files, headers=auth_headers)
 
-    assert resp.status_code == 400
+    assert resp.status_code == 413
     assert resp.json()["code"] == "FILE_TOO_LARGE"
+    mock_core_api.post.assert_not_awaited()
+
+
+def test_upload_reads_only_limit_plus_one(client, auth_headers, mock_core_api, monkeypatch):
+    from starlette.datastructures import UploadFile
+    original = UploadFile.read
+    sizes = []
+
+    async def tracked_read(self, size=-1):
+        sizes.append(size)
+        return await original(self, size)
+
+    monkeypatch.setattr("app.routes.videos.MAX_UPLOAD_BYTES", 16)
+    monkeypatch.setattr(UploadFile, "read", tracked_read)
+    response = client.post('/api/mobile/videos/upload', headers=auth_headers,
+                           files={'file': ('trip.mp4', b'x' * 64, 'video/mp4')})
+    assert response.status_code == 413
+    assert sizes == [17]
     mock_core_api.post.assert_not_awaited()
 
 

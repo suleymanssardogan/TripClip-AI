@@ -19,6 +19,7 @@ from app.transformers.video_transformer import to_mobile_summary, to_mobile_deta
 limiter      = Limiter(key_func=get_remote_address)
 router       = APIRouter(prefix="/videos", tags=["videos"])
 CORE_API_URL = os.getenv("CORE_API_URL", "http://core-api:8000")
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 
 @router.post("/upload")
@@ -36,9 +37,9 @@ async def upload_video(
             "message": "Yalnızca video dosyaları yüklenebilir.",
         })
 
-    content = await file.read()
-    if len(content) > 100 * 1024 * 1024:
-        raise HTTPException(400, detail={
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, detail={
             "code": "FILE_TOO_LARGE",
             "message": "Video dosyası çok büyük. 100 MB altında bir video seçin.",
         })

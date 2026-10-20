@@ -2,7 +2,15 @@
 Pytest fixtures — SQLite in-memory test DB, FastAPI test client
 """
 import os
-os.environ.setdefault("DATABASE_URL",   "sqlite:///./test.db")
+import tempfile
+from pathlib import Path
+
+# Each pytest process owns its database, including application SessionLocal.
+# Never use a developer/production DATABASE_URL during unit tests.
+_test_storage = tempfile.TemporaryDirectory(prefix="tripclip-core-tests-")
+TEST_DATABASE_URL = f"sqlite:///{Path(_test_storage.name) / 'test.db'}"
+os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+os.environ["ANALYTICS_ENABLED"] = "false"
 os.environ.setdefault("REDIS_URL",      "redis://localhost:6379/1")
 os.environ.setdefault("MONGODB_URL",    "mongodb://localhost:27017/tripclip_test")
 os.environ.setdefault("SECRET_KEY",     "test-secret-key-tripclip-ai-2026")
@@ -16,8 +24,7 @@ from sqlalchemy.orm import sessionmaker
 from app.main import app
 from app.core.database import Base, get_db
 
-# SQLite in-memory (hızlı, izole)
-TEST_DATABASE_URL = "sqlite:///./test.db"
+# File-backed SQLite supports the API's threaded TestClient.
 
 engine = create_engine(
     TEST_DATABASE_URL,
@@ -40,6 +47,10 @@ def setup_db():
     Base.metadata.create_all(bind=engine)
     yield
     Base.metadata.drop_all(bind=engine)
+    engine.dispose()
+    from app.core.database import engine as app_engine
+    app_engine.dispose()
+    _test_storage.cleanup()
 
 
 @pytest.fixture(scope="function")

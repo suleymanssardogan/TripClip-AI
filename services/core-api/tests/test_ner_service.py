@@ -82,3 +82,15 @@ def test_extract_locations_from_transcript_filters_org_interjection():
     assert "Ya Allah" not in results
     assert "Gaziantep" in results
     assert "Kamil Şifa Beyran Salonu" in results
+
+
+def test_importing_ner_service_does_not_load_optional_ml_runtime():
+    """API/test discovery must not require a working SciPy/transformers binary."""
+    import subprocess
+    import sys
+    result = subprocess.run(
+        [sys.executable, '-c',
+         'import sys; import app.ml.ner_service; assert "transformers" not in sys.modules; assert "scipy" not in sys.modules'],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr

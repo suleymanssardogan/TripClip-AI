@@ -7,7 +7,7 @@ from app.models.trip import Trip
 from app.models.trip_collaborator import TripCollaborator, CollaboratorRole
 from app.infrastructure.repositories.sql_video_repository import SqlVideoRepository
 from app.infrastructure.repositories.sql_trip_repository import SqlTripRepository
-from tests.conftest import TestingSessionLocal
+from conftest import TestingSessionLocal
 
 
 def test_video_pages_are_bounded_stable_and_user_scoped(client, registered_user):

@@ -3,6 +3,7 @@ from difflib import SequenceMatcher
 from typing import List, Dict, Optional, Tuple
 from math import radians, sin, cos, sqrt, atan2
 from concurrent.futures import ThreadPoolExecutor
+from app.ml.location_validation import rejection_reason
 import logging
 import os
 import threading
@@ -992,7 +993,19 @@ out center 3;
         max_workers = min(4, len(locations)) or 1
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             for location_results in pool.map(_process_one, locations):
-                enriched.extend(location_results)
+                for candidate in location_results:
+                    reason = rejection_reason(
+                        candidate["original_name"], candidate["place_data"],
+                        bbox=city_bbox, city_hint=city_hint, country_code=country_code,
+                    )
+                    if reason:
+                        logger.info("Geographic candidate rejected: %s (%s)",
+                                    candidate["original_name"], reason)
+                        continue
+                    candidate["place_data"]["validation"] = {
+                        "status": "no_conflict_detected", "region_checked": bool(city_bbox),
+                    }
+                    enriched.append(candidate)
 
         logger.info(f"Enriched {len(enriched)}/{len(locations)} locations")
         return enriched

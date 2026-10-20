@@ -29,6 +29,12 @@ def get_current_user_id(
 ) -> int:
     try:
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
-        return int(payload["sub"])
-    except JWTError:
+        subject = payload.get("sub")
+        if payload.get("type") != "access" or not isinstance(subject, str) or not subject.isdecimal():
+            raise ValueError("Invalid access token claims")
+        user_id = int(subject)
+        if user_id <= 0:
+            raise ValueError("Invalid user ID")
+        return user_id
+    except (JWTError, ValueError, TypeError):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")

@@ -15,6 +15,15 @@ logger = logging.getLogger(__name__)
 
 class SqlVideoRepository(AbstractVideoRepository):
 
+    def get_travel_tips_status(self, video_id: int) -> str:
+        from app.models.deferred_job import DeferredJob
+        job = self._db.query(DeferredJob).filter_by(
+            kind="travel_tips", entity_id=video_id
+        ).order_by(DeferredJob.id.desc()).first()
+        if job and job.status in {"pending", "queued", "processing"}:
+            return "pending"
+        return "failed" if job and job.status == "failed" else "unavailable"
+
     def __init__(self, db: Session):
         self._db = db
 
@@ -170,22 +179,16 @@ class SqlVideoRepository(AbstractVideoRepository):
         video.status            = VideoStatus.COMPLETED
         from app.application.services.deferred_work import enqueue
         enqueue(self._db, "travel_tips", video_id)
+        library_job = enqueue(self._db, "library_sync", video_id)
+        self._db.flush()
+        library_job_id = library_job.id
         self._db.commit()
 
-        # Bu video artık videolar-arası Place kütüphanesine işlenir — tek bir
-        # video değil, kullanıcının BİRİKMİŞ tüm mekanları "kütüphane" ekranını
-        # besler (bkz. goal.md Phase 12). Kütüphane bu adım olmadan yalnızca
-        # backfill anındaki eski videolarda kalır, yeni videolar görünmez.
-        # Best-effort: senkronizasyon başarısız olsa bile video COMPLETED
-        # kalmalı — kullanıcı sonucu görmeyi bu adıma bağımlı olmamalı.
-        try:
-            SqlPlaceRepository(self._db).sync_from_video(video)
-        except Exception:
-            # A failed optional sync can leave the shared Session in a failed
-            # transaction. Restore it before push/analytics read the video.
-            # The completed video was committed in the preceding transaction.
-            self._db.rollback()
-            logger.exception("⚠️ Place senkronizasyonu başarısız | video_id=%s", video_id)
+        # Use the same lease/retry protocol for the immediate attempt and worker.
+        # The job committed with the video survives a crash before this attempt.
+        from app.application.services.deferred_work import execute_job
+        execute_job(self._db, library_job_id,
+                    lambda kind, entity_id: SqlPlaceRepository(self._db).sync_from_video(video))
 
     def save_travel_tips(self, video_id: int, tips: Dict[str, Any]) -> None:
         """

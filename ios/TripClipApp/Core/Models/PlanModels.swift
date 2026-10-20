@@ -156,6 +156,7 @@ struct PlanDetail: Codable, Identifiable {
     // Kullanıcı durakları düzenleyebiliyor (silme/sıralama) — sunucu yanıtı
     // beklenmeden ekranın güncellenmesi için değiştirilebilir olmalı.
     var locations:        [LocationPin]
+    var unresolvedLocations: [UnresolvedLocation]? = nil
     var route:            [RoutePoint]?
     let transcription:    String?
     let travelTips:       [TravelTip]
@@ -171,6 +172,12 @@ struct PlanDetail: Codable, Identifiable {
         }
         return "Gezi #\(id)"
     }
+}
+
+struct UnresolvedLocation: Codable {
+    let name: String
+    let city: String?
+    let status: String
 }
 
 struct LocationPin: Codable, Identifiable {

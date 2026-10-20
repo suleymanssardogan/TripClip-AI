@@ -105,7 +105,7 @@ def test_url_schema_migration_roundtrip(tmp_path, monkeypatch):
         connection.execute(text("ALTER TABLE videos DROP COLUMN source_platform"))
         connection.execute(text("ALTER TABLE videos DROP COLUMN source_url"))
     cfg = Config("alembic.ini"); cfg.set_main_option("sqlalchemy.url", url)
-    command.stamp(cfg, "f7c21a904d63"); command.upgrade(cfg, "head")
+    command.stamp(cfg, "f7c21a904d63"); command.upgrade(cfg, "a81d5c02ef49")
     assert {"source_url", "source_platform"} <= {c["name"] for c in inspect(engine).get_columns("videos")}
     command.downgrade(cfg, "f7c21a904d63")
     assert "source_url" not in {c["name"] for c in inspect(engine).get_columns("videos")}
@@ -118,7 +118,7 @@ def test_upload_accepted_during_broker_outage(client, bff_headers, monkeypatch):
     with mock.patch("app.application.services.deferred_work.dispatch_pending_work", side_effect=RuntimeError("offline")):
         response = client.post("/internal/videos/process", files={"file": ("test.mp4", b"video", "video/mp4")}, headers=bff_headers)
     assert response.status_code == 200
-    from tests.conftest import TestingSessionLocal
+    from conftest import TestingSessionLocal
     with TestingSessionLocal() as db:
         vid = response.json()["id"]
         assert db.get(Video, vid) is not None

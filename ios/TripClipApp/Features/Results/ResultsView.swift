@@ -141,7 +141,6 @@ struct ResultsView: View {
                         .id(Self.mapAnchor)
                 }
 
-                statsStrip(plan).padding(.horizontal, 16)
 
                 if !plan.locations.isEmpty {
                     locationsHeader(plan)
@@ -180,6 +179,24 @@ struct ResultsView: View {
                     emptyLocationsState.padding(.horizontal, 16)
                 }
 
+                if let unresolved = plan.unresolvedLocations, !unresolved.isEmpty {
+                    sectionHeader("Konumu bulunamadı")
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Bu yerler videoda tespit edildi ancak konumları eşleştirilemedi. Haritaya ve rotaya eklenmedi.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        ForEach(Array(unresolved.enumerated()), id: \.offset) { _, place in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(place.name).font(.headline)
+                                if let city = place.city, !city.isEmpty {
+                                    Text(city).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                }
+
                 if !plan.travelTips.isEmpty {
                     sectionHeader("Seyahat İpuçları")
                     TravelTipsSection(tips: plan.travelTips)
@@ -194,6 +211,8 @@ struct ResultsView: View {
                     tipsFailedNotice
                 }
 
+                DisclosureGroup("Analiz detayları") {
+                    statsStrip(plan)
                 if let transcript = plan.transcription, !transcript.isEmpty {
                     sectionHeader("Video Transkripsiyonu")
                     Text(transcript)
@@ -201,6 +220,9 @@ struct ResultsView: View {
                         .foregroundStyle(AppColors.textSecondary)
                         .padding(.horizontal, 16)
                 }
+
+                }
+                .padding(.horizontal, 16)
 
                 Color.clear.frame(height: 40)
             }

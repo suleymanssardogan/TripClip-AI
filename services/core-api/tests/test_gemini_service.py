@@ -231,3 +231,24 @@ def test_answer_question_uses_a_tighter_retry_budget_than_the_shared_default(ser
         service.answer_question("system prompt", "soru")
     _, kwargs = mock_call.call_args
     assert kwargs["max_retries"] == 2
+
+
+def test_tips_receive_geographic_context_and_filter_invented_places(service):
+    locations = [{'original_name': 'Efes', 'place_data': {
+        'name': 'Efes', 'address': 'Selçuk, İzmir', 'osm_id': 42,
+        'location': {'lat': 37.94, 'lng': 27.34}, 'precision': 'exact'}},
+        {'original_name': 'Unknown', 'place_data': {'precision': 'approximate'}}]
+    with mock.patch.object(service, '_cache_get', return_value=None), mock.patch.object(service, '_cache_set'), mock.patch.object(service, '_call', return_value='{"tips":[{"location":"Efes","tip":"Su alın"},{"location":"Paris","tip":"Gezin"}],"summary":"Gezi"}') as call:
+        result = service.generate_travel_tips(locations, video_id=1)
+    prompt = call.call_args.args[0][0]['text']
+    assert 'Selçuk' in prompt and '37.94' in prompt and '42' in prompt
+    assert 'Unknown' not in prompt
+    assert [t['location'] for t in result['tips']] == ['Efes']
+    assert result['sources'] == []
+    assert result['knowledge_source'] == 'model_general_knowledge'
+
+
+def test_unresolved_only_does_not_call_provider(service):
+    with mock.patch.object(service, '_call') as call:
+        assert service.generate_travel_tips([{'place_data': {'precision': 'unresolved'}}])['tips'] == []
+    call.assert_not_called()

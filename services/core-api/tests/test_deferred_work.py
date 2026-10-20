@@ -107,3 +107,42 @@ def test_deliberately_disabled_tip_provider_does_not_retry_forever(db, monkeypat
     with mock.patch("app.ml.gemini_service.GeminiService") as provider:
         assert execute_job(db, job.id, lambda k, v: _run_deferred_work(db, k, v)) == "completed"
         provider.assert_not_called()
+
+
+@pytest.mark.parametrize('job_status,expected', [
+    ('pending', 'pending'), ('queued', 'pending'), ('processing', 'pending'),
+    ('failed', 'failed'), ('completed', 'unavailable'),
+])
+def test_travel_tips_status_uses_durable_job(db, job_status, expected):
+    from app.infrastructure.repositories.sql_video_repository import SqlVideoRepository
+    job = enqueue(db, 'travel_tips', 52)
+    job.status = job_status
+    db.commit()
+    assert SqlVideoRepository(db).get_travel_tips_status(52) == expected
+    assert SqlVideoRepository(db).get_travel_tips_status(53) == 'unavailable'
+
+
+def test_library_failure_is_durable_and_retry_does_not_duplicate_saves(db):
+    from app.models.video import Video, VideoStatus
+    from app.models.place_save import PlaceSave
+    from app.infrastructure.repositories.sql_video_repository import SqlVideoRepository
+    from app.infrastructure.repositories.sql_place_repository import SqlPlaceRepository
+    from app.tasks.video_tasks import _run_deferred_work
+    video = Video(filename='test.mp4', file_path='/tmp/no-file', user_id=1,
+                  status=VideoStatus.PROCESSING)
+    db.add(video)
+    db.commit()
+    results = {'deduplicated_locations': [{'original_name': 'Library recovery test',
+        'place_data': {'location': {'lat': 38.32, 'lng': 26.76}}}]}
+    with mock.patch.object(SqlPlaceRepository, 'sync_from_video', side_effect=RuntimeError('offline')):
+        SqlVideoRepository(db).save_results(video.id, results)
+    job = db.query(DeferredJob).filter_by(kind='library_sync', entity_id=video.id).one()
+    assert job.status == 'pending'
+    assert db.get(Video, video.id).status == VideoStatus.COMPLETED
+    job.available_at = datetime.utcnow() - timedelta(seconds=1)
+    db.commit()
+    assert execute_job(db, job.id, lambda k, v: _run_deferred_work(db, k, v)) == 'completed'
+    count = db.query(PlaceSave).filter_by(user_id=1).count()
+    assert count == 1
+    _run_deferred_work(db, 'library_sync', video.id)
+    assert db.query(PlaceSave).filter_by(user_id=1).count() == count

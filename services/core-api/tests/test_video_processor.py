@@ -195,3 +195,51 @@ def test_empty_gemini_extraction_completes_without_region(provider_failure, tmp_
         result = service.process_video('synthetic.mp4', 9999, defer_tips=True)
     assert result['deduplicated_locations'] == []
     service.places.resolve_region.assert_not_called()
+
+
+def test_unresolved_efes_keeps_selcuk_context_without_urla_pin(tmp_path):
+    """Missing Efes must not inherit the first resolved district coordinates."""
+    service = VideoProcessingService.__new__(VideoProcessingService)
+    service._ml_available = True
+    service._use_gemini = True
+    service._use_hybrid = False
+    service.frames_dir = tmp_path
+    service.detector = mock.Mock()
+    service.vision_detector = mock.Mock()
+    service.ocr = mock.Mock()
+    service.places = mock.Mock()
+    service.route_optimizer = mock.Mock()
+    service.gemini = mock.Mock()
+    service.gemini.normalize_extraction.return_value = {
+        'region': {'city': 'İzmir', 'country': 'Türkiye'},
+        'locations': [{'name': 'Urla', 'city': 'Urla'},
+                      {'name': 'Efes Antik Kenti', 'city': 'Selçuk'}],
+    }
+    service.places.resolve_region.return_value = {
+        'bbox': (37, 26, 39, 28), 'center': (38.32, 26.76)}
+    urla = {'original_name': 'Urla', 'place_data': {
+        'name': 'Urla', 'type': 'administrative',
+        'location': {'lat': 38.32, 'lng': 26.76}, 'importance': 0.4}}
+    service.places.enrich_locations.side_effect = lambda names, **kw: [urla] if names == ['Urla'] else []
+    service._fix_geographic_outliers = mock.Mock(side_effect=lambda locations, log: locations)
+    service.route_optimizer.optimize_route.return_value = {}
+    service.gemini.extract_locations.return_value = []
+    service._get_metadata = mock.Mock(return_value={'duration': 5, 'width': 640, 'height': 360, 'fps': 30})
+    service._extract_frames = mock.Mock(return_value=[])
+    service._create_thumbnail = mock.Mock(return_value=None)
+    service._filter_ocr_pois = mock.Mock(return_value=[])
+    service._enrich_ocr_pois = mock.Mock(return_value=[])
+    from app.core.services.video_processor import ServiceResult
+    results = [ServiceResult(name, [], True) for name in ['YOLO', 'Vision', 'OCR']]
+    with mock.patch('app.core.services.video_processor.run_parallel', return_value=results), mock.patch('app.core.services.video_processor.set_progress'), mock.patch('app.core.services.video_processor._gemini_cache_get', return_value=None), mock.patch('app.core.services.video_processor._gemini_cache_set'):
+        result = service.process_video('synthetic.mp4', 9999, defer_tips=True)
+    assert [x['original_name'] for x in result['deduplicated_locations']] == ['Urla']
+    missing = result['location_summary']['unresolved_locations']
+    assert missing == [{'name': 'Efes Antik Kenti', 'city': 'Selçuk',
+                        'status': 'unresolved', 'reason': 'no_geographic_match'}]
+    assert 'location' not in missing[0]
+    service.places.enrich_locations.assert_any_call(
+        ['Efes Antik Kenti'], use_overpass=True,
+        city_bbox=(37, 26, 39, 28), city_hint='Selçuk', country_code=None)
+    routed = service.route_optimizer.optimize_route.call_args.args[0]
+    assert [x['original_name'] for x in routed] == ['Urla']

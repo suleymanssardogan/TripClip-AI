@@ -58,6 +58,7 @@ def to_mobile_detail(raw: Dict[str, Any]) -> Dict[str, Any]:
         "createdAt":    raw.get("created_at"),
         # Harita verisi
         "locations":    locations,
+        "unresolvedLocations": (nominatim.get("location_summary") or {}).get("unresolved_locations", []),
         "route":        route,
         # AI özet
         "transcription": ((ai.get("audio") or {}).get("transcription") or {}).get("transcript"),

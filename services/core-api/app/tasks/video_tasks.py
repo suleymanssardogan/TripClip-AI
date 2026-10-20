@@ -259,7 +259,13 @@ def deferred_work_task(job_id: int):
 
 
 def _run_deferred_work(db, kind, entity_id):
-    if kind == "place_index":
+    if kind == "library_sync":
+        from app.models.video import Video
+        from app.infrastructure.repositories.sql_place_repository import SqlPlaceRepository
+        video = db.get(Video, entity_id)
+        if video is not None and video.status == "completed":
+            SqlPlaceRepository(db).sync_from_video(video)
+    elif kind == "place_index":
         from datetime import datetime
         from app.models.place import Place
         from app.models.place_knowledge_document import PlaceKnowledgeDocument
@@ -292,7 +298,7 @@ def _run_deferred_work(db, kind, entity_id):
             if gemini_mode:
                 from app.ml.gemini_service import GeminiService
                 tips = GeminiService().generate_travel_tips(
-                    [loc.get("original_name") or loc.get("name", "") for loc in video.deduplicated_locations],
+                    video.deduplicated_locations,
                     video_id=entity_id)
             else:
                 from app.ml.rag_service import RAGService

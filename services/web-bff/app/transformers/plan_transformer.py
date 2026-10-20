@@ -46,6 +46,7 @@ def to_analyze_view(raw: Dict[str, Any]) -> Dict[str, Any]:
         "status":    raw.get("status"),
         "duration":  raw.get("duration"),
         "locations": _web_locations(locs),
+        "unresolvedLocations": (nominatim.get("location_summary") or {}).get("unresolved_locations", []),
         "tips":      tips,
         "route":     route,
         "transcription": (ai.get("audio") or {}).get("transcription", {}).get("transcript"),

@@ -230,7 +230,10 @@ class VideoService:
                     "location_summary":      video.location_summary,
                 },
                 "route":    {"optimized_route": video.optimized_route},
-                "rag":      {"travel_tips": video.travel_tips},
+                "rag":      {"travel_tips": video.travel_tips,
+                             "status": "completed" if video.travel_tips and (
+                                 video.travel_tips.get("tips") or video.travel_tips.get("summary")
+                             ) else self._repo.get_travel_tips_status(video_id)},
                 "ocr_pois": video.ocr_pois if is_owner else None,
             },
             degradation=video.degradation,

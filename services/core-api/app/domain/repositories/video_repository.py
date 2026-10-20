@@ -7,6 +7,9 @@ from typing import Optional, List, Dict, Any
 
 class AbstractVideoRepository(ABC):
 
+    def get_travel_tips_status(self, video_id: int) -> str:
+        return "unavailable"
+
     @abstractmethod
     def create(self, filename: str, file_path: str, user_id: int, source_url: Optional[str] = None, source_platform: Optional[str] = None):
         """Yeni video kaydı oluştur. Video nesnesini döner."""

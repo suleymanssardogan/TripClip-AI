@@ -137,7 +137,7 @@ def test_places_service_scoring():
         }
     ]
     
-    with mock.patch("requests.get") as mock_get:
+    with mock.patch("app.ml.places_service.requests.get") as mock_get:
         mock_resp = mock.Mock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = mock_results

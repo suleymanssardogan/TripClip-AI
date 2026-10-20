@@ -65,6 +65,7 @@ _WEB_MESSAGES: dict[str, str] = {
 }
 
 _DEFAULT_MESSAGE = "Bir hata oluştu. Lütfen sayfayı yenileyip tekrar deneyin."
+_WEB_MESSAGES["NOT_FOUND"] = "Aradığınız kayıt bulunamadı veya erişim izniniz yok."
 
 
 def _parse_core_error(data: dict) -> tuple[str, str, int]:
@@ -81,7 +82,7 @@ def _parse_core_error(data: dict) -> tuple[str, str, int]:
         status = 401
     elif code in {"PERMISSION_DENIED", "FORBIDDEN"}:
         status = 403
-    elif code in {"VIDEO_NOT_FOUND", "SHARE_TOKEN_INVALID", "SHARE_NOT_FOUND", "TRIP_NOT_FOUND", "ITINERARY_NOT_FOUND", "APPLY_HISTORY_NOT_FOUND"}:
+    elif code in {"NOT_FOUND", "VIDEO_NOT_FOUND", "SHARE_TOKEN_INVALID", "SHARE_NOT_FOUND", "TRIP_NOT_FOUND", "ITINERARY_NOT_FOUND", "APPLY_HISTORY_NOT_FOUND"}:
         status = 404
     elif code in {"RATE_LIMIT_EXCEEDED", "DAILY_QUOTA_EXCEEDED"}:
         status = 429

@@ -4,7 +4,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
 import {
-  MapPin, ArrowLeft, Clock, Mic, FileText, Globe2, Navigation, PenLine, Share2, Download,
+  MapPin, ArrowLeft, Clock, Mic, FileText, Navigation, PenLine, Share2, Download,
   Sparkles, Landmark, Map, Lightbulb, Check, AlertTriangle, Info, BookOpen, Building2,
 } from "lucide-react";
 import Link from "next/link";
@@ -131,6 +131,7 @@ export default function AnalysisResultPage() {
   const [video, setVideo]               = useState<VideoDetail | null>(null);
   const [loading, setLoading]           = useState(true);
   const [error, setError]               = useState("");
+  const [tipsRefreshStopped, setTipsRefreshStopped] = useState(false);
   const [progressStage, setProgressStage]   = useState("metadata");
   const [progressPercent, setProgressPercent] = useState(0);
   const [elapsed, setElapsed]           = useState(0);
@@ -191,6 +192,29 @@ export default function AnalysisResultPage() {
     };
   }, [video?.status, params.id]);
 
+  const tipsStatus = video?.ai_results?.rag?.status;
+  useEffect(() => {
+    if (video?.status !== "completed" || tipsStatus !== "pending") return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let attempts = 0;
+    const refresh = async () => {
+      if (cancelled) return;
+      if (attempts === 0) setTipsRefreshStopped(false);
+      try {
+        const updated = await getPlan(Number(params.id));
+        if (cancelled) return;
+        setVideo(updated);
+        if (updated.ai_results?.rag?.status !== "pending") return;
+      } catch { /* Retry transient failures within the bounded window. */ }
+      if (cancelled) return;
+      if (++attempts >= 60) { setTipsRefreshStopped(true); return; }
+      timer = setTimeout(refresh, 5000);
+    };
+    timer = setTimeout(refresh, 5000);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [video?.status, tipsStatus, params.id]);
+
   /* ─── States ─── */
   if (loading) {
     return (
@@ -228,6 +252,7 @@ export default function AnalysisResultPage() {
   const locations    = ai?.nominatim?.deduplicated_locations ?? [];
   const ocrTexts     = ai?.ocr?.extracted_texts ?? [];
   const nerLocations = ai?.ner?.extracted_locations ?? [];
+  const unresolvedLocations = ai?.nominatim?.location_summary?.unresolved_locations ?? [];
   const ocrPois      = ai?.ocr_pois ?? [];
   const transcript   = ai?.audio?.transcription?.transcript;
   const tips         = ai?.rag?.travel_tips?.tips ?? [];
@@ -239,7 +264,7 @@ export default function AnalysisResultPage() {
       <Navbar />
 
       <main className="pt-24 pb-20 px-6 max-w-screen-xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
           <Button
             variant="ghost" size="sm"
             onClick={() => router.back()}
@@ -247,7 +272,7 @@ export default function AnalysisResultPage() {
           >
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Geri
           </Button>
-          <div className="flex items-center gap-3 no-print">
+          <div className="flex flex-wrap items-center gap-3 no-print">
             <Button
               variant="ghost" size="sm"
               onClick={() => window.print()}
@@ -279,10 +304,10 @@ export default function AnalysisResultPage() {
               : "Gezi Planı"}
           </h1>
           <div className="flex flex-wrap items-center gap-6 text-sm text-text-tertiary">
-            {ai?.processing_time && <span className="flex items-center gap-1"><Clock className="w-4 h-4" /> {Math.round(ai.processing_time)}s analiz</span>}
+            <span>{locations.length} keşfedilen yer</span>
             {video.duration      && <span className="flex items-center gap-1"><FileText className="w-4 h-4" /> {video.duration}s video</span>}
-            {totalDistance       && <span className="flex items-center gap-1"><Navigation className="w-4 h-4" /> {Math.round(totalDistance)} km rota</span>}
-            {ai?.detections?.count && <span className="flex items-center gap-1"><Globe2 className="w-4 h-4" /> {ai.detections.count} nesne</span>}
+            {totalDistance       && <span className="flex items-center gap-1"><Navigation className="w-4 h-4" /> {Math.round(totalDistance)} km yaklaşık rota</span>}
+
           </div>
         </div>
 
@@ -300,26 +325,24 @@ export default function AnalysisResultPage() {
         )}
 
         {/* AI Pipeline İstatistikleri */}
-        {ai && (
-          <AIStatsCard
-            processingTime={ai.processing_time ?? null}
-            locationsCount={locations.length}
-            detectionsCount={ai.detections?.count ?? 0}
-            ocrCount={(ocrPois.length || ocrTexts.length) ?? 0}
-            transcriptLength={transcript?.length ?? 0}
-            tipsCount={tips.length}
-            totalDistanceKm={totalDistance ?? null}
-            videoDuration={video.duration}
-          />
-        )}
+
+        <section aria-label="Gezi haritası" className="mb-8">
+            {locations.length > 0 && (
+              <Card title="Rotanı keşfet" icon={Map}>
+                <div className="h-[300px] sm:h-[420px] rounded-md overflow-hidden">
+                  <MapPreview locations={locations} />
+                </div>
+              </Card>
+            )}
+        </section>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
 
           {/* Sol Panel */}
-          <div className="lg:col-span-4 space-y-6">
+          <div className="lg:col-span-8 space-y-6">
 
             {locations.length > 0 && (
-              <Card title="Bulunan Şehirler" icon={Building2}>
+              <Card title="Keşfedilen Yerler" icon={Building2}>
                 <div className="space-y-3">
                   {locations.map((loc, i) => (
                     <div key={i} className="flex items-start gap-3">
@@ -334,13 +357,43 @@ export default function AnalysisResultPage() {
               </Card>
             )}
 
-            {locations.length === 0 && nerLocations.length > 0 && (
+            {unresolvedLocations.length > 0 && (
+              <Card title="Konumu bulunamadı" icon={AlertTriangle}>
+                <p className="text-sm text-text-tertiary mb-3">
+                  Bu yerler videoda tespit edildi ancak konumları eşleştirilemedi. Haritaya ve rotaya eklenmedi.
+                </p>
+                <ul className="space-y-3">
+                  {unresolvedLocations.map((place, i) => (
+                    <li key={i}>
+                      <p className="font-semibold text-sm text-text">{place.name}</p>
+                      {place.city && <p className="text-xs text-text-tertiary">{place.city}</p>}
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            )}
+
+            {locations.length === 0 && unresolvedLocations.length === 0 && nerLocations.length > 0 && (
               <Card title="Tespit Edilen Yerler" icon={MapPin}>
                 <div className="flex flex-wrap gap-2">
                   {nerLocations.map((loc, i) => (
                     <span key={i} className="tag">{loc}</span>
                   ))}
                 </div>
+              </Card>
+            )}
+
+            {tips.length === 0 && video.status === "completed" && (
+              <Card title="Seyahat İpuçları" icon={Lightbulb}>
+                <p role="status" className="text-sm text-text-tertiary">
+                  {tipsStatus === "pending"
+                    ? tipsRefreshStopped
+                      ? "Öneriler hâlâ hazırlanıyor. Güncel durumu görmek için sayfayı yenileyebilirsin."
+                      : "Seyahat önerileri hazırlanıyor. Hazır olduğunda burada görünecek."
+                    : tipsStatus === "failed"
+                      ? "Seyahat önerileri üretilemedi. Bulunan yerler ve haritan kullanılabilir."
+                      : "Bu analiz için seyahat önerisi bulunmuyor. Bulunan yerleri inceleyebilirsin."}
+                </p>
               </Card>
             )}
 
@@ -365,16 +418,24 @@ export default function AnalysisResultPage() {
           </div>
 
           {/* Sağ Panel */}
-          <div className="lg:col-span-8 space-y-6">
+          <div className="lg:col-span-4 space-y-6">
 
-            {locations.length > 0 && (
-              <Card title="Harita" icon={Map}>
-                <div className="h-[350px] rounded-md overflow-hidden">
-                  <MapPreview locations={locations} />
-                </div>
-              </Card>
-            )}
 
+            <details className="rounded-2xl border border-border bg-surface p-5">
+              <summary className="cursor-pointer font-semibold text-text">Analiz detayları</summary>
+              <div className="mt-5 space-y-6">
+        {ai && (
+          <AIStatsCard
+            processingTime={ai.processing_time ?? null}
+            locationsCount={locations.length}
+            detectionsCount={ai.detections?.count ?? 0}
+            ocrCount={(ocrPois.length || ocrTexts.length) ?? 0}
+            transcriptLength={transcript?.length ?? 0}
+            tipsCount={tips.length}
+            totalDistanceKm={totalDistance ?? null}
+            videoDuration={video.duration}
+          />
+        )}
             {(ocrPois.length > 0 || ocrTexts.length > 0) && (
               <Card title="Videodaki Yazılar" icon={FileText}>
                 <div className="flex flex-wrap gap-2">
@@ -393,6 +454,9 @@ export default function AnalysisResultPage() {
                 </div>
               </Card>
             )}
+
+              </div>
+            </details>
 
             {locations.length === 0 && nerLocations.length === 0 && ocrTexts.length === 0 && (
               <Card title="Bilgi" icon={Info}>

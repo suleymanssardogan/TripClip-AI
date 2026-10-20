@@ -63,8 +63,7 @@ def get_optional_user_id(
     Public endpoint'ler için kullanılır (keşif sayfası vb.).
     """
     if not request.cookies.get(ACCESS_COOKIE) and not credentials:
+        if request.cookies.get(REFRESH_COOKIE):
+            raise HTTPException(status_code=401, detail="Oturum yenileme gerekli")
         return None
-    try:
-        return int(get_access_claims(request, credentials)["sub"])
-    except HTTPException:
-        return None
+    return int(get_access_claims(request, credentials)["sub"])

@@ -26,7 +26,7 @@ def client():
 
 
 def _make_token(user_id: int) -> str:
-    return jwt.encode({"sub": str(user_id)}, SECRET_KEY, algorithm=ALGORITHM)
+    return jwt.encode({"sub": str(user_id), "type": "access"}, SECRET_KEY, algorithm=ALGORITHM)
 
 
 @pytest.fixture

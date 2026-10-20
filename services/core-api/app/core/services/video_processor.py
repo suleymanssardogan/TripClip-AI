@@ -212,10 +212,9 @@ class VideoProcessingService(MediaStages, OCRStages, LocationStages):
     def _run_travel_tips(self, deduplicated_locations: List[Dict], video_id: int):
         """İpuçlarını üretir. Pipeline içinden de, ertelenmiş task'tan da çağrılır."""
         if self._use_gemini and self.gemini:
-            tip_names = [loc.get("original_name", "") for loc in deduplicated_locations]
             return _safe_run(
                 "Gemini(tips)",
-                lambda: self.gemini.generate_travel_tips(tip_names, video_id=video_id) if tip_names else {},
+                lambda: self.gemini.generate_travel_tips(deduplicated_locations, video_id=video_id) if deduplicated_locations else {},
                 fallback={},
             )
         return _safe_run(
@@ -576,91 +575,10 @@ class VideoProcessingService(MediaStages, OCRStages, LocationStages):
         # Vision landmarks → zenginleştirilmiş formata çevir
         vision_enriched = self._convert_vision_landmarks(vision_landmarks)
 
-        # ── ÇÖZÜLEMEYEN MEKANLAR ─────────────────────────────────────────────
-        #
-        # Coğrafi veritabanı bu isimleri bulamadı (Nominatim'in POI kapsamı
-        # zayıf: "Ciğerci Aziz Usta", "Safi Künefe" hiç yok). Mekanı LİSTEDEN
-        # ATMIYORUZ — video gerçekten oradan bahsediyor, kullanıcı görmeli.
-        #
-        # Ama koordinatını da UYDURMUYORUZ. Şehir merkezine düşen pin artık
-        # precision="approximate" ile işaretleniyor ve arayüz bunu kullanıcıya
-        # söyleyebiliyor. Tatil planında sessizce yanlış bir noktaya
-        # yönlendirmek "bulamadım" demekten daha zararlı: kullanıcı 30 km
-        # öteye gidiyor ve hatayı ancak oraya varınca anlıyor.
-        if self._use_gemini and extracted_locations:
-            enriched_names = {
-                e["original_name"].lower().strip() for e in ner_enriched
-            }
-            # Yaklaşık pin için ŞEHİR MERKEZİ tercih ediliyor, bölge merkezi
-            # değil. `primary_region` artık idari sınırdan geliyor (arama
-            # kutusunu geniş tutmak için, bkz. prefer_area) ve onun merkezi
-            # ilin coğrafi ağırlık noktası — Gaziantep'te şehrin 11 km
-            # güneyine düşüyor. Kullanıcıya "yaklaşık" bir pin gösterecekse
-            # en makul nokta şehrin kendisi.
-            #
-            # NOT: bilerek ner_enriched[0] alınmıyor. Sıradaki ilk eleman şehir
-            # olmayabilir (örn. ülke adı veya yanlış geocode edilmiş bir POI) —
-            # o zaman alakasız bir koordinata pin basmak yerine bu lokasyonu
-            # tamamen atlıyoruz (aşağıdaki `if city_coords:`).
-            city_entry = next(
-                (e for e in ner_enriched
-                 if (e.get("place_data") or {}).get("type") in ("city", "town", "administrative")),
-                None,
-            )
-            city_coords = (city_entry or {}).get("place_data", {}).get("location") if city_entry else None
-
-            if not city_coords and primary_region and primary_region.get("center"):
-                r_lat, r_lng = primary_region["center"]
-                city_coords = {"lat": r_lat, "lng": r_lng}
-            fallback_city = gemini_city_hint or city_hint or ""
-
-            approximate = 0
-            dropped: List[str] = []
-
-            for loc in extracted_locations:
-                if loc.lower().strip() in enriched_names:
-                    continue  # zaten çözüldü
-                if loc.lower().strip() == fallback_city.lower().strip():
-                    continue  # şehrin kendisi, tekrar ekleme
-                if city_coords:
-                    ner_enriched.append({
-                        "original_name": loc,
-                        "place_data": {
-                            "name":       loc,
-                            "address":    f"{loc}, {fallback_city}",
-                            "location":   city_coords,   # şehir merkezi koordinatı
-                            "type":       "point_of_interest",
-                            "class":      "amenity",
-                            "importance": 0.08,
-                            # `gemini_` öneki dedup'ta "adı güven, koordinatı
-                            # güvenme" kuralını tetikliyor — bu kayıtların hepsi
-                            # AYNI koordinatta olduğu için mesafe kontrolü
-                            # hepsini tek mekana indirirdi.
-                            # Bkz. LocationDeduplicator.deduplicate_locations.
-                            "source":     "gemini_unresolved",
-                            "precision":  "approximate",
-                        },
-                    })
-                    approximate += 1
-                    logger.info("📍 Çözülemedi, yaklaşık konum: '%s' → %s merkezi",
-                                loc, fallback_city)
-                else:
-                    dropped.append(loc)
-
-            if approximate:
-                logger.warning(
-                    "⚠️ %d mekan coğrafi veritabanında bulunamadı — "
-                    "şehir merkezi koordinatıyla 'yaklaşık' işaretlendi", approximate)
-            if dropped:
-                logger.warning(
-                    "⚠️ %d mekan hem çözülemedi hem de şehir merkezi bilinmiyor, "
-                    "listeye alınmadı: %s", len(dropped), dropped)
-
         enriched_locations = ner_enriched + ocr_enriched + vision_enriched
 
-        # Konum kalitesi etiketi. Yukarıda "approximate" olarak işaretlenmemiş
-        # her kayıt gerçek bir gazetteer eşleşmesinden geliyor (Nominatim,
-        # Overpass, Vision landmark) — setdefault mevcut etiketi ezmez.
+        # Preserve provider precision; a database match is not independent
+        # verification that the video depicts that particular place.
         for entry in enriched_locations:
             (entry.get("place_data") or {}).setdefault("precision", "exact")
 
@@ -687,6 +605,28 @@ class VideoProcessingService(MediaStages, OCRStages, LocationStages):
         enriched_locations = r_geo_fix.data
         degradation_log.append(r_geo_fix)
 
+        # Validate once more AFTER all providers and outlier replacements.
+        from app.ml.location_validation import validate_final_candidates
+        candidate_cities = {
+            item["name"].casefold().strip(): item.get("city") or gemini_city_hint
+            for item in (gemini_raw or [])
+        } if self._use_gemini else {}
+        enriched_locations, rejected_locations = validate_final_candidates(
+            enriched_locations, cities=candidate_cities, regions=regions,
+            country_code=gemini_country_code,
+        )
+        resolved_names = {e["original_name"].casefold().strip() for e in enriched_locations}
+        missing = {
+            name.casefold().strip(): {"name": name,
+                "city": candidate_cities.get(name.casefold().strip()),
+                "status": "unresolved", "reason": "no_geographic_match"}
+            for name in extracted_locations if name.casefold().strip() not in resolved_names
+        }
+        for rejected in rejected_locations:
+            if rejected["name"].casefold().strip() not in resolved_names:
+                missing[rejected["name"].casefold().strip()] = rejected
+        unresolved_locations = list(missing.values())
+
         # ─────────────────────────────────────────────────────────────────────
         # ── 7. Deduplication ─────────────────────────────────────────────────
         # ─────────────────────────────────────────────────────────────────────
@@ -706,10 +646,6 @@ class VideoProcessingService(MediaStages, OCRStages, LocationStages):
         else:
             dedup_threshold = 2.0    # 2 km
 
-        # Çözülemeyen kayıtlar (source="gemini_unresolved") mesafe kontrolünden
-        # muaf — hepsi aynı şehir merkezi koordinatını paylaştığı için mesafe
-        # onları tek mekana indirirdi. Ad ve kök eşleşmesi onlarda da çalışır.
-        # Bkz. LocationDeduplicator.deduplicate_locations.
         from app.ml.location_deduplicator import LocationDeduplicator
         deduplicator = LocationDeduplicator(distance_threshold_km=dedup_threshold)
 
@@ -734,7 +670,8 @@ class VideoProcessingService(MediaStages, OCRStages, LocationStages):
             lambda: deduplicator.get_location_summary(deduplicated_locations),
             fallback={},
         )
-        location_summary: Dict = r_loc_summary.data
+        location_summary: Dict = dict(r_loc_summary.data or {})
+        location_summary["unresolved_locations"] = unresolved_locations
         degradation_log.extend([r_dedup, r_loc_summary])
 
         # ─────────────────────────────────────────────────────────────────────
